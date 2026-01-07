@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ aircraft_name }} - Price Chart | Jet Finder</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/price_chart.css') }}" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .aircraft-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .aircraft-info h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .aircraft-info .model {
+            color: #8e8e93;
+            font-size: 16px;
+        }
+
+        .price-summary {
+            text-align: right;
+        }
+
+        .current-price {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .price-change {
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .price-change.positive {
+            color: #30d158;
+        }
+
+        .price-change.negative {
+            color: #ff453a;
+        }
+
+        .chart-container {
+            background: #2c2c2e;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+
+        .time-filters {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .time-filter {
+            background: transparent;
+            border: 1px solid #48484a;
+            color: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .time-filter:hover {
+            background: #48484a;
+        }
+
+        .time-filter.active {
+            background: #007aff;
+            border-color: #007aff;
+        }
+
+        .price-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .price-tooltip.show {
+            opacity: 1;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #2c2c2e;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #8e8e93;
+            font-size: 14px;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #48484a;
+            border-top: 3px solid #007aff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #007aff;
+            text-decoration: none;
+            font-weight: 500;
+            margin-bottom: 20px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+
+        .back-button:hover {
+            background: rgba(0, 122, 255, 0.1);
+            color: #007aff;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .aircraft-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .price-summary {
+                text-align: left;
+                width: 100%;
+            }
+
+            .current-price {
+                font-size: 28px;
+            }
+
+            .chart-wrapper {
+                height: 300px;
+            }
+
+            .time-filters {
+                gap: 10px;
+            }
+
+            .time-filter {
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="{{ url_for('home') }}" class="back-button">
+            <i class="fas fa-arrow-left"></i>
+            Back to Listings
+        </a>
+
+        <div class="aircraft-header">
+            <div class="aircraft-info">
+                <h1>{{ aircraft_name }}</h1>
+                <div class="model">{{ manufacturer }} {{ model }}</div>
+            </div>
+            <div class="price-summary">
+                <div class="current-price" id="currentPrice">$0</div>
+                <div class="price-change" id="priceChange">
+                    <span id="changeAmount">$0</span>
+                    <span id="changePercent">(0%)</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="time-filters">
+                <button class="time-filter" data-period="1M">1M</button>
+                <button class="time-filter" data-period="3M">3M</button>
+                <button class="time-filter active" data-period="6M">6M</button>
+                <button class="time-filter" data-period="1Y">1Y</button>
+                <button class="time-filter" data-period="ALL">All</button>
+            </div>
+
+            <div class="chart-wrapper">
+                <canvas id="priceChart"></canvas>
+                <div class="price-tooltip" id="priceTooltip">
+                    <div id="tooltipDate"></div>
+                    <div id="tooltipPrice"></div>
+                    <div id="tooltipVolume"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="dayHigh">$0</div>
+                <div class="stat-label">Day High</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="dayLow">$0</div>
+                <div class="stat-label">Day Low</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgPrice">$0</div>
+                <div class="stat-label">52W Average</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="volume">0</div>
+                <div class="stat-label">Volume</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/aircraft_price_chart.js') }}"></script>
+    <script>
+        // Simplified initialization script
+        document.addEventListener('DOMContentLoaded', () => {
+            const aircraftId = parseInt('{{ aircraft_id }}');
+            const priceChart = new AircraftPriceChart(aircraftId);
+        });
+    </script>
+    <script>
+        // Legacy inline script for compatibility
+        class AircraftPriceChartLegacy {
+            constructor(aircraftId) {
+                this.aircraftId = aircraftId;
+                this.chart = null;
+                this.currentPeriod = '6M';
+                this.priceData = [];
+                this.tooltip = document.getElementById('priceTooltip');
+
+                this.init();
+            }
+
+            async init() {
+                await this.loadPriceData();
+                this.initChart();
+                this.bindEvents();
+            }
+
+            async loadPriceData() {
+                try {
+                    const response = await fetch(`/api/aircraft/${this.aircraftId}/price-history?period=${this.currentPeriod}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        this.priceData = data.price_history;
+                        this.updateStats(data.stats);
+                        this.updatePriceSummary(data.current_price, data.price_change);
+                    }
+                } catch (error) {
+                    console.error('Error loading price data:', error);
+                }
+            }
+
+            initChart() {
+                const ctx = document.getElementById('priceChart').getContext('2d');
+
+                // Prepare data for Chart.js
+                const chartData = this.priceData.map(point => ({
+                    x: new Date(point.date),
+                    y: point.price
+                }));
+
+                this.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            data: chartData,
+                            borderColor: '#30d158',
+                            backgroundColor: 'rgba(48, 209, 88, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHoverRadius: 6,
+                            pointHoverBackgroundColor: '#30d158',
+                            pointHoverBorderColor: '#ffffff',
+                            pointHoverBorderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            intersect: false,
+                            mode: 'index'
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                enabled: false, // We'll use custom tooltip
+                                external: (context) => {
+                                    this.showCustomTooltip(context);
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                display: false,
+                                grid: {
+                                    display: false
+                                }
+                            },
+                            y: {
+                                display: false,
+                                grid: {
+                                    display: false
+                                }
+                            }
+                        },
+                        onHover: (event, activeElements) => {
+                            if (activeElements.length > 0) {
+                                const dataIndex = activeElements[0].index;
+                                const dataPoint = this.priceData[dataIndex];
+                                this.showTooltip(event, dataPoint);
+                            } else {
+                                this.hideTooltip();
+                            }
+                        },
+                        elements: {
+                            point: {
+                                hoverRadius: 8
+                            }
+                        }
+                    }
+                });
+
+                // Add touch support for mobile
+                this.addTouchSupport();
+            }
+
+            addTouchSupport() {
+                const canvas = document.getElementById('priceChart');
+                let isTracking = false;
+
+                canvas.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    isTracking = true;
+                    this.handleTouch(e);
+                });
+
+                canvas.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    if (isTracking) {
+                        this.handleTouch(e);
+                    }
+                });
+
+                canvas.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    isTracking = false;
+                    this.hideTooltip();
+                });
+
+                // Also add mouse support
+                canvas.addEventListener('mousemove', (e) => {
+                    this.handleMouse(e);
+                });
+
+                canvas.addEventListener('mouseleave', () => {
+                    this.hideTooltip();
+                });
+            }
+
+            handleTouch(e) {
+                const rect = e.target.getBoundingClientRect();
+                const x = e.touches[0].clientX - rect.left;
+                this.findNearestDataPoint(x, e.touches[0].clientX, e.touches[0].clientY);
+            }
+
+            handleMouse(e) {
+                const rect = e.target.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                this.findNearestDataPoint(x, e.clientX, e.clientY);
+            }
+
+            findNearestDataPoint(canvasX, screenX, screenY) {
+                if (!this.chart || !this.priceData.length) return;
+
+                const chartArea = this.chart.chartArea;
+                const datasetMeta = this.chart.getDatasetMeta(0);
+
+                // Calculate the relative position within the chart area
+                const relativeX = (canvasX - chartArea.left) / (chartArea.right - chartArea.left);
+                const dataIndex = Math.round(relativeX * (this.priceData.length - 1));
+
+                if (dataIndex >= 0 && dataIndex < this.priceData.length) {
+                    const dataPoint = this.priceData[dataIndex];
+                    this.showTooltip({ clientX: screenX, clientY: screenY }, dataPoint);
+                }
+            }
+
+            showTooltip(event, dataPoint) {
+                const tooltip = this.tooltip;
+                const date = new Date(dataPoint.date);
+                const formattedDate = date.toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                });
+
+                document.getElementById('tooltipDate').textContent = formattedDate;
+                document.getElementById('tooltipPrice').textContent = `$${dataPoint.price.toLocaleString()}`;
+                document.getElementById('tooltipVolume').textContent = `Volume: ${dataPoint.volume || 0}`;
+
+                // Position tooltip
+                const rect = document.getElementById('priceChart').getBoundingClientRect();
+                let x = event.clientX - rect.left - 80; // Center tooltip
+                let y = event.clientY - rect.top - 80;
+
+                // Keep tooltip within bounds
+                x = Math.max(10, Math.min(x, rect.width - 160));
+                y = Math.max(10, Math.min(y, rect.height - 100));
+
+                tooltip.style.left = x + 'px';
+                tooltip.style.top = y + 'px';
+                tooltip.classList.add('show');
+            }
+
+            hideTooltip() {
+                this.tooltip.classList.remove('show');
+            }
+
+            updateStats(stats) {
+                document.getElementById('dayHigh').textContent = `$${stats.day_high.toLocaleString()}`;
+                document.getElementById('dayLow').textContent = `$${stats.day_low.toLocaleString()}`;
+                document.getElementById('avgPrice').textContent = `$${stats.avg_price.toLocaleString()}`;
+                document.getElementById('volume').textContent = stats.volume.toLocaleString();
+            }
+
+            updatePriceSummary(currentPrice, priceChange) {
+                document.getElementById('currentPrice').textContent = `$${currentPrice.toLocaleString()}`;
+
+                const changeElement = document.getElementById('priceChange');
+                const changeAmount = document.getElementById('changeAmount');
+                const changePercent = document.getElementById('changePercent');
+
+                const isPositive = priceChange.amount >= 0;
+                changeElement.className = `price-change ${isPositive ? 'positive' : 'negative'}`;
+
+                changeAmount.textContent = `${isPositive ? '+' : ''}$${Math.abs(priceChange.amount).toLocaleString()}`;
+                changePercent.textContent = `(${isPositive ? '+' : ''}${priceChange.percent.toFixed(2)}%)`;
+            }
+
+            bindEvents() {
+                // Time filter buttons
+                document.querySelectorAll('.time-filter').forEach(button => {
+                    button.addEventListener('click', async (e) => {
+                        document.querySelector('.time-filter.active').classList.remove('active');
+                        e.target.classList.add('active');
+
+                        this.currentPeriod = e.target.dataset.period;
+                        await this.loadPriceData();
+                        this.updateChart();
+                    });
+                });
+            }
+
+            updateChart() {
+                const chartData = this.priceData.map(point => ({
+                    x: new Date(point.date),
+                    y: point.price
+                }));
+
+                this.chart.data.datasets[0].data = chartData;
+                this.chart.update('none');
+            }
+        }
+
+        // Initialize the chart when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            const aircraftId = parseInt('{{ aircraft_id }}');
+            const priceChart = new AircraftPriceChart(aircraftId);
+        });
+    </script>
+</body>
+
+</html>

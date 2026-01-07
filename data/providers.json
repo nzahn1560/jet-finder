@@ -1,0 +1,102 @@
+[
+    {
+        "id": "prov-001",
+        "name": "TechAir Maintenance",
+        "description": "Expert aircraft maintenance and inspection services for all aircraft types.",
+        "services": [
+            "maintenance",
+            "inspection",
+            "avionics"
+        ],
+        "location": "New York, NY",
+        "contact_email": "service@techair.com",
+        "contact_phone": "(555) 123-4567",
+        "website": "https://techair.example.com",
+        "verified": true,
+        "subscription_status": "active",
+        "subscription_id": "sub_123456",
+        "join_date": "2023-05-15T10:30:00",
+        "logo": "techair-logo.png",
+        "featured": true
+    },
+    {
+        "id": "prov-002",
+        "name": "SkyFinance Partners",
+        "description": "Specialized aviation financing and leasing solutions for private aircraft.",
+        "services": [
+            "financing",
+            "leasing",
+            "insurance"
+        ],
+        "location": "Chicago, IL",
+        "contact_email": "info@skyfinance.com",
+        "contact_phone": "(555) 234-5678",
+        "website": "https://skyfinance.example.com",
+        "verified": true,
+        "subscription_status": "active",
+        "subscription_id": "sub_234567",
+        "join_date": "2023-06-20T14:45:00",
+        "logo": "skyfinance-logo.png",
+        "featured": true
+    },
+    {
+        "id": "prov-003",
+        "name": "AviLegal Consulting",
+        "description": "Legal services specializing in aircraft transactions and aviation regulations.",
+        "services": [
+            "legal",
+            "documentation",
+            "compliance"
+        ],
+        "location": "Washington, DC",
+        "contact_email": "counsel@avilegal.com",
+        "contact_phone": "(555) 345-6789",
+        "website": "https://avilegal.example.com",
+        "verified": true,
+        "subscription_status": "active",
+        "subscription_id": "sub_345678",
+        "join_date": "2023-07-10T09:15:00",
+        "logo": "avilegal-logo.png",
+        "featured": false
+    },
+    {
+        "id": "prov-004",
+        "name": "JetTech Services",
+        "description": "Comprehensive aircraft management and technical consulting.",
+        "services": [
+            "management",
+            "consulting",
+            "inspections"
+        ],
+        "location": "Dallas, TX",
+        "contact_email": "support@jettech.com",
+        "contact_phone": "(555) 456-7890",
+        "website": "https://jettech.example.com",
+        "verified": false,
+        "subscription_status": "inactive",
+        "subscription_id": null,
+        "join_date": "2023-08-05T16:20:00",
+        "logo": "jettech-logo.png",
+        "featured": false
+    },
+    {
+        "id": "prov-005",
+        "name": "AeroInsure Group",
+        "description": "Specialized aviation insurance for private aircraft owners and operators.",
+        "services": [
+            "insurance",
+            "risk assessment",
+            "claims"
+        ],
+        "location": "Miami, FL",
+        "contact_email": "coverage@aeroinsure.com",
+        "contact_phone": "(555) 567-8901",
+        "website": "https://aeroinsure.example.com",
+        "verified": true,
+        "subscription_status": "active",
+        "subscription_id": "sub_456789",
+        "join_date": "2023-09-12T11:30:00",
+        "logo": "aeroinsure-logo.png",
+        "featured": true
+    }
+]

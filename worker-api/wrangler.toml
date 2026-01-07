@@ -1,0 +1,52 @@
+name = "jetschoolusa-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-15"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+RATE_LIMIT_ENABLED = "true"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "jetschoolusa-db"
+database_id = "aaadaf6c-10c3-4f78-b0cb-31b04c8e6f03"
+
+# R2 Bucket for images
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "jetschoolusa-images"
+preview_bucket_name = "jetschoolusa-images-preview"
+
+# R2 Bucket for videos
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "jetschoolusa-videos"
+preview_bucket_name = "jetschoolusa-videos-preview"
+
+# KV for caching and rate limiting
+# Uncomment and add ID after creating: wrangler kv:namespace create "CACHE"
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "your_kv_namespace_id_here"
+
+[env.development]
+vars = { ENVIRONMENT = "development", RATE_LIMIT_ENABLED = "false" }
+[[env.development.d1_databases]]
+binding = "DB"
+database_name = "jetschoolusa-db"
+# database_id = "" # Will be auto-generated for local dev
+
+[[env.development.r2_buckets]]
+binding = "IMAGES"
+bucket_name = "jetschoolusa-images-preview"
+
+[[env.development.r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "jetschoolusa-videos-preview"
+
+# KV for development (optional - uncomment after creating)
+# [env.development.kv_namespaces]
+# binding = "CACHE"
+# id = "your_preview_kv_namespace_id_here"

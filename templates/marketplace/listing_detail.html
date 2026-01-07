@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+
+{% block title %}{{ listing.title }} - Aircraft for Sale{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <!-- Breadcrumb -->
+    <nav class="mb-6">
+        <ol class="flex items-center space-x-2 text-sm text-gray-500">
+            <li><a href="{{ url_for('browse_aircraft') }}" class="hover:text-blue-600">Browse Aircraft</a></li>
+            <li><span class="mx-2">/</span></li>
+            <li class="text-gray-900">{{ listing.manufacturer }} {{ listing.model }}</li>
+        </ol>
+    </nav>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Main Content -->
+        <div class="lg:col-span-2">
+            <!-- Images -->
+            <div class="mb-8">
+                {% if listing.images %}
+                {% set image_list = listing.images.split(',') %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% for image in image_list[:4] %}
+                    <div class="aspect-w-16 aspect-h-12 bg-gray-200 rounded-lg overflow-hidden">
+                        <img src="{{ image.strip() }}" alt="{{ listing.title }}"
+                            class="w-full h-64 object-cover hover:scale-105 transition-transform cursor-pointer"
+                            onclick="openImageModal('{{ image.strip() }}')">
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if image_list|length > 4 %}
+                <p class="text-sm text-gray-500 mt-2">+ {{ image_list|length - 4 }} more images</p>
+                {% endif %}
+                {% else %}
+                <div class="h-64 bg-gray-200 rounded-lg flex items-center justify-center">
+                    <svg class="w-16 h-16 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                            d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" />
+                    </svg>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Aircraft Details -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+                <h1 class="text-3xl font-bold text-gray-900 mb-4">{{ listing.title }}</h1>
+
+                <!-- Basic Info -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <span class="text-sm text-gray-500">Manufacturer</span>
+                        <p class="font-semibold">{{ listing.manufacturer }}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Model</span>
+                        <p class="font-semibold">{{ listing.model }}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Year</span>
+                        <p class="font-semibold">{{ listing.year or 'N/A' }}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Location</span>
+                        <p class="font-semibold">{{ listing.location or 'TBD' }}</p>
+                    </div>
+                </div>
+
+                <!-- Price -->
+                <div class="mb-6">
+                    <span class="text-sm text-gray-500">Price</span>
+                    <p class="text-3xl font-bold text-green-600">
+                        {% if listing.price %}
+                        ${{ "{:,}".format(listing.price) }}
+                        {% else %}
+                        Price on Request
+                        {% endif %}
+                    </p>
+                    {% if listing.listing_type != 'sale' %}
+                    <span class="inline-block bg-blue-100 text-blue-800 text-sm px-2 py-1 rounded-full mt-2">
+                        {{ listing.listing_type.title() }}
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- Description -->
+                {% if listing.description %}
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Description</h3>
+                    <div class="prose prose-blue max-w-none">
+                        {{ listing.description|replace('\n', '<br>')|safe }}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Specifications -->
+                {% if listing.specifications %}
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Specifications</h3>
+                    <div class="prose prose-blue max-w-none">
+                        {{ listing.specifications|replace('\n', '<br>')|safe }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Listing Stats -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Listing Information</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <span class="text-sm text-gray-500">Quality Score</span>
+                        <div class="flex items-center">
+                            <div class="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                <div class="bg-blue-600 h-2 rounded-full"
+                                    style="width: {{ listing.quality_score or 0 }}%"></div>
+                            </div>
+                            <span class="text-sm font-medium">{{ "%.0f"|format(listing.quality_score or 0) }}%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Views</span>
+                        <p class="font-semibold">{{ listing.views or 0 }}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Listed</span>
+                        <p class="font-semibold">{{ listing.created_at[:10] if listing.created_at else 'N/A' }}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm text-gray-500">Status</span>
+                        <span class="inline-block bg-green-100 text-green-800 text-sm px-2 py-1 rounded-full">
+                            {{ listing.status.title() }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="lg:col-span-1">
+            <!-- Seller Information -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                    Seller Information
+                    {% if listing.is_verified_seller %}
+                    <svg class="w-5 h-5 text-green-500 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    <span class="text-sm text-green-600 ml-1">Verified</span>
+                    {% endif %}
+                </h3>
+
+                <div class="space-y-3">
+                    <div>
+                        <span class="text-sm text-gray-500">Name/Company</span>
+                        <p class="font-medium">
+                            {{ listing.company or (listing.first_name + ' ' + listing.last_name) }}
+                        </p>
+                    </div>
+
+                    {% if listing.seller_score %}
+                    <div>
+                        <span class="text-sm text-gray-500">Seller Score</span>
+                        <div class="flex items-center">
+                            <div class="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                <div class="bg-green-600 h-2 rounded-full" style="width: {{ listing.seller_score }}%">
+                                </div>
+                            </div>
+                            <span class="text-sm font-medium">{{ "%.1f"|format(listing.seller_score) }}/100</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div>
+                        <span class="text-sm text-gray-500">Total Listings</span>
+                        <p class="font-medium">{{ listing.total_listings or 0 }}</p>
+                    </div>
+
+                    {% if listing.successful_transactions %}
+                    <div>
+                        <span class="text-sm text-gray-500">Successful Transactions</span>
+                        <p class="font-medium">{{ listing.successful_transactions }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Contact Seller -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Contact Seller</h3>
+
+                {% if listing.contact_info %}
+                <div class="mb-4">
+                    <span class="text-sm text-gray-500">Contact Information</span>
+                    <div class="mt-2 text-sm">
+                        {{ listing.contact_info|replace('\n', '<br>')|safe }}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if get_current_user_info() %}
+                <button onclick="openContactModal()"
+                    class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                    Send Message
+                </button>
+                {% else %}
+                <div class="text-center">
+                    <p class="text-sm text-gray-600 mb-3">Login to contact seller</p>
+                    <a href="{{ url_for('login', next=request.url) }}"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors inline-block text-center">
+                        Login to Contact
+                    </a>
+                </div>
+                {% endif %}
+
+                <!-- Report Listing -->
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                    <a href="{{ url_for('report_issue') }}?listing_id={{ listing.id }}&type=aircraft"
+                        class="text-sm text-red-600 hover:text-red-800">
+                        🚩 Report this listing
+                    </a>
+                </div>
+            </div>
+
+            <!-- Pro Tools Promotion -->
+            {% if not (get_current_user_info() and get_current_user_info().is_pro_member) %}
+            <div class="bg-gradient-to-r from-purple-600 to-purple-800 rounded-lg p-6 text-white">
+                <h3 class="font-semibold mb-2">Want More Aircraft Analysis?</h3>
+                <p class="text-purple-100 text-sm mb-4">
+                    Get Pro tools to analyze this aircraft with our Match Score system and price analytics.
+                </p>
+                <a href="{{ url_for('pricing') }}"
+                    class="bg-white text-purple-600 px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+                    View Features
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Similar Listings -->
+    {% if similar_listings %}
+    <div class="mt-12">
+        <h2 class="text-2xl font-bold text-gray-900 mb-6">Similar Aircraft</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for similar in similar_listings %}
+            <div class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+                <div class="h-48 bg-gray-200 relative">
+                    {% if similar.images %}
+                    <img src="{{ similar.images.split(',')[0] }}" alt="{{ similar.title }}"
+                        class="w-full h-full object-cover">
+                    {% endif %}
+                    {% if similar.is_verified_seller %}
+                    <div class="absolute top-2 right-2 bg-green-600 text-white px-2 py-1 rounded-full text-xs">
+                        ✓ Verified
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="p-4">
+                    <h3 class="font-semibold text-lg mb-2">{{ similar.title }}</h3>
+                    <p class="text-gray-600 text-sm mb-2">{{ similar.manufacturer }} {{ similar.model }}</p>
+                    <div class="flex justify-between items-center">
+                        <span class="text-xl font-bold text-green-600">
+                            {% if similar.price %}
+                            ${{ "{:,}".format(similar.price) }}
+                            {% else %}
+                            Price on Request
+                            {% endif %}
+                        </span>
+                        <a href="{{ url_for('view_listing', listing_id=similar.id) }}"
+                            class="text-blue-600 hover:text-blue-800 text-sm">
+                            View Details →
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Contact Modal -->
+<div id="contactModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+    <div class="flex items-center justify-center min-h-screen px-4">
+        <div class="bg-white rounded-lg max-w-md w-full p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">Contact Seller</h3>
+                <button onclick="closeContactModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+            <form id="contactForm">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Message</label>
+                    <textarea id="contactMessage" rows="4"
+                        placeholder="I'm interested in your {{ listing.manufacturer }} {{ listing.model }}..."
+                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeContactModal()"
+                        class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        Send Message
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Image Modal -->
+<div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 hidden z-50">
+    <div class="flex items-center justify-center min-h-screen px-4">
+        <div class="relative max-w-4xl w-full">
+            <button onclick="closeImageModal()" class="absolute top-4 right-4 text-white hover:text-gray-300 z-10">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </path>
+                </svg>
+            </button>
+            <img id="modalImage" src="" alt="" class="w-full h-auto rounded-lg">
+        </div>
+    </div>
+</div>
+
+<script>
+    function openContactModal() {
+        document.getElementById('contactModal').classList.remove('hidden');
+    }
+
+    function closeContactModal() {
+        document.getElementById('contactModal').classList.add('hidden');
+    }
+
+    function openImageModal(imageSrc) {
+        document.getElementById('modalImage').src = imageSrc;
+        document.getElementById('imageModal').classList.remove('hidden');
+    }
+
+    function closeImageModal() {
+        document.getElementById('imageModal').classList.add('hidden');
+    }
+
+    // Handle contact form submission
+    document.getElementById('contactForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const message = document.getElementById('contactMessage').value;
+        if (!message.trim()) {
+            alert('Please enter a message');
+            return;
+        }
+
+        fetch('/api/listings/{{ listing.id }}/contact', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message: message,
+                type: 'aircraft'
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Message sent successfully!');
+                    closeContactModal();
+                    document.getElementById('contactMessage').value = '';
+                } else {
+                    alert('Error sending message: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error sending message: ' + error);
+            });
+    });
+
+    // Close modals when clicking outside
+    document.getElementById('contactModal').addEventListener('click', function (e) {
+        if (e.target === this) closeContactModal();
+    });
+
+    document.getElementById('imageModal').addEventListener('click', function (e) {
+        if (e.target === this) closeImageModal();
+    });
+</script>
+{% endblock %}

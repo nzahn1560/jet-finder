@@ -1,0 +1,13 @@
+[
+  {
+    "id": "a4dff78e-4207-497d-8846-7a3d0fc18e16",
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "john@example.com",
+    "password": "scrypt:32768:8:1$K4lY0MCSoBvnQ2st$c03f46c6350e6c521a8f4c2646b54baf05d9cef2093d91d6db42a13d554c487d62f06eb658f6a4348230af8bf299bc92ed3305ea9e99246ceb83bcfdce525535",
+    "phone": "555-123-4567",
+    "account_type": "both",
+    "created_at": "2025-05-14T19:01:31.492490",
+    "favorites": []
+  }
+]

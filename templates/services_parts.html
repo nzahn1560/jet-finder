@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Services & Parts - Jet Finder</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        .service-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .service-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .category-tab {
+            transition: all 0.3s;
+        }
+
+        .category-tab.active {
+            background: linear-gradient(135deg, #0d6efd, #6610f2);
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-airplane"></i> Jet Finder
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/buy-aircraft">Buy Aircraft</a>
+                <a class="nav-link active" href="/services-parts">Services & Parts</a>
+                <a class="nav-link" href="/charter">Charter</a>
+                <a class="nav-link" href="/stock-market">Stock Market</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4" x-data="servicesAndParts()">
+        <!-- Category Tabs -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-center">
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-primary category-tab"
+                            :class="activeTab === 'services' ? 'active' : ''" @click="setActiveTab('services')">
+                            <i class="bi bi-tools"></i> Maintenance Services
+                        </button>
+                        <button type="button" class="btn btn-outline-primary category-tab"
+                            :class="activeTab === 'parts' ? 'active' : ''" @click="setActiveTab('parts')">
+                            <i class="bi bi-gear"></i> Parts Marketplace
+                        </button>
+                        <button type="button" class="btn btn-outline-primary category-tab"
+                            :class="activeTab === 'providers' ? 'active' : ''" @click="setActiveTab('providers')">
+                            <i class="bi bi-people"></i> Service Providers
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Services Tab -->
+        <div x-show="activeTab === 'services'" x-transition>
+            <div class="row">
+                <div class="col-lg-3">
+                    <div class="card sticky-top">
+                        <div class="card-body">
+                            <h5>Find Services</h5>
+                            <div class="mb-3">
+                                <input type="text" class="form-control" placeholder="Search services..."
+                                    x-model="serviceSearch" @input="filterServices()">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Service Type</label>
+                                <select class="form-select" x-model="serviceFilters.type" @change="filterServices()">
+                                    <option value="">All Services</option>
+                                    <option value="maintenance">Maintenance</option>
+                                    <option value="inspection">Inspection</option>
+                                    <option value="avionics">Avionics</option>
+                                    <option value="interior">Interior</option>
+                                    <option value="paint">Paint</option>
+                                    <option value="engine">Engine</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Location</label>
+                                <input type="text" class="form-control" placeholder="City, State"
+                                    x-model="serviceFilters.location" @input="filterServices()">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Aircraft Type</label>
+                                <select class="form-select" x-model="serviceFilters.aircraftType"
+                                    @change="filterServices()">
+                                    <option value="">All Aircraft</option>
+                                    <option value="light_jet">Light Jets</option>
+                                    <option value="midsize_jet">Midsize Jets</option>
+                                    <option value="heavy_jet">Heavy Jets</option>
+                                    <option value="turboprop">Turboprops</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-9">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3>Maintenance Services</h3>
+                        <span class="badge bg-primary" x-text="filteredServices.length + ' services found'"></span>
+                    </div>
+                    <div class="row">
+                        <template x-for="service in filteredServices" :key="service.id">
+                            <div class="col-lg-6 mb-4">
+                                <div class="card service-card h-100" @click="showServiceDetails(service)">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-3">
+                                            <h5 class="card-title" x-text="service.name"></h5>
+                                            <span class="badge bg-success" x-text="service.rating + ' ★'"></span>
+                                        </div>
+                                        <p class="card-text" x-text="service.description"></p>
+                                        <div class="mb-3">
+                                            <small class="text-muted">
+                                                <i class="bi bi-geo-alt"></i> <span x-text="service.location"></span>
+                                            </small>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-1 mb-3">
+                                            <template x-for="specialty in service.specialties">
+                                                <span class="badge bg-light text-dark" x-text="specialty"></span>
+                                            </template>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted" x-text="service.certifications"></small>
+                                            <button class="btn btn-primary btn-sm"
+                                                @click.stop="contactService(service)">
+                                                Get Quote
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Parts Tab -->
+        <div x-show="activeTab === 'parts'" x-transition>
+            <div class="row">
+                <div class="col-lg-3">
+                    <div class="card sticky-top">
+                        <div class="card-body">
+                            <h5>Find Parts</h5>
+                            <div class="mb-3">
+                                <input type="text" class="form-control" placeholder="Part number or description..."
+                                    x-model="partSearch" @input="filterParts()">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Category</label>
+                                <select class="form-select" x-model="partFilters.category" @change="filterParts()">
+                                    <option value="">All Categories</option>
+                                    <option value="engine">Engine</option>
+                                    <option value="avionics">Avionics</option>
+                                    <option value="landing_gear">Landing Gear</option>
+                                    <option value="interior">Interior</option>
+                                    <option value="hydraulics">Hydraulics</option>
+                                    <option value="electrical">Electrical</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Condition</label>
+                                <select class="form-select" x-model="partFilters.condition" @change="filterParts()">
+                                    <option value="">Any Condition</option>
+                                    <option value="new">New</option>
+                                    <option value="overhauled">Overhauled</option>
+                                    <option value="serviceable">Serviceable</option>
+                                    <option value="repair">As Removed</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Aircraft Model</label>
+                                <input type="text" class="form-control" placeholder="e.g. Citation CJ3"
+                                    x-model="partFilters.aircraft" @input="filterParts()">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-9">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3>Parts Marketplace</h3>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-primary" x-text="filteredParts.length + ' parts found'"></span>
+                            <button class="btn btn-success btn-sm">
+                                <i class="bi bi-plus"></i> List Part
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Part Number</th>
+                                    <th>Description</th>
+                                    <th>Aircraft</th>
+                                    <th>Condition</th>
+                                    <th>Price</th>
+                                    <th>Seller</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="part in filteredParts" :key="part.id">
+                                    <tr style="cursor: pointer;" @click="showPartDetails(part)">
+                                        <td>
+                                            <strong x-text="part.partNumber"></strong><br>
+                                            <small class="text-muted" x-text="part.manufacturer"></small>
+                                        </td>
+                                        <td x-text="part.description"></td>
+                                        <td x-text="part.applicableAircraft"></td>
+                                        <td>
+                                            <span class="badge" :class="getConditionBadge(part.condition)"
+                                                x-text="part.condition"></span>
+                                        </td>
+                                        <td x-text="formatPrice(part.price)"></td>
+                                        <td>
+                                            <div x-text="part.sellerName"></div>
+                                            <small class="text-muted" x-text="part.sellerLocation"></small>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary"
+                                                @click.stop="contactPartSeller(part)">
+                                                Contact
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Service Providers Tab -->
+        <div x-show="activeTab === 'providers'" x-transition>
+            <div class="row">
+                <div class="col-lg-3">
+                    <div class="card sticky-top">
+                        <div class="card-body">
+                            <h5>Find Providers</h5>
+                            <div class="mb-3">
+                                <input type="text" class="form-control" placeholder="Company name..."
+                                    x-model="providerSearch" @input="filterProviders()">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Service Category</label>
+                                <select class="form-select" x-model="providerFilters.category"
+                                    @change="filterProviders()">
+                                    <option value="">All Categories</option>
+                                    <option value="mro">MRO</option>
+                                    <option value="fbo">FBO</option>
+                                    <option value="parts">Parts Supplier</option>
+                                    <option value="avionics">Avionics Shop</option>
+                                    <option value="interior">Interior Shop</option>
+                                    <option value="paint">Paint Shop</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Location</label>
+                                <input type="text" class="form-control" placeholder="City, State"
+                                    x-model="providerFilters.location" @input="filterProviders()">
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" x-model="providerFilters.verifiedOnly">
+                                <label class="form-check-label">Verified providers only</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-9">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3>Service Providers</h3>
+                        <span class="badge bg-primary" x-text="filteredProviders.length + ' providers found'"></span>
+                    </div>
+                    <div class="row">
+                        <template x-for="provider in filteredProviders" :key="provider.id">
+                            <div class="col-lg-6 mb-4">
+                                <div class="card service-card h-100" @click="showProviderDetails(provider)">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-3">
+                                            <h5 class="card-title" x-text="provider.companyName"></h5>
+                                            <div>
+                                                <span class="badge bg-success" x-text="provider.rating + ' ★'"></span>
+                                                <span x-show="provider.verified" class="badge bg-primary ms-1">
+                                                    <i class="bi bi-check-circle"></i> Verified
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <p class="card-text" x-text="provider.description"></p>
+                                        <div class="mb-3">
+                                            <small class="text-muted">
+                                                <i class="bi bi-geo-alt"></i> <span x-text="provider.location"></span>
+                                            </small>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-1 mb-3">
+                                            <template x-for="service in provider.services">
+                                                <span class="badge bg-light text-dark" x-text="service"></span>
+                                            </template>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted" x-text="provider.certifications"></small>
+                                            <button class="btn btn-primary btn-sm"
+                                                @click.stop="contactProvider(provider)">
+                                                Contact
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Modal -->
+    <div class="modal fade" id="contactModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"
+                        x-text="'Contact ' + (selectedItem?.name || selectedItem?.companyName || 'Provider')"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form @submit.prevent="sendContactMessage()">
+                        <div class="mb-3">
+                            <label class="form-label">Your Name</label>
+                            <input type="text" class="form-control" x-model="contactForm.name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" x-model="contactForm.email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Phone</label>
+                            <input type="tel" class="form-control" x-model="contactForm.phone">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Message</label>
+                            <textarea class="form-control" rows="4" x-model="contactForm.message" required></textarea>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">Send Message</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function servicesAndParts() {
+            return {
+                activeTab: 'services',
+
+                // Services
+                serviceSearch: '',
+                services: [
+                    {
+                        id: 1,
+                        name: 'Elite Aviation Services',
+                        description: 'Full-service MRO specializing in business jets',
+                        location: 'Teterboro, NJ',
+                        rating: 4.8,
+                        specialties: ['Maintenance', 'Inspection', 'Avionics'],
+                        certifications: 'FAA Part 145, EASA 145'
+                    },
+                    {
+                        id: 2,
+                        name: 'Precision Avionics',
+                        description: 'Leading avionics installation and repair',
+                        location: 'Van Nuys, CA',
+                        rating: 4.9,
+                        specialties: ['Avionics', 'Upgrades', 'Installation'],
+                        certifications: 'FAA Part 145'
+                    }
+                ],
+                filteredServices: [],
+                serviceFilters: {
+                    type: '',
+                    location: '',
+                    aircraftType: ''
+                },
+
+                // Parts
+                partSearch: '',
+                parts: [
+                    {
+                        id: 1,
+                        partNumber: 'PWC-PT6A-135A',
+                        manufacturer: 'Pratt & Whitney',
+                        description: 'PT6A-135A Turboprop Engine',
+                        applicableAircraft: 'King Air 350',
+                        condition: 'Overhauled',
+                        price: 485000,
+                        sellerName: 'Turbine Solutions',
+                        sellerLocation: 'Dallas, TX'
+                    },
+                    {
+                        id: 2,
+                        partNumber: 'GTN-750',
+                        manufacturer: 'Garmin',
+                        description: 'GTN 750 GPS/NAV/COM',
+                        applicableAircraft: 'Citation Series',
+                        condition: 'New',
+                        price: 15500,
+                        sellerName: 'Avionics Direct',
+                        sellerLocation: 'Orlando, FL'
+                    }
+                ],
+                filteredParts: [],
+                partFilters: {
+                    category: '',
+                    condition: '',
+                    aircraft: ''
+                },
+
+                // Providers
+                providerSearch: '',
+                providers: [
+                    {
+                        id: 1,
+                        companyName: 'Signature Flight Support',
+                        description: 'Premium FBO services worldwide',
+                        location: 'Multiple Locations',
+                        rating: 4.7,
+                        verified: true,
+                        services: ['FBO', 'Fuel', 'Handling', 'Catering'],
+                        certifications: 'IS-BAH, Safety 1st'
+                    },
+                    {
+                        id: 2,
+                        companyName: 'Duncan Aviation',
+                        description: 'Full-service business aviation company',
+                        location: 'Lincoln, NE',
+                        rating: 4.9,
+                        verified: true,
+                        services: ['MRO', 'Avionics', 'Interior', 'Paint'],
+                        certifications: 'FAA Part 145, EASA 145'
+                    }
+                ],
+                filteredProviders: [],
+                providerFilters: {
+                    category: '',
+                    location: '',
+                    verifiedOnly: false
+                },
+
+                selectedItem: null,
+                contactForm: {
+                    name: '',
+                    email: '',
+                    phone: '',
+                    message: ''
+                },
+
+                init() {
+                    this.filteredServices = this.services;
+                    this.filteredParts = this.parts;
+                    this.filteredProviders = this.providers;
+                },
+
+                setActiveTab(tab) {
+                    this.activeTab = tab;
+                },
+
+                filterServices() {
+                    let filtered = this.services;
+
+                    if (this.serviceSearch) {
+                        const query = this.serviceSearch.toLowerCase();
+                        filtered = filtered.filter(service =>
+                            service.name.toLowerCase().includes(query) ||
+                            service.description.toLowerCase().includes(query)
+                        );
+                    }
+
+                    this.filteredServices = filtered;
+                },
+
+                filterParts() {
+                    let filtered = this.parts;
+
+                    if (this.partSearch) {
+                        const query = this.partSearch.toLowerCase();
+                        filtered = filtered.filter(part =>
+                            part.partNumber.toLowerCase().includes(query) ||
+                            part.description.toLowerCase().includes(query)
+                        );
+                    }
+
+                    this.filteredParts = filtered;
+                },
+
+                filterProviders() {
+                    let filtered = this.providers;
+
+                    if (this.providerSearch) {
+                        const query = this.providerSearch.toLowerCase();
+                        filtered = filtered.filter(provider =>
+                            provider.companyName.toLowerCase().includes(query)
+                        );
+                    }
+
+                    if (this.providerFilters.verifiedOnly) {
+                        filtered = filtered.filter(provider => provider.verified);
+                    }
+
+                    this.filteredProviders = filtered;
+                },
+
+                contactService(service) {
+                    this.selectedItem = service;
+                    this.contactForm.message = `I'm interested in your ${service.specialties.join(', ')} services. Please contact me with more information.`;
+                    new bootstrap.Modal(document.getElementById('contactModal')).show();
+                },
+
+                contactPartSeller(part) {
+                    this.selectedItem = part;
+                    this.contactForm.message = `I'm interested in part number ${part.partNumber}. Please provide availability and pricing information.`;
+                    new bootstrap.Modal(document.getElementById('contactModal')).show();
+                },
+
+                contactProvider(provider) {
+                    this.selectedItem = provider;
+                    this.contactForm.message = `I'm interested in your services. Please contact me to discuss my requirements.`;
+                    new bootstrap.Modal(document.getElementById('contactModal')).show();
+                },
+
+                async sendContactMessage() {
+                    // Simulate API call
+                    alert('Message sent successfully!');
+                    bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide();
+                    this.contactForm = { name: '', email: '', phone: '', message: '' };
+                },
+
+                getConditionBadge(condition) {
+                    const badges = {
+                        'new': 'bg-success',
+                        'overhauled': 'bg-primary',
+                        'serviceable': 'bg-warning',
+                        'repair': 'bg-secondary'
+                    };
+                    return badges[condition] || 'bg-secondary';
+                },
+
+                formatPrice(price) {
+                    if (!price) return 'Contact for price';
+                    return new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 0
+                    }).format(price);
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

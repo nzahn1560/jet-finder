@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-950 text-white min-h-screen;
+  font-family: "Inter", sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+

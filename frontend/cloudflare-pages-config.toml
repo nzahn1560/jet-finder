@@ -1,0 +1,13 @@
+# Cloudflare Pages Build Configuration
+# This file is optional but helpful for Pages deployments
+
+[build]
+command = "cd frontend && npm install && npm run build"
+output_directory = "frontend/dist"
+
+[env]
+# Set these in Cloudflare Pages dashboard:
+# - VITE_SUPABASE_URL
+# - VITE_SUPABASE_ANON_KEY
+# - VITE_API_URL
+
