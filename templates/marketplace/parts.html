@@ -1,0 +1,961 @@
+{% extends "base.html" %}
+
+{% block title %}Parts Marketplace - Jet Finder{% endblock %}
+
+{% block additional_css %}
+<style>
+    .parts-card {
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.8));
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        position: relative;
+    }
+
+    .parts-card:hover {
+        border-color: #F05545;
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(240, 85, 69, 0.2);
+    }
+
+    .match-score {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        background: linear-gradient(135deg, #10b981, #047857);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 50px;
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+
+    .criticality-critical {
+        background: #ef4444;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .criticality-important {
+        background: #f59e0b;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .criticality-standard {
+        background: #10b981;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .category-badge {
+        background: rgba(240, 85, 69, 0.1);
+        color: #F05545;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-right: 8px;
+        display: inline-block;
+    }
+
+    .compatibility-badge {
+        background: rgba(59, 130, 246, 0.1);
+        color: #3b82f6;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-right: 4px;
+        margin-bottom: 4px;
+        display: inline-block;
+    }
+
+    .finder-form {
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.7));
+        border-radius: 16px;
+        padding: 30px;
+        margin-bottom: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .form-control {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        color: white;
+        padding: 12px 16px;
+    }
+
+    .form-control:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: #F05545;
+        box-shadow: 0 0 0 3px rgba(240, 85, 69, 0.1);
+        color: white;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #F05545, #d44437);
+        border: none;
+        padding: 12px 30px;
+        border-radius: 8px;
+        font-weight: 600;
+    }
+
+    .btn-primary:hover {
+        background: linear-gradient(135deg, #d44437, #F05545);
+        transform: translateY(-2px);
+    }
+
+    .price-range {
+        color: #10b981;
+        font-weight: 700;
+        font-size: 1.1rem;
+    }
+
+    .maintenance-info {
+        background: rgba(16, 185, 129, 0.1);
+        color: #10b981;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-5">
+    <div class="row">
+        <div class="col-12 text-center mb-5">
+            <h1 class="display-4 text-white mb-3">Aircraft Parts Marketplace</h1>
+            <p class="lead text-muted">Find the exact parts you need with AI-powered aircraft compatibility matching</p>
+        </div>
+    </div>
+
+    <!-- AI Parts Finder Form -->
+    <div class="row mb-5">
+        <div class="col-lg-10 mx-auto">
+            <div class="finder-form">
+                <h3 class="text-white mb-4">AI Parts Finder</h3>
+                <form id="parts-finder-form">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-white">Aircraft Type</label>
+                            <select class="form-control" id="aircraft-type">
+                                <option value="">Select your aircraft</option>
+                                <option value="Citation CJ3+">Citation CJ3+</option>
+                                <option value="Citation Sovereign+">Citation Sovereign+</option>
+                                <option value="Citation Latitude">Citation Latitude</option>
+                                <option value="Gulfstream G650">Gulfstream G650</option>
+                                <option value="Challenger 350">Challenger 350</option>
+                                <option value="Legacy 450">Legacy 450</option>
+                                <option value="Falcon 2000LXS">Falcon 2000LXS</option>
+                                <option value="King Air 350i">King Air 350i</option>
+                                <option value="PC-12 NGX">PC-12 NGX</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-white">Part Category</label>
+                            <select class="form-control" id="part-category">
+                                <option value="">All Categories</option>
+                                <option value="Engine">Engine Components</option>
+                                <option value="Avionics">Avionics & Electronics</option>
+                                <option value="Landing Gear">Landing Gear</option>
+                                <option value="Interior">Interior Components</option>
+                                <option value="Structure">Structural Parts</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-white">Criticality</label>
+                            <select class="form-control" id="criticality">
+                                <option value="">All Criticality Levels</option>
+                                <option value="critical">Critical (AOG)</option>
+                                <option value="important">Important</option>
+                                <option value="standard">Standard</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-white">Budget Range</label>
+                            <select class="form-control" id="budget-range">
+                                <option value="">Any Budget</option>
+                                <option value="under-1000">Under $1,000</option>
+                                <option value="1000-5000">$1,000 - $5,000</option>
+                                <option value="5000-15000">$5,000 - $15,000</option>
+                                <option value="15000-plus">$15,000+</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label text-white">Manufacturer</label>
+                            <select class="form-control" id="manufacturer">
+                                <option value="">All Manufacturers</option>
+                                <option value="Pratt & Whitney">Pratt & Whitney</option>
+                                <option value="Rolls-Royce">Rolls-Royce</option>
+                                <option value="General Electric">General Electric</option>
+                                <option value="Honeywell">Honeywell</option>
+                                <option value="Garmin">Garmin</option>
+                                <option value="Safran">Safran</option>
+                            </select>
+                        </div>
+                        <div class="col-12 mb-3">
+                            <label class="form-label text-white">Search Parts</label>
+                            <input type="text" class="form-control" id="parts-search"
+                                placeholder="e.g., fuel injection, turbine blade, landing gear strut">
+                        </div>
+
+                        <!-- Priority Selection Section -->
+                        <div class="col-12 mb-4">
+                            <h5 class="text-white mb-3">Set Your Priorities</h5>
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label text-white">Price Priority</label>
+                                    <select class="form-control" id="price-priority">
+                                        <option value="low">Low Priority</option>
+                                        <option value="medium" selected>Medium Priority</option>
+                                        <option value="high">High Priority</option>
+                                        <option value="critical">Critical Priority</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label text-white">Quality Priority</label>
+                                    <select class="form-control" id="quality-priority">
+                                        <option value="low">Low Priority</option>
+                                        <option value="medium">Medium Priority</option>
+                                        <option value="high" selected>High Priority</option>
+                                        <option value="critical">Critical Priority</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label text-white">Speed Priority</label>
+                                    <select class="form-control" id="speed-priority">
+                                        <option value="low">Low Priority</option>
+                                        <option value="medium" selected>Medium Priority</option>
+                                        <option value="high">High Priority</option>
+                                        <option value="critical">Critical Priority</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label text-white">Location Priority</label>
+                                    <select class="form-control" id="location-priority">
+                                        <option value="low">Low Priority</option>
+                                        <option value="medium" selected>Medium Priority</option>
+                                        <option value="high">High Priority</option>
+                                        <option value="critical">Critical Priority</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-search me-2"></i>Find Compatible Parts
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search and Sort Controls -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <input type="text" class="form-control" id="search-input" placeholder="Quick search parts...">
+        </div>
+        <div class="col-md-4">
+            <select class="form-control" id="sort-select">
+                <option value="match">Best Match (Priority-Based)</option>
+                <option value="price-low">Cheapest First</option>
+                <option value="price-high">Most Expensive First</option>
+                <option value="quality">Highest Quality First</option>
+                <option value="reviews">Highest Reviews First</option>
+                <option value="distance">Closest Location First</option>
+                <option value="availability">Most Available First</option>
+                <option value="criticality">Most Critical First</option>
+                <option value="manufacturer">Manufacturer A-Z</option>
+                <option value="category">Category</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <button class="btn btn-outline-primary w-100" onclick="showPriorityBreakdown()">
+                <i class="fas fa-chart-bar me-1"></i>View Priority Breakdown
+            </button>
+        </div>
+    </div>
+
+    <!-- Parts Grid -->
+    <div class="row">
+        <div class="col-12">
+            <h3 class="text-white mb-4">Available Parts</h3>
+            <div id="parts-grid">
+                <!-- Parts cards will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let partsInventory = {};
+    let aircraftPartsMapping = {};
+    let filteredParts = [];
+    let currentUserNeeds = {};
+
+    // Load data when page loads
+    document.addEventListener('DOMContentLoaded', function () {
+        loadPartsData();
+        setupEventListeners();
+    });
+
+    async function loadPartsData() {
+        try {
+            // Load parts catalog
+            const partsResponse = await fetch('/static/data/parts_catalog.json');
+            partsInventory = await partsResponse.json();
+
+            // Load aircraft parts mapping
+            const mappingResponse = await fetch('/static/data/aircraft_parts_mapping.json');
+            aircraftPartsMapping = await mappingResponse.json();
+
+            // Convert parts inventory to array for easier handling
+            filteredParts = Object.values(partsInventory);
+            renderPartsGrid();
+
+        } catch (error) {
+            console.error('Error loading parts data:', error);
+            // Fallback to sample data
+            partsInventory = getSampleParts();
+            filteredParts = Object.values(partsInventory);
+            renderPartsGrid();
+        }
+    }
+
+    function setupEventListeners() {
+        // AI Parts Finder form
+        document.getElementById('parts-finder-form').addEventListener('submit', function (e) {
+            e.preventDefault();
+            performAIPartsSearch();
+        });
+
+        // Quick search functionality
+        document.getElementById('search-input').addEventListener('input', function () {
+            const searchQuery = this.value.toLowerCase();
+            filterParts(searchQuery);
+        });
+
+        // Sort functionality
+        document.getElementById('sort-select').addEventListener('change', function () {
+            sortParts(this.value);
+        });
+    }
+
+    function performAIPartsSearch() {
+        const userNeeds = {
+            aircraft_type: document.getElementById('aircraft-type').value,
+            part_category: document.getElementById('part-category').value,
+            criticality: document.getElementById('criticality').value,
+            budget_range: document.getElementById('budget-range').value,
+            manufacturer: document.getElementById('manufacturer').value,
+            search_text: document.getElementById('parts-search').value,
+            priorities: {
+                price: document.getElementById('price-priority').value,
+                quality: document.getElementById('quality-priority').value,
+                speed: document.getElementById('speed-priority').value,
+                location: document.getElementById('location-priority').value
+            }
+        };
+
+        currentUserNeeds = userNeeds;
+
+        // Filter based on aircraft compatibility
+        let compatibleParts = Object.values(partsInventory);
+
+        if (userNeeds.aircraft_type) {
+            compatibleParts = compatibleParts.filter(part =>
+                part.compatible_aircraft.includes(userNeeds.aircraft_type)
+            );
+        }
+
+        // Apply additional filters
+        if (userNeeds.part_category) {
+            compatibleParts = compatibleParts.filter(part =>
+                part.category === userNeeds.part_category
+            );
+        }
+
+        if (userNeeds.criticality) {
+            compatibleParts = compatibleParts.filter(part =>
+                part.criticality === userNeeds.criticality
+            );
+        }
+
+        if (userNeeds.manufacturer) {
+            compatibleParts = compatibleParts.filter(part =>
+                part.manufacturer === userNeeds.manufacturer
+            );
+        }
+
+        if (userNeeds.budget_range) {
+            compatibleParts = compatibleParts.filter(part =>
+                isInBudgetRange(part.price_range, userNeeds.budget_range)
+            );
+        }
+
+        if (userNeeds.search_text) {
+            const searchText = userNeeds.search_text.toLowerCase();
+            compatibleParts = compatibleParts.filter(part =>
+                part.name.toLowerCase().includes(searchText) ||
+                part.description.toLowerCase().includes(searchText) ||
+                part.part_number.toLowerCase().includes(searchText)
+            );
+        }
+
+        // Calculate comprehensive match scores with priority breakdown
+        filteredParts = compatibleParts.map(part => {
+            const scoreBreakdown = calculatePriorityBasedScore(userNeeds, part);
+            return {
+                ...part,
+                matchScore: scoreBreakdown.totalScore,
+                scoreBreakdown: scoreBreakdown
+            };
+        }).sort((a, b) => b.matchScore - a.matchScore);
+
+        renderPartsGrid();
+
+        // Scroll to results
+        document.getElementById('parts-grid').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function isInBudgetRange(priceRange, budgetRange) {
+        if (!priceRange) return true;
+
+        // Extract price from range like "$15,000-$25,000"
+        const prices = priceRange.match(/\$[\d,]+/g);
+        if (!prices || prices.length === 0) return true;
+
+        const minPrice = parseInt(prices[0].replace(/[$,]/g, ''));
+        const maxPrice = prices.length > 1 ? parseInt(prices[1].replace(/[$,]/g, '')) : minPrice;
+
+        switch (budgetRange) {
+            case 'under-1000':
+                return minPrice < 1000;
+            case '1000-5000':
+                return minPrice >= 1000 && maxPrice <= 5000;
+            case '5000-15000':
+                return minPrice >= 5000 && maxPrice <= 15000;
+            case '15000-plus':
+                return minPrice >= 15000;
+            default:
+                return true;
+        }
+    }
+
+    function calculatePriorityBasedScore(userNeeds, part) {
+        const priorities = userNeeds.priorities;
+        const breakdown = {
+            compatibility: 0,
+            price: 0,
+            quality: 0,
+            speed: 0,
+            location: 0,
+            criticality: 0,
+            searchRelevance: 0,
+            totalScore: 0
+        };
+
+        // 1. Aircraft Compatibility (Always critical - 25% base weight)
+        if (userNeeds.aircraft_type) {
+            if (part.compatible_aircraft.includes(userNeeds.aircraft_type)) {
+                breakdown.compatibility = 25;
+            } else {
+                breakdown.compatibility = -50; // Heavy penalty for incompatible parts
+            }
+        }
+
+        // 2. Price Priority (0-20% based on user priority)
+        const priceWeight = getPriorityWeight(priorities.price);
+        const priceScore = calculatePriceScore(part, userNeeds.budget_range);
+        breakdown.price = priceScore * priceWeight;
+
+        // 3. Quality Priority (0-20% based on user priority)
+        const qualityWeight = getPriorityWeight(priorities.quality);
+        const qualityScore = calculateQualityScore(part);
+        breakdown.quality = qualityScore * qualityWeight;
+
+        // 4. Speed Priority (0-15% based on user priority)
+        const speedWeight = getPriorityWeight(priorities.speed);
+        const speedScore = calculateSpeedScore(part);
+        breakdown.speed = speedScore * speedWeight;
+
+        // 5. Location Priority (0-15% based on user priority)
+        const locationWeight = getPriorityWeight(priorities.location);
+        const locationScore = calculateLocationScore(part);
+        breakdown.location = locationScore * locationWeight;
+
+        // 6. Criticality (5-10% based on part criticality)
+        breakdown.criticality = calculateCriticalityScore(part);
+
+        // 7. Search Relevance (0-10% based on text match)
+        if (userNeeds.search_text) {
+            const searchText = userNeeds.search_text.toLowerCase();
+            const partText = (part.name + ' ' + part.description + ' ' + part.part_number).toLowerCase();
+            const relevance = calculateTextRelevance(searchText, partText);
+            breakdown.searchRelevance = relevance * 10;
+        }
+
+        // Calculate total score
+        breakdown.totalScore = Math.max(0, Math.min(100, Math.round(
+            breakdown.compatibility +
+            breakdown.price +
+            breakdown.quality +
+            breakdown.speed +
+            breakdown.location +
+            breakdown.criticality +
+            breakdown.searchRelevance
+        )));
+
+        return breakdown;
+    }
+
+    function getPriorityWeight(priority) {
+        switch (priority) {
+            case 'critical': return 1.0; // 100% weight
+            case 'high': return 0.8;     // 80% weight
+            case 'medium': return 0.5;   // 50% weight
+            case 'low': return 0.2;      // 20% weight
+            default: return 0.5;
+        }
+    }
+
+    function calculatePriceScore(part, budgetRange) {
+        const minPrice = extractMinPrice(part.price_range);
+        const maxPrice = extractMaxPrice(part.price_range);
+        const avgPrice = (minPrice + maxPrice) / 2;
+
+        // Score based on budget range preference
+        switch (budgetRange) {
+            case 'under-1000':
+                return avgPrice <= 1000 ? 20 : Math.max(0, 20 - (avgPrice - 1000) / 100);
+            case '1000-5000':
+                return avgPrice >= 1000 && avgPrice <= 5000 ? 20 : Math.max(0, 20 - Math.abs(avgPrice - 3000) / 200);
+            case '5000-15000':
+                return avgPrice >= 5000 && avgPrice <= 15000 ? 20 : Math.max(0, 20 - Math.abs(avgPrice - 10000) / 500);
+            case '15000-plus':
+                return avgPrice >= 15000 ? 20 : Math.max(0, 20 - (15000 - avgPrice) / 1000);
+            default:
+                // General price scoring (lower is better for most users)
+                if (avgPrice <= 1000) return 20;
+                if (avgPrice <= 5000) return 15;
+                if (avgPrice <= 15000) return 10;
+                return 5;
+        }
+    }
+
+    function calculateQualityScore(part) {
+        let score = 10; // Base score
+
+        // Manufacturer reputation
+        const manufacturerQuality = {
+            'Pratt & Whitney': 20,
+            'Rolls-Royce': 20,
+            'General Electric': 20,
+            'Honeywell': 18,
+            'Garmin': 18,
+            'Safran': 18
+        };
+        score += manufacturerQuality[part.manufacturer] || 10;
+
+        // Certification level
+        if (part.certification) {
+            if (part.certification.includes('FAA')) score += 5;
+            if (part.certification.includes('EASA')) score += 5;
+            if (part.certification.includes('PMA')) score += 3;
+        }
+
+        // New vs used
+        if (part.condition === 'new') score += 10;
+        else if (part.condition === 'overhauled') score += 8;
+        else if (part.condition === 'used') score += 5;
+
+        return Math.min(20, score);
+    }
+
+    function calculateSpeedScore(part) {
+        let score = 10; // Base score
+
+        // Availability status
+        if (part.availability === 'in_stock') score += 5;
+        else if (part.availability === 'same_day') score += 4;
+        else if (part.availability === 'next_day') score += 3;
+        else if (part.availability === 'within_week') score += 2;
+
+        // Shipping options
+        if (part.express_shipping) score += 3;
+        if (part.overnight_shipping) score += 2;
+
+        // Location proximity (simulated)
+        const distance = Math.random() * 1000; // Simulated distance in miles
+        if (distance <= 100) score += 2;
+        else if (distance <= 500) score += 1;
+
+        return Math.min(15, score);
+    }
+
+    function calculateLocationScore(part) {
+        let score = 10; // Base score
+
+        // Simulated location-based scoring
+        const locations = ['Miami', 'Los Angeles', 'New York', 'Chicago', 'Dallas', 'Seattle'];
+        const userLocation = 'Miami'; // Simulated user location
+
+        if (part.location === userLocation) score += 5;
+        else if (locations.includes(part.location)) score += 3;
+        else score += 1;
+
+        // International vs domestic
+        if (part.location.includes('USA') || part.location.includes('United States')) score += 2;
+
+        return Math.min(15, score);
+    }
+
+    function calculateCriticalityScore(part) {
+        switch (part.criticality) {
+            case 'critical': return 10;
+            case 'important': return 7;
+            case 'standard': return 5;
+            default: return 5;
+        }
+    }
+
+    function calculateTextRelevance(searchText, partText) {
+        const searchWords = searchText.split(' ').filter(word => word.length > 2);
+        let matches = 0;
+
+        searchWords.forEach(word => {
+            if (partText.includes(word)) matches++;
+        });
+
+        return matches / searchWords.length;
+    }
+
+    function extractMaxPrice(priceRange) {
+        if (!priceRange) return 0;
+        const prices = priceRange.match(/\$[\d,]+/g);
+        if (!prices || prices.length === 0) return 0;
+        return prices.length > 1 ? parseInt(prices[1].replace(/[$,]/g, '')) : parseInt(prices[0].replace(/[$,]/g, ''));
+    }
+
+    function filterParts(searchQuery) {
+        if (!searchQuery) {
+            filteredParts = Object.values(partsInventory);
+        } else {
+            filteredParts = Object.values(partsInventory).filter(part =>
+                part.name.toLowerCase().includes(searchQuery) ||
+                part.description.toLowerCase().includes(searchQuery) ||
+                part.part_number.toLowerCase().includes(searchQuery) ||
+                part.manufacturer.toLowerCase().includes(searchQuery) ||
+                part.category.toLowerCase().includes(searchQuery)
+            );
+        }
+
+        renderPartsGrid();
+    }
+
+    function sortParts(sortBy) {
+        switch (sortBy) {
+            case 'criticality':
+                const criticalityOrder = { 'critical': 3, 'important': 2, 'standard': 1 };
+                filteredParts.sort((a, b) => criticalityOrder[b.criticality] - criticalityOrder[a.criticality]);
+                break;
+            case 'price-low':
+                filteredParts.sort((a, b) => {
+                    const aPrice = extractMinPrice(a.price_range);
+                    const bPrice = extractMinPrice(b.price_range);
+                    return aPrice - bPrice;
+                });
+                break;
+            case 'price-high':
+                filteredParts.sort((a, b) => {
+                    const aPrice = extractMaxPrice(a.price_range);
+                    const bPrice = extractMaxPrice(b.price_range);
+                    return bPrice - aPrice;
+                });
+                break;
+            case 'quality':
+                filteredParts.sort((a, b) => {
+                    const aQuality = calculateQualityScore(a);
+                    const bQuality = calculateQualityScore(b);
+                    return bQuality - aQuality;
+                });
+                break;
+            case 'reviews':
+                filteredParts.sort((a, b) => {
+                    const aReviews = a.review_rating || 0;
+                    const bReviews = b.review_rating || 0;
+                    return bReviews - aReviews;
+                });
+                break;
+            case 'distance':
+                filteredParts.sort((a, b) => {
+                    const aDistance = a.distance || Math.random() * 1000;
+                    const bDistance = b.distance || Math.random() * 1000;
+                    return aDistance - bDistance;
+                });
+                break;
+            case 'availability':
+                const availabilityOrder = { 'in_stock': 4, 'same_day': 3, 'next_day': 2, 'within_week': 1 };
+                filteredParts.sort((a, b) => {
+                    const aAvail = availabilityOrder[a.availability] || 0;
+                    const bAvail = availabilityOrder[b.availability] || 0;
+                    return bAvail - aAvail;
+                });
+                break;
+            case 'manufacturer':
+                filteredParts.sort((a, b) => a.manufacturer.localeCompare(b.manufacturer));
+                break;
+            case 'category':
+                filteredParts.sort((a, b) => a.category.localeCompare(b.category));
+                break;
+            case 'match':
+            default:
+                filteredParts.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+                break;
+        }
+
+        renderPartsGrid();
+    }
+
+    function extractMinPrice(priceRange) {
+        if (!priceRange) return 0;
+        const prices = priceRange.match(/\$[\d,]+/g);
+        if (!prices || prices.length === 0) return 0;
+        return parseInt(prices[0].replace(/[$,]/g, ''));
+    }
+
+    function renderPartsGrid() {
+        const grid = document.getElementById('parts-grid');
+
+        if (filteredParts.length === 0) {
+            grid.innerHTML = `
+            <div class="text-center py-5">
+                <h4 class="text-muted">No parts found</h4>
+                <p class="text-muted">Try adjusting your search criteria or aircraft selection</p>
+            </div>
+        `;
+            return;
+        }
+
+        grid.innerHTML = filteredParts.map(part => `
+        <div class="parts-card">
+            ${part.matchScore ? `<div class="match-score">${part.matchScore}% Match</div>` : ''}
+            
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="d-flex align-items-start justify-content-between mb-3">
+                        <div>
+                            <h4 class="text-white mb-1">${part.name}</h4>
+                            <p class="text-muted mb-0">Part #: ${part.part_number}</p>
+                        </div>
+                        <span class="criticality-${part.criticality}">${part.criticality.toUpperCase()}</span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <span class="category-badge">${part.category}</span>
+                        <span class="text-white ms-2">by ${part.manufacturer}</span>
+                    </div>
+                    
+                    <p class="text-muted mb-3">${part.description}</p>
+                    
+                    <div class="mb-3">
+                        <strong class="text-white">Compatible Aircraft:</strong><br>
+                        ${part.compatible_aircraft.map(aircraft => `<span class="compatibility-badge">${aircraft}</span>`).join('')}
+                    </div>
+                    
+                    ${part.weight ? `<div class="text-muted small mb-2"><strong>Weight:</strong> ${part.weight} lbs</div>` : ''}
+                    ${part.dimensions ? `<div class="text-muted small mb-2"><strong>Dimensions:</strong> ${part.dimensions}</div>` : ''}
+                    ${part.maintenance_interval ? `
+                        <div class="mb-3">
+                            <span class="maintenance-info">
+                                <i class="fas fa-wrench me-1"></i>Service Interval: ${part.maintenance_interval} hours
+                            </span>
+                        </div>
+                    ` : ''}
+                    ${part.certification ? `<div class="text-muted small"><strong>Certification:</strong> ${part.certification}</div>` : ''}
+                    
+                    <!-- Priority Score Breakdown -->
+                    ${part.scoreBreakdown ? `
+                        <div class="mt-3 p-3" style="background: rgba(240, 85, 69, 0.1); border-radius: 8px; border: 1px solid rgba(240, 85, 69, 0.2);">
+                            <h6 class="text-white mb-2">Priority Score Breakdown:</h6>
+                            <div class="row">
+                                <div class="col-6">
+                                    <small class="text-muted">Compatibility: <span class="text-success">${part.scoreBreakdown.compatibility.toFixed(1)}</span></small><br>
+                                    <small class="text-muted">Price: <span class="text-info">${part.scoreBreakdown.price.toFixed(1)}</span></small><br>
+                                    <small class="text-muted">Quality: <span class="text-warning">${part.scoreBreakdown.quality.toFixed(1)}</span></small>
+                                </div>
+                                <div class="col-6">
+                                    <small class="text-muted">Speed: <span class="text-primary">${part.scoreBreakdown.speed.toFixed(1)}</span></small><br>
+                                    <small class="text-muted">Location: <span class="text-secondary">${part.scoreBreakdown.location.toFixed(1)}</span></small><br>
+                                    <small class="text-muted">Criticality: <span class="text-danger">${part.scoreBreakdown.criticality.toFixed(1)}</span></small>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <div class="col-md-4 text-end">
+                    ${part.price_range ? `
+                        <div class="mb-3">
+                            <div class="price-range">${part.price_range}</div>
+                            <small class="text-muted">Price Range</small>
+                        </div>
+                    ` : ''}
+                    
+                    <button class="btn btn-primary mb-2 w-100" onclick="requestQuote('${part.part_number}')">
+                        <i class="fas fa-calculator me-1"></i>Request Quote
+                    </button>
+                    <button class="btn btn-outline-light w-100" onclick="checkAvailability('${part.part_number}')">
+                        <i class="fas fa-search me-1"></i>Check Stock
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    }
+
+    function requestQuote(partNumber) {
+        const part = Object.values(partsInventory).find(p => p.part_number === partNumber);
+        const aircraftType = currentUserNeeds.aircraft_type || 'your aircraft';
+
+        alert(`Quote requested for ${part.name} (${partNumber})\\nCompatible with: ${part.compatible_aircraft.join(', ')}\\n\\nOur parts team will contact you within 1 hour with pricing and availability.`);
+    }
+
+    function checkAvailability(partNumber) {
+        const part = Object.values(partsInventory).find(p => p.part_number === partNumber);
+
+        // Simulate checking stock with service providers
+        fetch('/static/data/service_providers.json')
+            .then(response => response.json())
+            .then(providersData => {
+                const providers = Object.values(providersData);
+                const providersWithPart = providers.filter(provider =>
+                    provider.parts_inventory.includes(partNumber)
+                );
+
+                if (providersWithPart.length > 0) {
+                    const providersList = providersWithPart.map(p => `• ${p.name} (${p.location})`).join('\\n');
+                    alert(`${part.name} is available from:\\n\\n${providersList}\\n\\nWould you like us to connect you with these suppliers?`);
+                } else {
+                    alert(`${part.name} is currently out of stock.\\n\\nWe'll search our extended network and notify you when it becomes available.`);
+                }
+            })
+            .catch(error => {
+                console.error('Error checking availability:', error);
+                alert('Checking availability... Please try again in a moment.');
+            });
+    }
+
+    function showPriorityBreakdown() {
+        if (!currentUserNeeds || !currentUserNeeds.priorities) {
+            alert('Please perform a search first to see priority breakdown.');
+            return;
+        }
+
+        const priorities = currentUserNeeds.priorities;
+        const breakdown = `
+Priority Settings:
+• Price Priority: ${priorities.price.toUpperCase()} (${getPriorityWeight(priorities.price) * 100}% weight)
+• Quality Priority: ${priorities.quality.toUpperCase()} (${getPriorityWeight(priorities.quality) * 100}% weight)
+• Speed Priority: ${priorities.speed.toUpperCase()} (${getPriorityWeight(priorities.speed) * 100}% weight)
+• Location Priority: ${priorities.location.toUpperCase()} (${getPriorityWeight(priorities.location) * 100}% weight)
+
+Scoring System:
+• Compatibility: 25% (always critical)
+• Price: 0-20% (based on your priority)
+• Quality: 0-20% (based on your priority)
+• Speed: 0-15% (based on your priority)
+• Location: 0-15% (based on your priority)
+• Criticality: 5-10% (part importance)
+• Search Relevance: 0-10% (text match)
+
+Priority Weights:
+• Critical: 100% of available points
+• High: 80% of available points
+• Medium: 50% of available points
+• Low: 20% of available points
+        `;
+
+        alert(breakdown);
+    }
+
+    function getSampleParts() {
+        // Fallback sample data if JSON files not available
+        return {
+            "ENG001": {
+                "part_number": "ENG001",
+                "name": "Turbine Blade Set",
+                "category": "Engine",
+                "manufacturer": "Pratt & Whitney",
+                "compatible_aircraft": ["Citation CJ3+", "Citation Sovereign+"],
+                "description": "High-pressure turbine blades",
+                "price_range": "$15,000-$25,000",
+                "criticality": "critical",
+                "maintenance_interval": 2000,
+                "availability": "in_stock",
+                "condition": "new",
+                "certification": "FAA PMA",
+                "location": "Miami, USA",
+                "express_shipping": true,
+                "overnight_shipping": true,
+                "review_rating": 4.8
+            },
+            "AVI002": {
+                "part_number": "AVI002",
+                "name": "Garmin G3000 Display Unit",
+                "category": "Avionics",
+                "manufacturer": "Garmin",
+                "compatible_aircraft": ["Citation CJ3+", "Citation Latitude", "Challenger 350"],
+                "description": "Primary flight display with touchscreen interface",
+                "price_range": "$8,000-$12,000",
+                "criticality": "important",
+                "maintenance_interval": 5000,
+                "availability": "same_day",
+                "condition": "overhauled",
+                "certification": "FAA TSO",
+                "location": "Los Angeles, USA",
+                "express_shipping": true,
+                "overnight_shipping": false,
+                "review_rating": 4.6
+            },
+            "LND003": {
+                "part_number": "LND003",
+                "name": "Landing Gear Strut Assembly",
+                "category": "Landing Gear",
+                "manufacturer": "Safran",
+                "compatible_aircraft": ["Gulfstream G650", "Falcon 2000LXS"],
+                "description": "Complete landing gear strut with hydraulic system",
+                "price_range": "$25,000-$35,000",
+                "criticality": "critical",
+                "maintenance_interval": 3000,
+                "availability": "next_day",
+                "condition": "new",
+                "certification": "FAA PMA, EASA",
+                "location": "New York, USA",
+                "express_shipping": true,
+                "overnight_shipping": true,
+                "review_rating": 4.9
+            }
+        };
+    }
+</script>
+{% endblock %}

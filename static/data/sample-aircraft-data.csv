@@ -1,0 +1,12 @@
+Model,Manufacturer,Type,Multi Engine,Year Start,Year End,Date Range,Meets Year Requirement,Lowest Age,Highest Age,Min Crew Required,Max Operating Altitude,Balanced Field Length,Aircraft Height,Wingspan,Aircraft Length,Aircraft Volume,Cabin Height,Cabin Width,Cabin Length,Cabin Volume,Baggage Volume,Cabin/Aircraft Volume Ratio,Range,Cruise Speed,Passengers,Price,Depreciated Value,Fuel Burn,Fuel Type,Total Hourly Cost
+Sample Values,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+Citation CJ3+,Cessna,Light Jet,Yes,2014,2023,2014-2023,Yes,0,9,1,45000,3180,15.2,53.3,51.2,41459,4.8,4.8,15.7,361,65,0.87,2040,416,9,8800000,7040000,149,Jet A,800
+Phenom 300E,Embraer,Light Jet,Yes,2018,2023,2018-2023,Yes,0,5,1,45000,3450,16.7,52.2,51.4,44863,4.9,5.1,17.2,429,74,0.96,2010,453,10,9000000,7650000,156,Jet A,750
+King Air 360,Beechcraft,Turboprop,Yes,2020,2023,2020-2023,Yes,0,3,1,35000,3300,14.3,57.9,46.8,38800,4.8,4.5,16.7,361,54,0.93,1806,312,11,8400000,7140000,90,Jet A,450
+Cirrus SR22,Cirrus,Piston,No,2001,2023,2001-2023,Yes,0,22,1,17500,1600,8.9,38.3,26,8886,4.1,4.1,8.2,137,30,1.54,1200,183,4,1000000,700000,18,AVGAS,120
+Pilatus PC-12 NGX,Pilatus,Turboprop,No,2020,2023,2020-2023,Yes,0,3,1,30000,2485,14,53.3,47.3,35350,4.8,5,16.9,407,40,1.15,1765,290,10,5250000,4462500,65,Jet A,350
+Gulfstream G650,Gulfstream,Large Jet,Yes,2012,2023,2012-2023,Yes,0,11,2,51000,5858,25.8,99.7,99.9,256940,6.3,8.5,46.9,2506,195,0.98,7000,516,19,65000000,48750000,452,Jet A,3500
+Bombardier Global 7500,Bombardier,Large Jet,Yes,2018,2023,2018-2023,Yes,0,5,2,51000,5800,27,104,111,312228,6.2,8.0,54.5,2637,195,0.84,7700,516,19,75000000,63750000,498,Jet A,4000
+TBM 960,Daher,Turboprop,No,2022,2023,2022-2023,Yes,0,1,1,31000,2380,14.3,42.1,42.4,25477,4,4,15.5,248,30,0.97,1730,330,6,4500000,4275000,57,Jet A,280
+Cessna 172 Skyhawk,Cessna,Piston,No,1956,2023,1956-2023,Yes,0,67,1,14000,1630,8.9,36,27.2,8701,4.0,3.6,10.0,144,28,1.66,800,126,4,400000,180000,10,AVGAS,80
+Citation Longitude,Cessna,Midsize Jet,Yes,2017,2023,2017-2023,Yes,0,6,2,45000,4900,19.5,68.9,73.1,98330,6.0,6.5,25.2,982,112,1.00,3500,483,12,29000000,23200000,210,Jet A,1800 

@@ -1,0 +1,427 @@
+{
+  "ENG001": {
+    "part_number": "ENG001",
+    "name": "Turbine Blade Set",
+    "category": "Engine",
+    "manufacturer": "Pratt & Whitney",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "Citation Sovereign+"
+    ],
+    "description": "High-pressure turbine blades",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$15,000-$25,000",
+    "criticality": "critical",
+    "maintenance_interval": 2000,
+    "certification": null
+  },
+  "ENG002": {
+    "part_number": "ENG002",
+    "name": "Fuel Injection Nozzle",
+    "category": "Engine",
+    "manufacturer": "Rolls-Royce",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "Falcon 2000LXS"
+    ],
+    "description": "Primary fuel injection system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$3,000-$5,000",
+    "criticality": "critical",
+    "maintenance_interval": 1500,
+    "certification": null
+  },
+  "ENG003": {
+    "part_number": "ENG003",
+    "name": "Compressor Disc",
+    "category": "Engine",
+    "manufacturer": "General Electric",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "Legacy 450"
+    ],
+    "description": "High-pressure compressor disc",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$20,000-$35,000",
+    "criticality": "critical",
+    "maintenance_interval": 3000,
+    "certification": null
+  },
+  "ENG004": {
+    "part_number": "ENG004",
+    "name": "Oil Pump Assembly",
+    "category": "Engine",
+    "manufacturer": "Honeywell",
+    "compatible_aircraft": [
+      "King Air 350i",
+      "PC-12 NGX"
+    ],
+    "description": "Engine lubrication system pump",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$2,000-$4,000",
+    "criticality": "important",
+    "maintenance_interval": 1000,
+    "certification": null
+  },
+  "ENG005": {
+    "part_number": "ENG005",
+    "name": "Starter Generator",
+    "category": "Engine",
+    "manufacturer": "Safran",
+    "compatible_aircraft": [
+      "Challenger 350",
+      "Citation Latitude"
+    ],
+    "description": "Engine start and power generation",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$8,000-$12,000",
+    "criticality": "important",
+    "maintenance_interval": 2500,
+    "certification": null
+  },
+  "AVI001": {
+    "part_number": "AVI001",
+    "name": "Primary Flight Display",
+    "category": "Avionics",
+    "manufacturer": "Garmin",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "King Air 350i"
+    ],
+    "description": "Main pilot flight display",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$25,000-$40,000",
+    "criticality": "critical",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "AVI002": {
+    "part_number": "AVI002",
+    "name": "Autopilot Computer",
+    "category": "Avionics",
+    "manufacturer": "Honeywell",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "Challenger 350"
+    ],
+    "description": "Flight management system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$15,000-$25,000",
+    "criticality": "critical",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "AVI003": {
+    "part_number": "AVI003",
+    "name": "Weather Radar Unit",
+    "category": "Avionics",
+    "manufacturer": "Bendix",
+    "compatible_aircraft": [
+      "Citation Sovereign+",
+      "Legacy 450"
+    ],
+    "description": "Weather detection system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$35,000-$50,000",
+    "criticality": "important",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "AVI004": {
+    "part_number": "AVI004",
+    "name": "GPS Navigation Unit",
+    "category": "Avionics",
+    "manufacturer": "Garmin",
+    "compatible_aircraft": [
+      "PC-12 NGX",
+      "Citation Latitude"
+    ],
+    "description": "Satellite navigation system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$20,000-$30,000",
+    "criticality": "critical",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "AVI005": {
+    "part_number": "AVI005",
+    "name": "Radio Transceiver",
+    "category": "Avionics",
+    "manufacturer": "Collins Aerospace",
+    "compatible_aircraft": [
+      "Falcon 2000LXS",
+      "King Air 350i"
+    ],
+    "description": "Communication radio system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$5,000-$8,000",
+    "criticality": "important",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "LG001": {
+    "part_number": "LG001",
+    "name": "Main Landing Gear Strut",
+    "category": "Landing Gear",
+    "manufacturer": "Safran",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "Falcon 2000LXS"
+    ],
+    "description": "Primary landing gear shock strut",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$12,000-$18,000",
+    "criticality": "critical",
+    "maintenance_interval": 5000,
+    "certification": null
+  },
+  "LG002": {
+    "part_number": "LG002",
+    "name": "Nose Wheel Assembly",
+    "category": "Landing Gear",
+    "manufacturer": "Honeywell",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "Citation Latitude"
+    ],
+    "description": "Nose landing gear wheel and tire",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$3,000-$5,000",
+    "criticality": "important",
+    "maintenance_interval": 1500,
+    "certification": null
+  },
+  "LG003": {
+    "part_number": "LG003",
+    "name": "Brake Disc Assembly",
+    "category": "Landing Gear",
+    "manufacturer": "Meggitt",
+    "compatible_aircraft": [
+      "Challenger 350",
+      "Legacy 450"
+    ],
+    "description": "Main gear brake system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$4,000-$7,000",
+    "criticality": "critical",
+    "maintenance_interval": 2000,
+    "certification": null
+  },
+  "LG004": {
+    "part_number": "LG004",
+    "name": "Landing Gear Actuator",
+    "category": "Landing Gear",
+    "manufacturer": "Parker",
+    "compatible_aircraft": [
+      "Citation Sovereign+",
+      "King Air 350i"
+    ],
+    "description": "Gear retraction system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$8,000-$12,000",
+    "criticality": "critical",
+    "maintenance_interval": 3000,
+    "certification": null
+  },
+  "LG005": {
+    "part_number": "LG005",
+    "name": "Anti-Skid Control Unit",
+    "category": "Landing Gear",
+    "manufacturer": "Crane Aerospace",
+    "compatible_aircraft": [
+      "PC-12 NGX",
+      "Citation CJ3+"
+    ],
+    "description": "Brake anti-skid system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$6,000-$10,000",
+    "criticality": "important",
+    "maintenance_interval": 2500,
+    "certification": null
+  },
+  "INT001": {
+    "part_number": "INT001",
+    "name": "Pilot Seat Assembly",
+    "category": "Interior",
+    "manufacturer": "AmSafe",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "Citation Latitude"
+    ],
+    "description": "Adjustable pilot seat",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$8,000-$15,000",
+    "criticality": "standard",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "INT002": {
+    "part_number": "INT002",
+    "name": "Passenger Seat Track",
+    "category": "Interior",
+    "manufacturer": "Zodiac Aerospace",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "Challenger 350"
+    ],
+    "description": "Seat mounting rail system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$2,000-$4,000",
+    "criticality": "standard",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "INT003": {
+    "part_number": "INT003",
+    "name": "Cabin Window Assembly",
+    "category": "Interior",
+    "manufacturer": "PPG Aerospace",
+    "compatible_aircraft": [
+      "Falcon 2000LXS",
+      "Legacy 450"
+    ],
+    "description": "Pressurized cabin window",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$5,000-$8,000",
+    "criticality": "important",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "INT004": {
+    "part_number": "INT004",
+    "name": "LED Cabin Light Strip",
+    "category": "Interior",
+    "manufacturer": "Astronics",
+    "compatible_aircraft": [
+      "Citation Sovereign+",
+      "King Air 350i"
+    ],
+    "description": "Interior LED lighting",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$1,000-$2,000",
+    "criticality": "standard",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "INT005": {
+    "part_number": "INT005",
+    "name": "Entertainment System Display",
+    "category": "Interior",
+    "manufacturer": "Panasonic",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "PC-12 NGX"
+    ],
+    "description": "Passenger entertainment screen",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$3,000-$6,000",
+    "criticality": "standard",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "STR001": {
+    "part_number": "STR001",
+    "name": "Wing Spar Assembly",
+    "category": "Structure",
+    "manufacturer": "Boeing",
+    "compatible_aircraft": [
+      "Citation CJ3+",
+      "Citation Sovereign+"
+    ],
+    "description": "Primary wing structural beam",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$25,000-$40,000",
+    "criticality": "critical",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "STR002": {
+    "part_number": "STR002",
+    "name": "Fuselage Frame",
+    "category": "Structure",
+    "manufacturer": "Airbus",
+    "compatible_aircraft": [
+      "Challenger 350",
+      "Legacy 450"
+    ],
+    "description": "Cabin frame structure",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$15,000-$25,000",
+    "criticality": "critical",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "STR003": {
+    "part_number": "STR003",
+    "name": "Control Surface Hinge",
+    "category": "Structure",
+    "manufacturer": "Triumph Group",
+    "compatible_aircraft": [
+      "Falcon 2000LXS",
+      "Citation Latitude"
+    ],
+    "description": "Aileron/rudder mounting",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$3,000-$5,000",
+    "criticality": "important",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "STR004": {
+    "part_number": "STR004",
+    "name": "Cabin Door Seal",
+    "category": "Structure",
+    "manufacturer": "Eaton",
+    "compatible_aircraft": [
+      "King Air 350i",
+      "PC-12 NGX"
+    ],
+    "description": "Pressurization door seal",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$1,500-$3,000",
+    "criticality": "important",
+    "maintenance_interval": null,
+    "certification": null
+  },
+  "STR005": {
+    "part_number": "STR005",
+    "name": "Baggage Door Actuator",
+    "category": "Structure",
+    "manufacturer": "Safran",
+    "compatible_aircraft": [
+      "Gulfstream G650",
+      "Citation CJ3+"
+    ],
+    "description": "Cargo compartment door system",
+    "weight": null,
+    "dimensions": null,
+    "price_range": "$4,000-$7,000",
+    "criticality": "standard",
+    "maintenance_interval": null,
+    "certification": null
+  }
+}

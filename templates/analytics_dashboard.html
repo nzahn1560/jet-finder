@@ -1,0 +1,785 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics Dashboard - Jet Finder Pro{% endblock %}
+
+{% block extra_css %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    .analytics-container {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        margin: -20px -20px 0 -20px;
+        padding: 40px 20px;
+        min-height: 100vh;
+        color: white;
+    }
+
+    .analytics-header {
+        text-align: center;
+        margin-bottom: 40px;
+    }
+
+    .analytics-header h1 {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .analytics-header p {
+        font-size: 1.1rem;
+        opacity: 0.8;
+    }
+
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 30px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    .analytics-card {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        padding: 30px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: all 0.3s ease;
+    }
+
+    .analytics-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .card-icon {
+        font-size: 2rem;
+        margin-right: 15px;
+        color: #fbbf24;
+    }
+
+    .card-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .metric-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #fbbf24;
+        margin-bottom: 5px;
+    }
+
+    .metric-label {
+        font-size: 0.9rem;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-change {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-top: 8px;
+    }
+
+    .metric-change.positive {
+        background: rgba(16, 185, 129, 0.2);
+        color: #10b981;
+    }
+
+    .metric-change.negative {
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+    }
+
+    .chart-container {
+        position: relative;
+        height: 300px;
+        margin-top: 20px;
+    }
+
+    .table-container {
+        max-height: 400px;
+        overflow-y: auto;
+        margin-top: 20px;
+    }
+
+    .analytics-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .analytics-table th,
+    .analytics-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .analytics-table th {
+        background: rgba(255, 255, 255, 0.1);
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .analytics-table tr:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .filter-bar {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .filter-label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        opacity: 0.8;
+    }
+
+    .filter-select {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        padding: 8px 12px;
+        color: white;
+        font-size: 0.9rem;
+    }
+
+    .filter-select option {
+        background: #1a1a2e;
+        color: white;
+    }
+
+    .insights-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .insights-list li {
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+    }
+
+    .insights-list li:last-child {
+        border-bottom: none;
+    }
+
+    .insight-icon {
+        margin-right: 12px;
+        font-size: 1.2rem;
+    }
+
+    .insight-text {
+        flex: 1;
+        font-size: 0.95rem;
+    }
+
+    .portfolio-item {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .portfolio-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .portfolio-details {
+        font-size: 0.9rem;
+        opacity: 0.7;
+    }
+
+    .portfolio-value {
+        text-align: right;
+    }
+
+    .portfolio-price {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #fbbf24;
+    }
+
+    .portfolio-change {
+        font-size: 0.8rem;
+        margin-top: 4px;
+    }
+
+    @media (max-width: 768px) {
+        .analytics-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .filter-bar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .analytics-header h1 {
+            font-size: 2rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-container">
+    <div class="analytics-header">
+        <h1>📊 Analytics Dashboard</h1>
+        <p>Comprehensive market insights and portfolio analytics for aviation professionals</p>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <div class="filter-group">
+            <div class="filter-label">Time Period</div>
+            <select class="filter-select" id="timePeriod">
+                <option value="1M">Last Month</option>
+                <option value="3M" selected>Last 3 Months</option>
+                <option value="6M">Last 6 Months</option>
+                <option value="1Y">Last Year</option>
+                <option value="ALL">All Time</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <div class="filter-label">Aircraft Category</div>
+            <select class="filter-select" id="aircraftCategory">
+                <option value="all">All Categories</option>
+                <option value="turboprop">Turboprops</option>
+                <option value="light_jet">Light Jets</option>
+                <option value="midsize_jet">Midsize Jets</option>
+                <option value="heavy_jet">Heavy Jets</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <div class="filter-label">Price Range</div>
+            <select class="filter-select" id="priceRange">
+                <option value="all">All Prices</option>
+                <option value="0-1M">Under $1M</option>
+                <option value="1M-5M">$1M - $5M</option>
+                <option value="5M-15M">$5M - $15M</option>
+                <option value="15M+">$15M+</option>
+            </select>
+        </div>
+
+        <button class="btn btn-primary" onclick="refreshAnalytics()">Update Analytics</button>
+    </div>
+
+    <div class="analytics-grid">
+        <!-- Market Overview Card -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">📈</div>
+                <h3 class="card-title">Market Overview</h3>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="metric-value" id="totalAircraft">316</div>
+                    <div class="metric-label">Total Aircraft</div>
+                    <div class="metric-change positive">+12 this month</div>
+                </div>
+                <div class="col-md-6">
+                    <div class="metric-value" id="avgPrice">$8.2M</div>
+                    <div class="metric-label">Average Price</div>
+                    <div class="metric-change positive">+3.2%</div>
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <div class="metric-value" id="medianDaysOnMarket">45</div>
+                    <div class="metric-label">Median Days on Market</div>
+                    <div class="metric-change negative">-5 days</div>
+                </div>
+                <div class="col-md-6">
+                    <div class="metric-value" id="totalVolume">$127M</div>
+                    <div class="metric-label">Total Volume</div>
+                    <div class="metric-change positive">+8.7%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Price Trends Chart -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">📊</div>
+                <h3 class="card-title">Price Trends</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="priceTrendsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Market Insights -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">💡</div>
+                <h3 class="card-title">Market Insights</h3>
+            </div>
+            <ul class="insights-list">
+                <li>
+                    <div class="insight-icon">🚀</div>
+                    <div class="insight-text">Light jets seeing 15% price increase due to high demand</div>
+                </li>
+                <li>
+                    <div class="insight-icon">📉</div>
+                    <div class="insight-text">Heavy jets spending 23% longer on market</div>
+                </li>
+                <li>
+                    <div class="insight-icon">⭐</div>
+                    <div class="insight-text">Turboprops showing strongest value retention</div>
+                </li>
+                <li>
+                    <div class="insight-icon">🔥</div>
+                    <div class="insight-text">Pre-owned aircraft under $5M in highest demand</div>
+                </li>
+                <li>
+                    <div class="insight-icon">📈</div>
+                    <div class="insight-text">International buyers driving 30% of sales</div>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">⚡</div>
+                <h3 class="card-title">Performance vs. Value</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Top Performing Aircraft -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">🏆</div>
+                <h3 class="card-title">Top Performing Aircraft</h3>
+            </div>
+            <div class="table-container">
+                <table class="analytics-table">
+                    <thead>
+                        <tr>
+                            <th>Aircraft</th>
+                            <th>Match Score</th>
+                            <th>Value Score</th>
+                            <th>Market Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody id="topAircraftTable">
+                        <!-- Data will be loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Saved Portfolio -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">💼</div>
+                <h3 class="card-title">Your Portfolio</h3>
+            </div>
+            <div id="portfolioContainer">
+                <div class="portfolio-item">
+                    <div>
+                        <div class="portfolio-name">Citation CJ3+</div>
+                        <div class="portfolio-details">2018 • Watched since March 2024</div>
+                    </div>
+                    <div class="portfolio-value">
+                        <div class="portfolio-price">$7.2M</div>
+                        <div class="portfolio-change positive">+$180K (+2.6%)</div>
+                    </div>
+                </div>
+
+                <div class="portfolio-item">
+                    <div>
+                        <div class="portfolio-name">King Air 350i</div>
+                        <div class="portfolio-details">2020 • Watched since February 2024</div>
+                    </div>
+                    <div class="portfolio-value">
+                        <div class="portfolio-price">$6.8M</div>
+                        <div class="portfolio-change negative">-$95K (-1.4%)</div>
+                    </div>
+                </div>
+
+                <div class="portfolio-item">
+                    <div>
+                        <div class="portfolio-name">Gulfstream G280</div>
+                        <div class="portfolio-details">2017 • Watched since January 2024</div>
+                    </div>
+                    <div class="portfolio-value">
+                        <div class="portfolio-price">$16.5M</div>
+                        <div class="portfolio-change positive">+$420K (+2.6%)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Heatmap -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">🗺️</div>
+                <h3 class="card-title">Category Performance</h3>
+            </div>
+            <div class="chart-container">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+
+        <!-- ROI Calculator -->
+        <div class="analytics-card">
+            <div class="card-header">
+                <div class="card-icon">💰</div>
+                <h3 class="card-title">ROI Calculator</h3>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <label class="filter-label">Purchase Price</label>
+                    <input type="number" class="filter-select" id="purchasePrice" placeholder="$5,000,000"
+                        style="width: 100%;">
+                </div>
+                <div class="col-md-6">
+                    <label class="filter-label">Annual Usage (hours)</label>
+                    <input type="number" class="filter-select" id="annualUsage" placeholder="200" style="width: 100%;">
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <label class="filter-label">Hold Period (years)</label>
+                    <input type="number" class="filter-select" id="holdPeriod" placeholder="5" style="width: 100%;">
+                </div>
+                <div class="col-md-6">
+                    <label class="filter-label">Expected Appreciation</label>
+                    <select class="filter-select" id="appreciation" style="width: 100%;">
+                        <option value="0.02">2% annually</option>
+                        <option value="0.03" selected>3% annually</option>
+                        <option value="0.04">4% annually</option>
+                        <option value="0.05">5% annually</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <button class="btn btn-primary" onclick="calculateROI()">Calculate ROI</button>
+                <div id="roiResults" class="mt-3" style="display: none;">
+                    <div class="metric-value" id="roiValue">0%</div>
+                    <div class="metric-label">Total Return on Investment</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Chart.js configuration for dark theme
+    Chart.defaults.color = '#ffffff';
+    Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)';
+
+    // Initialize charts
+    let priceTrendsChart, performanceChart, categoryChart;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        initializePriceTrendsChart();
+        initializePerformanceChart();
+        initializeCategoryChart();
+        loadTopAircraft();
+    });
+
+    function initializePriceTrendsChart() {
+        const ctx = document.getElementById('priceTrendsChart').getContext('2d');
+
+        // Generate sample data
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+        const lightJets = [7.2, 7.3, 7.5, 7.8, 8.1, 8.3];
+        const midsize = [12.5, 12.7, 12.9, 13.2, 13.1, 13.4];
+        const heavy = [24.8, 25.1, 24.9, 25.3, 25.7, 26.1];
+
+        priceTrendsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [{
+                    label: 'Light Jets',
+                    data: lightJets,
+                    borderColor: '#fbbf24',
+                    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Midsize Jets',
+                    data: midsize,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Heavy Jets',
+                    data: heavy,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        ticks: {
+                            callback: function (value) {
+                                return '$' + value + 'M';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function initializePerformanceChart() {
+        const ctx = document.getElementById('performanceChart').getContext('2d');
+
+        performanceChart = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Light Jets',
+                    data: [
+                        { x: 450, y: 7.2 }, { x: 520, y: 8.1 }, { x: 480, y: 6.9 },
+                        { x: 510, y: 7.8 }, { x: 470, y: 7.1 }
+                    ],
+                    backgroundColor: '#fbbf24',
+                    borderColor: '#fbbf24'
+                }, {
+                    label: 'Midsize Jets',
+                    data: [
+                        { x: 520, y: 12.5 }, { x: 580, y: 13.2 }, { x: 550, y: 12.8 },
+                        { x: 490, y: 11.9 }, { x: 560, y: 13.1 }
+                    ],
+                    backgroundColor: '#3b82f6',
+                    borderColor: '#3b82f6'
+                }, {
+                    label: 'Heavy Jets',
+                    data: [
+                        { x: 560, y: 24.8 }, { x: 620, y: 26.1 }, { x: 590, y: 25.3 },
+                        { x: 580, y: 25.7 }, { x: 570, y: 24.9 }
+                    ],
+                    backgroundColor: '#10b981',
+                    borderColor: '#10b981'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Speed (kts)'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Price ($M)'
+                        },
+                        ticks: {
+                            callback: function (value) {
+                                return '$' + value + 'M';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function initializeCategoryChart() {
+        const ctx = document.getElementById('categoryChart').getContext('2d');
+
+        categoryChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Light Jets', 'Midsize Jets', 'Heavy Jets', 'Turboprops'],
+                datasets: [{
+                    data: [42, 28, 18, 12],
+                    backgroundColor: [
+                        '#fbbf24',
+                        '#3b82f6',
+                        '#10b981',
+                        '#8b5cf6'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                    }
+                }
+            }
+        });
+    }
+
+    function loadTopAircraft() {
+        // Simulate loading top aircraft data
+        const tableBody = document.getElementById('topAircraftTable');
+
+        const topAircraft = [
+            { name: 'Citation CJ3+', matchScore: 94.2, valueScore: 87.5, trend: 'up' },
+            { name: 'King Air 350i', matchScore: 91.8, valueScore: 89.1, trend: 'up' },
+            { name: 'PC-12 NGX', matchScore: 88.6, valueScore: 92.3, trend: 'stable' },
+            { name: 'Phenom 300E', matchScore: 87.4, valueScore: 85.7, trend: 'up' },
+            { name: 'Citation M2', matchScore: 85.9, valueScore: 88.9, trend: 'down' }
+        ];
+
+        tableBody.innerHTML = topAircraft.map(aircraft => `
+        <tr>
+            <td>${aircraft.name}</td>
+            <td>${aircraft.matchScore}%</td>
+            <td>${aircraft.valueScore}%</td>
+            <td>
+                <span class="${aircraft.trend === 'up' ? 'metric-change positive' : aircraft.trend === 'down' ? 'metric-change negative' : 'metric-change'}">
+                    ${aircraft.trend === 'up' ? '↗️' : aircraft.trend === 'down' ? '↘️' : '➡️'} ${aircraft.trend}
+                </span>
+            </td>
+        </tr>
+    `).join('');
+    }
+
+    function refreshAnalytics() {
+        // Simulate refreshing analytics based on filters
+        console.log('Refreshing analytics with current filters...');
+
+        // Update metrics with animation
+        animateMetric('totalAircraft', 316, 328);
+        animateMetric('avgPrice', 8.2, 8.4);
+        animateMetric('medianDaysOnMarket', 45, 42);
+        animateMetric('totalVolume', 127, 134);
+
+        // Refresh charts
+        updateChartData();
+    }
+
+    function animateMetric(elementId, startValue, endValue) {
+        const element = document.getElementById(elementId);
+        const duration = 1000;
+        const startTime = performance.now();
+
+        function updateValue(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            const currentValue = startValue + (endValue - startValue) * progress;
+
+            if (elementId.includes('Price') || elementId.includes('Volume')) {
+                element.textContent = '$' + currentValue.toFixed(1) + (elementId.includes('Volume') ? 'M' : 'M');
+            } else {
+                element.textContent = Math.round(currentValue);
+            }
+
+            if (progress < 1) {
+                requestAnimationFrame(updateValue);
+            }
+        }
+
+        requestAnimationFrame(updateValue);
+    }
+
+    function updateChartData() {
+        // Generate new random data for demonstration
+        const newData = {
+            lightJets: Array.from({ length: 6 }, () => 7 + Math.random() * 2),
+            midsize: Array.from({ length: 6 }, () => 12 + Math.random() * 2),
+            heavy: Array.from({ length: 6 }, () => 24 + Math.random() * 3)
+        };
+
+        priceTrendsChart.data.datasets[0].data = newData.lightJets;
+        priceTrendsChart.data.datasets[1].data = newData.midsize;
+        priceTrendsChart.data.datasets[2].data = newData.heavy;
+        priceTrendsChart.update();
+    }
+
+    function calculateROI() {
+        const purchasePrice = parseFloat(document.getElementById('purchasePrice').value) || 5000000;
+        const annualUsage = parseFloat(document.getElementById('annualUsage').value) || 200;
+        const holdPeriod = parseFloat(document.getElementById('holdPeriod').value) || 5;
+        const appreciation = parseFloat(document.getElementById('appreciation').value) || 0.03;
+
+        // Simple ROI calculation
+        const futureValue = purchasePrice * Math.pow(1 + appreciation, holdPeriod);
+        const totalReturn = ((futureValue - purchasePrice) / purchasePrice) * 100;
+
+        document.getElementById('roiValue').textContent = totalReturn.toFixed(1) + '%';
+        document.getElementById('roiResults').style.display = 'block';
+
+        // Add animation
+        document.getElementById('roiResults').style.animation = 'fadeIn 0.5s ease-in';
+    }
+
+    // Add CSS animation keyframes
+    const style = document.createElement('style');
+    style.textContent = `
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+`;
+    document.head.appendChild(style);
+</script>
+{% endblock %}
