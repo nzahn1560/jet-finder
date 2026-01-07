@@ -1,18 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
+import { apiClient } from "../lib/supabase-auth";
 import { useState } from "react";
 
 import { adminToken } from "../lib/auth";
 
 const fetchPendingListings = async () => {
-    const { data } = await axios.get("/api/admin/listings/", {
+    const { data } = await apiClient.get("/api/admin/listings/", {
         headers: { Authorization: `Bearer ${adminToken}` }
     });
     return data;
 };
 
 const updateStatus = async ({ id, status, reason }) => {
-    const { data } = await axios.post(
+    const { data } = await apiClient.post(
         `/api/admin/listings/${id}/status`,
         { status, reason },
         {
