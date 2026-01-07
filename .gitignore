@@ -1,5 +1,60 @@
+# Dependencies
+node_modules/
+dist/
+dist-ssr/
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.production.local
+.env.development.local
+
+# Secrets (NEVER commit these)
+token.json
+credentials.json
+**/*.pem
+**/*.key
+
+# Python (not used in Cloudflare - ignore all Python files)
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+*.py
+!regenerate_token.py  # Keep token regeneration script if needed
+
+# Legacy Python backend (not used)
+backend/
+app.py
+requirements.txt
+runtime.txt
+Procfile
+railway.toml
+setup.py
+*.sh
+
+# Legacy folders (old Python Flask app)
+static/
+templates/
+instance/
+uploads/
+workers/  # Keep worker-api/, remove old workers/
+
+# Database files (use D1 in production)
+*.db
+*.sqlite
+*.sqlite3
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,64 +62,33 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-.venv/
+# Cloudflare
+.wrangler/
 
-# env files
-.env
-.env.*
-
-# Secrets
-token.json
-credentials.json
-**/*.pem
-**/*.key
-
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
+*.swp
+*.swo
+*.swn
 .DS_Store
+
+# OS
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-venv/
-.wrangler/
-.venv/
 
-# Secrets
-token.json
-credentials.json
-.env
-.env.*
+# Build outputs
+*.local
+*.tsbuildinfo
 
-# Node
-node_modules/
-dist/
+# Data files (CSV, JSON - keep in data/ if needed)
+*.csv
+!database/migrations/*.sql  # Keep SQL migrations
+!worker-api/migrations/*.sql
 
-# Python
-venv/
-.venv/
-__pycache__/
-*.pyc
-
-# Secrets
-token.json
-credentials.json
-.env
-.env.*
-
-# Node
-node_modules/
-dist/
-
-# Python
-venv/
-.venv/
-__pycache__/
-*.pyc
+# Archive files
+*.zip
