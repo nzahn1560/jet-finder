@@ -14,7 +14,7 @@
 
 Add these in Cloudflare Pages → Settings → Environment Variables:
 
-- `VITE_API_URL` = `https://api.jetschoolusa.com`
+- `VITE_API_URL` = `https://jetschoolusa-api.nick-zahn777.workers.dev` (or `https://api.jetschoolusa.com` if you set up the custom domain)
 - `VITE_SUPABASE_URL` = `https://thjvacmcpvwxdrfouymp.supabase.co`
 - `VITE_SUPABASE_ANON_KEY` = (your full anon key)
 
