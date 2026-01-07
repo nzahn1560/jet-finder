@@ -103,3 +103,4 @@ Adjust as needed for production deployments.
 Future enhancements can include JWT auth, file uploads, payment processor integration, and production-ready deployment scripts.
 
 <!-- Trigger rebuild -->
+# Force rebuild with updated API URL
