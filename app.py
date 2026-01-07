@@ -40,7 +40,20 @@ allowed_origins = [
     'http://localhost:5173',
     'http://localhost:3000',
 ]
-CORS(app, origins=allowed_origins, supports_credentials=True)
+# Allow any Cloudflare Pages subdomain
+import re
+def is_allowed_origin(origin):
+    if not origin:
+        return False
+    # Check exact matches
+    if origin in allowed_origins:
+        return True
+    # Check if it's a Cloudflare Pages domain
+    if re.match(r'https://.*\.pages\.dev$', origin):
+        return True
+    return False
+
+CORS(app, origins=is_allowed_origin, supports_credentials=True)
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
