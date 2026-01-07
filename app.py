@@ -33,6 +33,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
 
 # Configure CORS for production
+import re
 allowed_origins = [
     'https://jetschoolusa.com',
     'https://www.jetschoolusa.com',
@@ -40,8 +41,8 @@ allowed_origins = [
     'http://localhost:5173',
     'http://localhost:3000',
 ]
+
 # Allow any Cloudflare Pages subdomain
-import re
 def is_allowed_origin(origin):
     if not origin:
         return False
