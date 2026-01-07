@@ -101,3 +101,5 @@ Adjust as needed for production deployments.
 - [x] Docker-based dev environment
 
 Future enhancements can include JWT auth, file uploads, payment processor integration, and production-ready deployment scripts.
+
+<!-- Trigger rebuild -->
