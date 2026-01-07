@@ -29,12 +29,13 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 // Create Supabase client (will fail gracefully if config is missing)
 export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY 
     ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
-    },
-});
+        auth: {
+            autoRefreshToken: true,
+            persistSession: true,
+            detectSessionInUrl: true,
+        },
+    })
+    : null; // Return null if config is missing
 
 // Create axios instance with auth interceptor
 export const apiClient = axios.create({
