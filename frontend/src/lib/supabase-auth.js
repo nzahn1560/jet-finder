@@ -8,8 +8,27 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://jetfinder-api.YOUR_WORKER_SUBDOMAIN.workers.dev';
 
-// Create Supabase client
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+// Debug: Log environment variables in development
+if (import.meta.env.DEV) {
+    console.log('🔍 Environment Variables:', {
+        VITE_API_URL: API_BASE_URL,
+        VITE_SUPABASE_URL: SUPABASE_URL ? 'SET' : 'MISSING',
+        VITE_SUPABASE_ANON_KEY: SUPABASE_ANON_KEY ? 'SET' : 'MISSING'
+    });
+}
+
+// Validate Supabase config
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.error('❌ Missing Supabase configuration! Site may not work correctly.');
+    console.error('Missing:', {
+        SUPABASE_URL: !SUPABASE_URL,
+        SUPABASE_ANON_KEY: !SUPABASE_ANON_KEY
+    });
+}
+
+// Create Supabase client (will fail gracefully if config is missing)
+export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY 
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
         autoRefreshToken: true,
         persistSession: true,

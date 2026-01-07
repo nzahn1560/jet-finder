@@ -5,6 +5,10 @@ import { BrowserRouter } from "react-router-dom";
 
 import App from "./App.jsx";
 import "./index.css";
+import { checkEnvVars } from "./utils/debug.js";
+
+// Check environment variables on startup
+checkEnvVars();
 
 const queryClient = new QueryClient({
     defaultOptions: {
