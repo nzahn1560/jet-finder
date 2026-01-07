@@ -1,125 +1,108 @@
-# JetSchoolUSA - Cloudflare Deployment
+# Jet Finder Full-Stack Platform
 
-Modern aircraft marketplace built entirely on Cloudflare for global scale and low cost.
+Modern aircraft marketplace and ownership analysis stack featuring:
 
-## 🏗️ Architecture
+- React (Vite + Tailwind CSS) frontend with React Query
+- FastAPI + SQLModel backend with Alembic migrations
+- SQLite database (local dev)
+- Admin review workflow, seeded performance profiles, pricing plans, and listings
+- Docker Compose orchestration & `start.sh` helper script
 
-```
-┌─────────────────────────────────────────┐
-│      Cloudflare Pages (Frontend)        │
-│      React + Vite + Tailwind CSS        │
-│      jetschoolusa.pages.dev             │
-└────────────────┬────────────────────────┘
-                 │ HTTPS
-                 ▼
-┌─────────────────────────────────────────┐
-│    Cloudflare Workers (Backend API)     │
-│    TypeScript + D1 Database + R2        │
-│    jetschoolusa-api.nick-zahn777...     │
-└────────────────┬────────────────────────┘
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-┌─────────────┐    ┌─────────────┐
-│   D1 DB     │    │  R2 Storage │
-│ (SQLite)    │    │ (Media)     │
-└─────────────┘    └─────────────┘
-```
+---
 
-## 📁 Project Structure
+## Directory Layout
 
 ```
-jet-finder/
-├── frontend/              # React frontend (Cloudflare Pages)
-│   ├── src/              # React components & pages
-│   ├── public/           # Static assets
-│   ├── package.json
-│   └── vite.config.js
-│
-├── worker-api/           # Cloudflare Worker backend
-│   ├── src/              # TypeScript API routes
-│   ├── migrations/       # D1 database migrations
-│   ├── wrangler.toml     # Worker configuration
-│   └── package.json
-│
-├── infra/                # Infrastructure scripts
-│   ├── backup-d1.sh      # Database backup
-│   └── smoke-tests.sh    # API tests
-│
-└── README.md
+frontend/      # React client
+backend/       # FastAPI server
+database/      # Alembic migrations, seeds, SQLite db
+docker-compose.yml
+start.sh
 ```
 
-## 🚀 Deployment
+---
 
-### Frontend (Cloudflare Pages)
+## Requirements
 
-1. **Connect GitHub:**
-   - Go to Cloudflare Dashboard → Workers & Pages → Pages
-   - Create project → Connect to Git → GitHub
-   - Select: `nzahn1560/jet-finder`
+- Node.js 20+
+- Python 3.11+
+- Docker & Docker Compose
 
-2. **Build Settings:**
-   - Framework preset: `Vite`
-   - Root directory: `frontend`
-   - Build command: `npm ci && npm run build`
-   - Build output directory: `dist`
+---
 
-3. **Environment Variables (Production):**
-   ```
-   VITE_API_URL=https://jetschoolusa-api.nick-zahn777.workers.dev
-   VITE_SUPABASE_URL=https://thjvacmcpvwxdrfouymp.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-   ```
+## Quick Start
 
-### Backend (Cloudflare Worker)
-
-1. **Deploy Worker:**
-   ```bash
-   cd worker-api
-   npm install
-   npx wrangler deploy
-   ```
-
-2. **Database Setup:**
-   ```bash
-   cd worker-api
-   npx wrangler d1 execute jetschoolusa-db --file=./migrations/0001_initial.sql --remote
-   ```
-
-## 🛠️ Local Development
-
-### Frontend
 ```bash
-cd frontend
-npm install
-npm run dev
+chmod +x start.sh
+./start.sh
 ```
 
-### Backend Worker
+`start.sh` will:
+
+1. Generate `.env` (if missing)
+2. Install backend deps & run Alembic migrations
+3. Seed performance profiles, pricing plans, admin user, and sample listings
+4. Launch frontend + backend via Docker Compose
+
+Services available at:
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000/api
+
+---
+
+## Authentication / Admin
+
+- Seeded admin: `admin@example.com`
+- Temporary password: `Passw0rd!` (force reset recommended)
+- Admin dashboard lives at `/admin`
+- During scaffolding the frontend uses a stub bearer token (`token-1-admin@example.com`) that maps to the seeded admin user; replace with real auth flows in production.
+
+---
+
+## Key Commands
+
 ```bash
-cd worker-api
-npm install
-npx wrangler dev
+# Run migrations
+cd backend && alembic upgrade head
+
+# Seed database
+python database/seed.py
+
+# Run backend locally
+cd backend && uvicorn app.main:app --reload
+
+# Run frontend locally
+cd frontend && npm install && npm run dev
 ```
 
-## 📝 Tech Stack
+---
 
-- **Frontend:** React 18, Vite, Tailwind CSS, React Router, React Query
-- **Backend:** Cloudflare Workers (TypeScript)
-- **Database:** Cloudflare D1 (SQLite)
-- **Storage:** Cloudflare R2 (Images/Videos)
-- **Auth:** Supabase Authentication
-- **Deployment:** Cloudflare Pages + Workers
+## Environment Variables (`.env`)
 
-## 🔐 Secrets
+```
+DATABASE_URL=sqlite:///../database/jetfinder.db
+FRONTEND_ORIGIN=http://localhost:5173
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=Passw0rd!
+```
 
-Never commit these files (already in .gitignore):
-- `token.json`
-- `credentials.json`
-- `.env` files
+Adjust as needed for production deployments.
 
-## 📚 Documentation
+---
 
-- `CLOUDFLARE_PAGES_SETUP.md` - Frontend deployment guide
-- `README_CLOUDFLARE.md` - Architecture overview
-- `worker-api/wrangler.toml` - Worker configuration
+## Features & Status
+
+- [x] React + Tailwind UI shell & pages
+- [x] FastAPI REST API w/ SQLModel models
+- [x] Alembic migrations + seed data
+- [x] Admin approval workflow
+- [x] Pricing plan selection ($50/mo, $150/6mo)
+- [x] Docker-based dev environment
+
+Future enhancements can include JWT auth, file uploads, payment processor integration, and production-ready deployment scripts.
+
+<!-- Trigger rebuild -->
+# Force rebuild with updated API URL
+
+<!-- Rebuild with Railway API URL -->
