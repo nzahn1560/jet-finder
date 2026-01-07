@@ -1,0 +1,15 @@
+{
+    "venvPath": ".",
+    "venv": ".venv",
+    "include": [
+        "backend"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "frontend",
+        "database/migrations/versions"
+    ],
+    "extraPaths": [
+        "./backend"
+    ]
+}

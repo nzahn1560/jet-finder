@@ -1,0 +1,911 @@
+{% extends "base.html" %}
+
+{% block title %}Empty Leg Flights - Jet Finder{% endblock %}
+
+{% block additional_css %}
+<style>
+    /* Aircraft Grid Layout - Square Cards */
+    .aircraft-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .aircraft-card {
+        background: linear-gradient(145deg, #212529, #343a40);
+        border: 1px solid #495057;
+        border-radius: 12px;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        position: relative;
+        aspect-ratio: 1;
+        display: flex;
+        flex-direction: column;
+        height: 350px;
+        width: 350px;
+        margin: 0 auto;
+        cursor: pointer;
+    }
+
+    .aircraft-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px rgba(240, 85, 69, 0.3);
+        border-color: #F05545;
+    }
+
+    .aircraft-image {
+        position: relative;
+        height: 180px;
+        overflow: hidden;
+    }
+
+    .aircraft-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .score-overlay {
+        position: absolute;
+        top: -10px;
+        right: -10px;
+        z-index: 10;
+    }
+
+    .score-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.8rem;
+        color: white;
+        border: 3px solid #212529;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .score-circle.excellent {
+        background: linear-gradient(135deg, #F05545, #d44437);
+    }
+
+    .aircraft-details {
+        padding: 1.25rem;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .aircraft-header {
+        margin-bottom: 0.75rem;
+    }
+
+    .aircraft-name {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #F05545;
+        margin: 0;
+        line-height: 1.3;
+    }
+
+    .aircraft-category {
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
+
+    .aircraft-price-hours {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        background: rgba(240, 85, 69, 0.1);
+        border-radius: 8px;
+    }
+
+    .price-section .price-value {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #F05545;
+    }
+
+    .hours-section {
+        text-align: right;
+    }
+
+    .hours-value {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #17a2b8;
+    }
+
+    .hours-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+    }
+
+    .enhanced-specs-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .spec-item {
+        text-align: center;
+        padding: 0.5rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+    }
+
+    .spec-item:hover {
+        background: rgba(240, 85, 69, 0.1);
+        border-color: rgba(240, 85, 69, 0.3);
+    }
+
+    .spec-value {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #F05545;
+        margin-bottom: 0.25rem;
+    }
+
+    .spec-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .card-actions {
+        margin-top: auto;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        max-width: 120px;
+    }
+
+    .discount-badge {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        background: linear-gradient(135deg, #10b981, #047857);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 50px;
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+
+    .route-display {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .airport-code {
+        background: rgba(240, 85, 69, 0.1);
+        color: #F05545;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 1.2rem;
+    }
+
+    .route-arrow {
+        color: #F05545;
+        font-size: 1.5rem;
+        margin: 0 20px;
+    }
+
+    .urgency-high {
+        background: #ef4444;
+        color: white;
+    }
+
+    .urgency-medium {
+        background: #f59e0b;
+        color: white;
+    }
+
+    .urgency-low {
+        background: #10b981;
+        color: white;
+    }
+
+    .urgency-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .original-price {
+        text-decoration: line-through;
+        color: #6b7280;
+        font-size: 0.9rem;
+    }
+
+    .discounted-price {
+        color: #10b981;
+        font-weight: 700;
+        font-size: 1.1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-5">
+    <div class="row">
+        <div class="col-12 text-center mb-5">
+            <h1 class="display-4 text-white mb-3">Empty Leg Flights</h1>
+            <p class="lead text-muted">Save up to 75% on private jet flights with our empty leg opportunities</p>
+        </div>
+    </div>
+
+    <!-- Search and Filter Controls -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <input type="text" class="form-control" id="search-input" placeholder="Search routes, aircraft...">
+        </div>
+        <div class="col-md-2">
+            <select class="form-control" id="sort-select">
+                <option value="discount">Best Discount</option>
+                <option value="price">Price (Low to High)</option>
+                <option value="departure">Departure Date</option>
+                <option value="urgency">Most Urgent</option>
+                <option value="priority">Priority Match</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-control" id="urgency-filter">
+                <option value="">All Urgency Levels</option>
+                <option value="high">High Urgency</option>
+                <option value="medium">Medium Urgency</option>
+                <option value="low">Low Urgency</option>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary w-100" onclick="findBestMatch()">
+                <i class="fas fa-magic me-1"></i>AI Match
+            </button>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-outline-primary w-100" onclick="showPrioritySettings()">
+                <i class="fas fa-sliders-h me-1"></i>Set Priorities
+            </button>
+        </div>
+    </div>
+
+    <!-- Priority Settings Modal -->
+    <div class="modal fade" id="priorityModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">
+                        <i class="fas fa-sliders-h me-2"></i>Empty Leg Priorities
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Savings Priority</label>
+                            <select class="form-control" id="savings-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium">Medium Priority</option>
+                                <option value="high" selected>High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How important is getting the best discount?</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Timing Priority</label>
+                            <select class="form-control" id="timing-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium" selected>Medium Priority</option>
+                                <option value="high">High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How flexible are you with departure times?</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Aircraft Quality Priority</label>
+                            <select class="form-control" id="quality-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium">Medium Priority</option>
+                                <option value="high" selected>High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How important is aircraft luxury and comfort?</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Route Flexibility Priority</label>
+                            <select class="form-control" id="flexibility-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium" selected>Medium Priority</option>
+                                <option value="high">High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How flexible are you with departure/arrival airports?</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Operator Reputation Priority</label>
+                            <select class="form-control" id="reputation-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium">Medium Priority</option>
+                                <option value="high" selected>High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How important is operator safety and service ratings?</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Urgency Priority</label>
+                            <select class="form-control" id="urgency-priority">
+                                <option value="low">Low Priority</option>
+                                <option value="medium" selected>Medium Priority</option>
+                                <option value="high">High Priority</option>
+                                <option value="critical">Critical Priority</option>
+                            </select>
+                            <small class="text-muted">How quickly do you need to book?</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="applyPrioritySettings()">
+                        <i class="fas fa-check me-1"></i>Apply Priorities
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty Legs Grid -->
+    <div class="row">
+        <div class="col-12">
+            <div class="aircraft-grid" id="empty-legs-grid">
+                <!-- Empty leg cards will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Example empty leg data
+    const emptyLegs = [
+        {
+            id: 1,
+            aircraft: "Gulfstream G650",
+            departure: "KJFK",
+            departureCity: "New York",
+            arrival: "KLAX",
+            arrivalCity: "Los Angeles",
+            departureDate: "2024-01-15",
+            departureTime: "14:00",
+            passengers: 14,
+            originalPrice: 45000,
+            discountedPrice: 11250,
+            discount: 75,
+            urgency: "high",
+            operator: "Elite Aviation",
+            features: ["WiFi", "Full Kitchen", "Bedroom"],
+            reason: "Aircraft repositioning after charter"
+        },
+        {
+            id: 2,
+            aircraft: "Citation CJ3+",
+            departure: "KVNY",
+            departureCity: "Van Nuys",
+            arrival: "KLAS",
+            arrivalCity: "Las Vegas",
+            departureDate: "2024-01-14",
+            departureTime: "10:30",
+            passengers: 6,
+            originalPrice: 8500,
+            discountedPrice: 3400,
+            discount: 60,
+            urgency: "medium",
+            operator: "Pacific Jets",
+            features: ["WiFi", "Refreshments"],
+            reason: "Return flight after delivery"
+        },
+        {
+            id: 3,
+            aircraft: "Bombardier Challenger 350",
+            departure: "KBOS",
+            departureCity: "Boston",
+            arrival: "KMIA",
+            arrivalCity: "Miami",
+            departureDate: "2024-01-16",
+            departureTime: "09:15",
+            passengers: 9,
+            originalPrice: 22000,
+            discountedPrice: 8800,
+            discount: 60,
+            urgency: "low",
+            operator: "Northeast Aviation",
+            features: ["Wide Cabin", "WiFi", "Catering"],
+            reason: "Scheduled maintenance positioning"
+        },
+        {
+            id: 4,
+            aircraft: "Embraer Legacy 450",
+            departure: "KORD",
+            departureCity: "Chicago",
+            arrival: "KHOU",
+            arrivalCity: "Houston",
+            departureDate: "2024-01-15",
+            departureTime: "16:45",
+            passengers: 8,
+            originalPrice: 15000,
+            discountedPrice: 4500,
+            discount: 70,
+            urgency: "high",
+            operator: "Midwest Charter",
+            features: ["Quiet Cabin", "WiFi"],
+            reason: "Crew change positioning"
+        },
+        {
+            id: 5,
+            aircraft: "Cessna Citation Sovereign+",
+            departure: "KPHX",
+            departureCity: "Phoenix",
+            arrival: "KDEN",
+            arrivalCity: "Denver",
+            departureDate: "2024-01-17",
+            departureTime: "11:20",
+            passengers: 9,
+            originalPrice: 12000,
+            discountedPrice: 4800,
+            discount: 60,
+            urgency: "medium",
+            operator: "Desert Sky Aviation",
+            features: ["Spacious Cabin", "WiFi"],
+            reason: "Aircraft repositioning"
+        },
+        {
+            id: 6,
+            aircraft: "Dassault Falcon 2000LXS",
+            departure: "KSEA",
+            departureCity: "Seattle",
+            arrival: "KSJC",
+            arrivalCity: "San Jose",
+            departureDate: "2024-01-14",
+            departureTime: "13:30",
+            passengers: 10,
+            originalPrice: 18000,
+            discountedPrice: 5400,
+            discount: 70,
+            urgency: "high",
+            operator: "Pacific Northwest Jets",
+            features: ["Luxury Interior", "WiFi", "Full Kitchen"],
+            reason: "End of charter series"
+        }
+    ];
+
+    let filteredEmptyLegs = [...emptyLegs];
+    let searchQuery = '';
+    let urgencyFilter = '';
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', function () {
+        renderEmptyLegsGrid();
+        setupEventListeners();
+    });
+
+    function setupEventListeners() {
+        // Search functionality
+        document.getElementById('search-input').addEventListener('input', function () {
+            searchQuery = this.value.toLowerCase();
+            filterAndRenderEmptyLegs();
+        });
+
+        // Sort functionality
+        document.getElementById('sort-select').addEventListener('change', function () {
+            const sortBy = this.value;
+            if (sortBy === 'priority') {
+                // Sort by priority score
+                emptyLegs.sort((a, b) => {
+                    const aScore = calculateEmptyLegPriorityScore(a).totalScore;
+                    const bScore = calculateEmptyLegPriorityScore(b).totalScore;
+                    return bScore - aScore;
+                });
+            } else {
+                // Existing sort logic
+                sortEmptyLegs(sortBy);
+            }
+            renderEmptyLegsGrid();
+        });
+
+        // Urgency filter
+        document.getElementById('urgency-filter').addEventListener('change', function () {
+            urgencyFilter = this.value;
+            filterAndRenderEmptyLegs();
+        });
+    }
+
+    function findBestMatch() {
+        // Simulate AI tool integration for finding best matches
+        const userPreferences = {
+            budget: prompt("What's your budget range? (e.g., under 10000)"),
+            passengers: prompt("How many passengers? (1-14)"),
+            departure: prompt("Preferred departure city or airport code?"),
+            arrival: prompt("Preferred arrival city or airport code?")
+        };
+
+        if (!userPreferences.budget) return;
+
+        // Calculate match scores based on preferences
+        filteredEmptyLegs = emptyLegs.map(leg => ({
+            ...leg,
+            score: calculateEmptyLegScore(leg, userPreferences)
+        })).sort((a, b) => b.score - a.score);
+
+        renderEmptyLegsGrid();
+
+        alert(`Found ${filteredEmptyLegs.length} matches based on your preferences! Results sorted by best match.`);
+    }
+
+    function calculateEmptyLegScore(leg, preferences) {
+        let score = 100;
+
+        // Budget matching
+        const budget = parseInt(preferences.budget);
+        if (budget && leg.discountedPrice > budget) {
+            score -= 30;
+        } else if (budget && leg.discountedPrice <= budget * 0.8) {
+            score += 20; // Great value
+        }
+
+        // Passenger capacity
+        const passengers = parseInt(preferences.passengers);
+        if (passengers && leg.passengers >= passengers) {
+            score += 15;
+        } else if (passengers && leg.passengers < passengers) {
+            score -= 25;
+        }
+
+        // Location matching
+        if (preferences.departure) {
+            const depMatch = leg.departure.toLowerCase().includes(preferences.departure.toLowerCase()) ||
+                leg.departureCity.toLowerCase().includes(preferences.departure.toLowerCase());
+            if (depMatch) score += 25;
+        }
+
+        if (preferences.arrival) {
+            const arrMatch = leg.arrival.toLowerCase().includes(preferences.arrival.toLowerCase()) ||
+                leg.arrivalCity.toLowerCase().includes(preferences.arrival.toLowerCase());
+            if (arrMatch) score += 25;
+        }
+
+        // Urgency bonus (urgent flights = better deals)
+        if (leg.urgency === 'high') score += 15;
+        else if (leg.urgency === 'medium') score += 10;
+
+        // Discount bonus
+        if (leg.discount >= 70) score += 20;
+        else if (leg.discount >= 60) score += 15;
+
+        return Math.max(0, Math.min(100, score));
+    }
+
+    function filterAndRenderEmptyLegs() {
+        filteredEmptyLegs = emptyLegs.filter(leg => {
+            // Search filter
+            if (searchQuery) {
+                const searchMatch = leg.aircraft.toLowerCase().includes(searchQuery) ||
+                    leg.departure.toLowerCase().includes(searchQuery) ||
+                    leg.arrival.toLowerCase().includes(searchQuery) ||
+                    leg.departureCity.toLowerCase().includes(searchQuery) ||
+                    leg.arrivalCity.toLowerCase().includes(searchQuery) ||
+                    leg.operator.toLowerCase().includes(searchQuery);
+                if (!searchMatch) return false;
+            }
+
+            // Urgency filter
+            if (urgencyFilter && leg.urgency !== urgencyFilter) {
+                return false;
+            }
+
+            return true;
+        });
+
+        renderEmptyLegsGrid();
+    }
+
+    function sortEmptyLegs(sortBy) {
+        switch (sortBy) {
+            case 'discount':
+                filteredEmptyLegs.sort((a, b) => b.discount - a.discount);
+                break;
+            case 'price':
+                filteredEmptyLegs.sort((a, b) => a.discountedPrice - b.discountedPrice);
+                break;
+            case 'departure':
+                filteredEmptyLegs.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
+                break;
+            case 'urgency':
+                const urgencyOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+                filteredEmptyLegs.sort((a, b) => urgencyOrder[b.urgency] - urgencyOrder[a.urgency]);
+                break;
+            default:
+                if (filteredEmptyLegs[0] && filteredEmptyLegs[0].score !== undefined) {
+                    filteredEmptyLegs.sort((a, b) => (b.score || 0) - (a.score || 0));
+                }
+                break;
+        }
+
+        renderEmptyLegsGrid();
+    }
+
+    function renderEmptyLegsGrid() {
+        const grid = document.getElementById('empty-legs-grid');
+
+        if (filteredEmptyLegs.length === 0) {
+            grid.innerHTML = `
+            <div class="text-center py-5">
+                <h4 class="text-muted">No empty legs found</h4>
+                <p class="text-muted">Try adjusting your search criteria or check back later for new opportunities</p>
+            </div>
+        `;
+            return;
+        }
+
+        grid.innerHTML = filteredEmptyLegs.map(leg => `
+        <div class="aircraft-card" onclick="showEmptyLegDetails('${leg.id}')">
+            <!-- Aircraft Image -->
+            <div class="aircraft-image">
+                <img src="/static/images/aircraft_placeholder.jpg" alt="Aircraft" class="img-fluid">
+                <!-- Discount overlay -->
+                <div class="score-overlay">
+                    <div class="score-circle excellent">
+                        <span>${leg.discount}% OFF</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="aircraft-details">
+                <!-- Aircraft Name -->
+                <div class="aircraft-header">
+                    <h3 class="aircraft-name">${leg.aircraft}</h3>
+                    <div class="aircraft-category">Empty Leg</div>
+                </div>
+
+                <!-- Price and Route -->
+                <div class="aircraft-price-hours">
+                    <div class="price-section">
+                        <div class="price-value">$${leg.discountedPrice.toLocaleString()}</div>
+                    </div>
+                    <div class="hours-section">
+                        <div class="hours-value">${leg.departureTime}</div>
+                        <div class="hours-label">Time</div>
+                    </div>
+                </div>
+
+                <!-- Route Display -->
+                <div class="enhanced-specs-grid">
+                    <div class="spec-item">
+                        <div class="spec-value">${leg.departure}</div>
+                        <div class="spec-label">From</div>
+                    </div>
+                    <div class="spec-item">
+                        <div class="spec-value">${leg.arrival}</div>
+                        <div class="spec-label">To</div>
+                    </div>
+                    <div class="spec-item">
+                        <div class="spec-value">${leg.passengers}</div>
+                        <div class="spec-label">Passengers</div>
+                    </div>
+                    <div class="spec-item">
+                        <div class="spec-value">${new Date(leg.departureDate).toLocaleDateString()}</div>
+                        <div class="spec-label">Date</div>
+                    </div>
+                    <div class="spec-item">
+                        <div class="spec-value">${leg.urgency}</div>
+                        <div class="spec-label">Urgency</div>
+                    </div>
+                    <div class="spec-item">
+                        <div class="spec-value">${leg.operator}</div>
+                        <div class="spec-label">Operator</div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="card-actions">
+                    <button class="btn btn-outline-primary btn-sm me-2" onclick="event.stopPropagation(); getMoreInfo('${leg.id}')">
+                        <i class="fas fa-info-circle me-1"></i>Details
+                    </button>
+                    <button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation(); bookEmptyLeg('${leg.id}')">
+                        <i class="fas fa-plane me-1"></i>Book
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    }
+
+    function bookEmptyLeg(legId) {
+        const leg = emptyLegs.find(l => l.id === legId);
+        alert(`Booking request submitted for ${leg.aircraft} from ${leg.departureCity} to ${leg.arrivalCity}\\nOur team will contact you within 15 minutes to confirm.`);
+    }
+
+    function getMoreInfo(legId) {
+        const leg = emptyLegs.find(l => l.id === legId);
+        console.log('More info for:', leg);
+        // This would open a detailed modal or navigate to leg details page
+    }
+
+    // Priority system for empty legs
+    let userPriorities = {
+        savings: 'high',
+        timing: 'medium',
+        quality: 'high',
+        flexibility: 'medium',
+        reputation: 'high',
+        urgency: 'medium'
+    };
+
+    function showPrioritySettings() {
+        // Set current values in modal
+        document.getElementById('savings-priority').value = userPriorities.savings;
+        document.getElementById('timing-priority').value = userPriorities.timing;
+        document.getElementById('quality-priority').value = userPriorities.quality;
+        document.getElementById('flexibility-priority').value = userPriorities.flexibility;
+        document.getElementById('reputation-priority').value = userPriorities.reputation;
+        document.getElementById('urgency-priority').value = userPriorities.urgency;
+
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('priorityModal'));
+        modal.show();
+    }
+
+    function applyPrioritySettings() {
+        // Get values from modal
+        userPriorities.savings = document.getElementById('savings-priority').value;
+        userPriorities.timing = document.getElementById('timing-priority').value;
+        userPriorities.quality = document.getElementById('quality-priority').value;
+        userPriorities.flexibility = document.getElementById('flexibility-priority').value;
+        userPriorities.reputation = document.getElementById('reputation-priority').value;
+        userPriorities.urgency = document.getElementById('urgency-priority').value;
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('priorityModal'));
+        modal.hide();
+
+        // Re-render with new priorities
+        renderEmptyLegsGrid();
+    }
+
+    function calculateEmptyLegPriorityScore(leg) {
+        const breakdown = {
+            savings: 0,
+            timing: 0,
+            quality: 0,
+            flexibility: 0,
+            reputation: 0,
+            urgency: 0,
+            totalScore: 0
+        };
+
+        // Savings Priority (0-25% based on user priority)
+        const savingsWeight = getPriorityWeight(userPriorities.savings);
+        breakdown.savings = calculateSavingsScore(leg) * savingsWeight;
+
+        // Timing Priority (0-20% based on user priority)
+        const timingWeight = getPriorityWeight(userPriorities.timing);
+        breakdown.timing = calculateTimingScore(leg) * timingWeight;
+
+        // Quality Priority (0-20% based on user priority)
+        const qualityWeight = getPriorityWeight(userPriorities.quality);
+        breakdown.quality = calculateQualityScore(leg) * qualityWeight;
+
+        // Flexibility Priority (0-15% based on user priority)
+        const flexibilityWeight = getPriorityWeight(userPriorities.flexibility);
+        breakdown.flexibility = calculateFlexibilityScore(leg) * flexibilityWeight;
+
+        // Reputation Priority (0-15% based on user priority)
+        const reputationWeight = getPriorityWeight(userPriorities.reputation);
+        breakdown.reputation = calculateReputationScore(leg) * reputationWeight;
+
+        // Urgency Priority (0-5% based on user priority)
+        const urgencyWeight = getPriorityWeight(userPriorities.urgency);
+        breakdown.urgency = calculateUrgencyScore(leg) * urgencyWeight;
+
+        // Calculate total score
+        breakdown.totalScore = Math.max(0, Math.min(100, Math.round(
+            breakdown.savings + breakdown.timing + breakdown.quality +
+            breakdown.flexibility + breakdown.reputation + breakdown.urgency
+        )));
+
+        return breakdown;
+    }
+
+    function getPriorityWeight(priority) {
+        switch (priority) {
+            case 'critical': return 1.0;
+            case 'high': return 0.8;
+            case 'medium': return 0.5;
+            case 'low': return 0.2;
+            default: return 0.5;
+        }
+    }
+
+    function calculateSavingsScore(leg) {
+        // Score based on discount percentage
+        if (leg.discount >= 70) return 25;
+        if (leg.discount >= 60) return 20;
+        if (leg.discount >= 50) return 15;
+        if (leg.discount >= 40) return 10;
+        if (leg.discount >= 30) return 5;
+        return 0;
+    }
+
+    function calculateTimingScore(leg) {
+        // Score based on departure date proximity
+        const today = new Date();
+        const departureDate = new Date(leg.departureDate);
+        const daysUntilDeparture = Math.ceil((departureDate - today) / (1000 * 60 * 60 * 24));
+
+        if (daysUntilDeparture <= 1) return 20;
+        if (daysUntilDeparture <= 3) return 15;
+        if (daysUntilDeparture <= 7) return 10;
+        if (daysUntilDeparture <= 14) return 5;
+        return 0;
+    }
+
+    function calculateQualityScore(leg) {
+        let score = 10;
+
+        // Aircraft quality ratings
+        const qualityRatings = {
+            'Gulfstream G650': 20,
+            'Gulfstream G450': 18,
+            'Challenger 350': 16,
+            'Citation Latitude': 14,
+            'Citation CJ3+': 12,
+            'King Air 350i': 10
+        };
+
+        score += qualityRatings[leg.aircraft] || 10;
+        return Math.min(20, score);
+    }
+
+    function calculateFlexibilityScore(leg) {
+        let score = 10;
+
+        // Route flexibility (simulated)
+        const routeFlexibility = Math.random() * 10; // Simulated flexibility score
+        score += routeFlexibility;
+
+        return Math.min(15, score);
+    }
+
+    function calculateReputationScore(leg) {
+        let score = 10;
+
+        if (leg.operatorRating >= 4.8) score += 5;
+        if (leg.operatorRating >= 4.5) score += 3;
+        if (leg.operatorVerified) score += 2;
+
+        return Math.min(15, score);
+    }
+
+    function calculateUrgencyScore(leg) {
+        // Score based on time left to book
+        if (leg.timeLeft.includes('hours') || leg.timeLeft.includes('1 day')) return 5;
+        if (leg.timeLeft.includes('2 days') || leg.timeLeft.includes('3 days')) return 3;
+        if (leg.timeLeft.includes('week')) return 1;
+        return 0;
+    }
+</script>
+{% endblock %}

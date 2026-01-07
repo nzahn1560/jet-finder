@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aircraft Selection Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(to bottom, #f0f9ff, #ffffff);
+      min-height: 100vh;
+    }
+    .card {
+      transition: all 0.3s ease;
+    }
+    .card:hover {
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-7xl mx-auto px-4 py-8">
+    <header class="text-center mb-12">
+      <h1 class="text-4xl font-bold text-gray-900 mb-4">Private Jet Selection Tool</h1>
+      <p class="text-lg text-gray-600">Find the perfect aircraft for your needs</p>
+    </header>
+
+    <div class="max-w-3xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden mb-8">
+      <div class="p-8">
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">Basic Requirements</h2>
+        <p class="text-gray-600 mb-6">Let's start with your basic aircraft requirements</p>
+
+        <div class="space-y-6">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Year Model</label>
+            <input type="number" class="w-full px-4 py-2 border border-gray-300 rounded-md" value="1970" min="0">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Passengers</label>
+            <input type="number" class="w-full px-4 py-2 border border-gray-300 rounded-md" value="0" min="0">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Maximum Price ($)</label>
+            <input type="number" class="w-full px-4 py-2 border border-gray-300 rounded-md" value="0" min="0">
+          </div>
+        </div>
+
+        <div class="mt-8 flex justify-end">
+          <button class="px-6 py-2 bg-blue-500 text-white rounded-md text-sm font-medium hover:bg-blue-600 transition-colors">
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+      <div class="p-6 border-b border-gray-200">
+        <div class="flex justify-between items-center">
+          <h2 class="text-2xl font-semibold text-gray-800">Sample Results</h2>
+        </div>
+        <p class="text-gray-600 mt-2">Found 3 matching aircraft</p>
+      </div>
+
+      <div class="p-6 bg-gray-50 border-b border-gray-200">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">Summary Statistics</h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="bg-white p-4 rounded-lg shadow-sm">
+            <h4 class="text-sm font-medium text-gray-500 mb-2">Price Range</h4>
+            <p class="text-lg font-semibold">$1,095,000 - $7,346,000</p>
+            <p class="text-sm text-gray-500">Avg: $3,645,333</p>
+          </div>
+          
+          <div class="bg-white p-4 rounded-lg shadow-sm">
+            <h4 class="text-sm font-medium text-gray-500 mb-2">Range</h4>
+            <p class="text-lg font-semibold">1,004 - 3,059 nm</p>
+            <p class="text-sm text-gray-500">Avg: 2,516 nm</p>
+          </div>
+          
+          <div class="bg-white p-4 rounded-lg shadow-sm">
+            <h4 class="text-sm font-medium text-gray-500 mb-2">Cruise Speed</h4>
+            <p class="text-lg font-semibold">133 - 430 kts</p>
+            <p class="text-sm text-gray-500">Avg: 341 kts</p>
+          </div>
+          
+          <div class="bg-white p-4 rounded-lg shadow-sm">
+            <h4 class="text-sm font-medium text-gray-500 mb-2">Total Cost of Ownership</h4>
+            <p class="text-lg font-semibold">$1,095,000 - $7,346,000</p>
+            <p class="text-sm text-gray-500">Avg: $3,645,333</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
+        <div class="border rounded-lg overflow-hidden transition-all border-gray-200 hover:shadow-md card">
+          <div class="p-4 bg-gray-50 border-b border-gray-200">
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="font-bold text-lg text-gray-900">PHENOM 300</h3>
+                <p class="text-sm text-gray-600">EMBRAER | Business Jet</p>
+              </div>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Compare</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="p-4">
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <p class="text-xs text-gray-500">Year</p>
+                <p class="font-medium">2009</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Price</p>
+                <p class="font-medium">$7,346,000</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Range</p>
+                <p class="font-medium">3,059 nm</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Speed</p>
+                <p class="font-medium">430 kts</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Passengers</p>
+                <p class="font-medium">8</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Hourly Cost</p>
+                <p class="font-medium">$1,212.62</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="border rounded-lg overflow-hidden transition-all border-gray-200 hover:shadow-md card">
+          <div class="p-4 bg-gray-50 border-b border-gray-200">
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="font-bold text-lg text-gray-900">2 TURBINE BEAVER</h3>
+                <p class="text-sm text-gray-600">VIKING/DEHAVILLAND | Turboprop</p>
+              </div>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Compare</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="p-4">
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <p class="text-xs text-gray-500">Year</p>
+                <p class="font-medium">1948</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Price</p>
+                <p class="font-medium">$1,095,000</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Range</p>
+                <p class="font-medium">1,004 nm</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Speed</p>
+                <p class="font-medium">133 kts</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Passengers</p>
+                <p class="font-medium">8</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Hourly Cost</p>
+                <p class="font-medium">$518.62</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="border rounded-lg overflow-hidden transition-all border-gray-200 hover:shadow-md card">
+          <div class="p-4 bg-gray-50 border-b border-gray-200">
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="font-bold text-lg text-gray-900">NEXTANT 400XTi</h3>
+                <p class="text-sm text-gray-600">NEXTANT | Business Jet</p>
+              </div>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="form-checkbox h-5 w-5 text-blue-500">
+                <span class="ml-2 text-sm text-gray-700">Compare</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="p-4">
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <p class="text-xs text-gray-500">Year</p>
+                <p class="font-medium">2014</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Price</p>
+                <p class="font-medium">$2,495,000</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Range</p>
+                <p class="font-medium">4,485 nm</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Speed</p>
+                <p class="font-medium">460 kts</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Passengers</p>
+                <p class="font-medium">7</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500">Hourly Cost</p>
+                <p class="font-medium">$1,142.40</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html> 

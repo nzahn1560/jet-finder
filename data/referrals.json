@@ -1,0 +1,38 @@
+[
+    {
+        "id": "ref-001",
+        "user_id": "user-001",
+        "provider_id": "prov-001",
+        "listing_id": "list-001",
+        "timestamp": "2023-10-15T14:30:00",
+        "status": "contacted",
+        "notes": "Initial contact about annual inspection",
+        "conversion_status": "pending",
+        "conversion_value": null,
+        "conversion_date": null
+    },
+    {
+        "id": "ref-002",
+        "user_id": "user-002",
+        "provider_id": "prov-002",
+        "listing_id": "list-003",
+        "timestamp": "2023-10-16T09:45:00",
+        "status": "contacted",
+        "notes": "Financing inquiry for Cessna Citation",
+        "conversion_status": "converted",
+        "conversion_value": 25000,
+        "conversion_date": "2023-10-25T16:20:00"
+    },
+    {
+        "id": "ref-003",
+        "user_id": "user-001",
+        "provider_id": "prov-005",
+        "listing_id": "list-002",
+        "timestamp": "2023-10-18T11:15:00",
+        "status": "contacted",
+        "notes": "Insurance quote request",
+        "conversion_status": "converted",
+        "conversion_value": 3500,
+        "conversion_date": "2023-10-22T14:10:00"
+    }
+]

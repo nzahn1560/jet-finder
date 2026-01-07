@@ -1,0 +1,14 @@
+<svg width="300" height="80" viewBox="0 0 300 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Red triangular logo element -->
+  <path d="M40 10 L10 60 L70 60 Z" fill="#F05545"/>
+  <path d="M40 10 L25 60 L55 60 Z" fill="#000000"/>
+  
+  <!-- JETSCHOOL text -->
+  <path d="M90 20 H140 V30 H125 V60 H105 V30 H90 V20 Z" fill="#FFFFFF"/>
+  <path d="M145 20 H190 V30 H165 V35 H185 V45 H165 V50 H190 V60 H145 V20 Z" fill="#FFFFFF"/>
+  <path d="M195 20 H215 V50 H235 V60 H195 V20 Z" fill="#FFFFFF"/>
+  <path d="M240 20 H260 V35 H270 V20 H290 V60 H270 V45 H260 V60 H240 V20 Z" fill="#FFFFFF"/>
+  <path d="M295 20 H315 V35 C315 40 320 45 325 45 C330 45 335 40 335 35 V20 H355 V35 C355 50 340 65 325 65 C310 65 295 50 295 35 V20 Z" fill="#FFFFFF"/>
+  <path d="M360 20 H405 V30 H380 V35 H400 V45 H380 V50 H405 V60 H360 V20 Z" fill="#FFFFFF"/>
+  <path d="M410 20 H430 V50 H450 V60 H410 V20 Z" fill="#FFFFFF"/>
+</svg> 
