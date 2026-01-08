@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session
-from flask_cors import CORS
 import os
 import json
 import pandas as pd
@@ -30,32 +29,7 @@ except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
-
-# Configure CORS for production
-import re
-allowed_origins = [
-    'https://jetschoolusa.com',
-    'https://www.jetschoolusa.com',
-    'https://jetschoolusa.pages.dev',
-    'http://localhost:5173',
-    'http://localhost:3000',
-]
-
-# Allow any Cloudflare Pages subdomain
-def is_allowed_origin(origin):
-    if not origin:
-        return False
-    # Check exact matches
-    if origin in allowed_origins:
-        return True
-    # Check if it's a Cloudflare Pages domain
-    if re.match(r'https://.*\.pages\.dev$', origin):
-        return True
-    return False
-
-CORS(app, origins=is_allowed_origin, supports_credentials=True)
-
+app.secret_key = 'your-secret-key-change-this'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -87,8 +61,6 @@ app.register_blueprint(marketplace)
 # Database initialization
 def init_db():
     """Initialize the database with user and subscription tables"""
-    # Ensure instance directory exists
-    os.makedirs('instance', exist_ok=True)
     conn = sqlite3.connect('instance/jet_finder.db')
     cursor = conn.cursor()
     
@@ -1314,260 +1286,232 @@ def get_unified_aircraft_data():
 
 
 
-@app.route('/favicon.ico')
-def favicon():
-    """Handle favicon requests"""
-    return '', 204  # No Content
-
-@app.route('/api/health')
-def health():
-    """Health check endpoint"""
-    try:
-        return jsonify({
-            'status': 'ok',
-            'aircraft_data_loaded': len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0,
-            'timestamp': datetime.now().isoformat()
-        }), 200
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
-
 @app.route('/')
 @app.route('/jet-finder')
 def home():
     """Home route - Jet Finder with comprehensive scoring and pagination"""
-    try:
-        # Get query parameters for filtering
-        budget = request.args.get('budget', type=int)
-        range_requirement = request.args.get('range_requirement', type=int)
-        passengers = request.args.get('passengers', type=int)
-        sort_by = request.args.get('sort', 'score_desc')  # Default to score-based sorting
-        search_query = request.args.get('q', '')
-        page = request.args.get('page', 1, type=int)
-        
-        # Financial analysis filters
-        max_annual_cost = request.args.get('max_annual_cost', type=float)
-        max_hourly_cost = request.args.get('max_hourly_cost', type=float)
-        
-        # Advanced analysis filters
-        min_speed = request.args.get('min_speed', type=int)
-        min_altitude = request.args.get('min_altitude', type=int)
-        max_runway = request.args.get('max_runway', type=int)
-        min_cabin_volume = request.args.get('min_cabin_volume', type=int)
-        fuel_price = request.args.get('fuel_price', type=float)
-        ownership_years = request.args.get('ownership_years', type=int)
-        
-        # Get user priority selections from dropdowns
-        priority_1st = request.args.get('priority_1st', 'best_speed_dollar')
-        priority_2nd = request.args.get('priority_2nd', 'best_range_dollar')
-        priority_3rd = request.args.get('priority_3rd', 'best_performance_dollar')
-        priority_4th = request.args.get('priority_4th', 'best_efficiency_dollar')
-        priority_5th = request.args.get('priority_5th', 'best_all_around_dollar')
-        
-        # Collect all selected priorities (skip empty selections)
-        selected_priorities = []
-        if priority_1st:
-            selected_priorities.append(priority_1st)
-        if priority_2nd:
-            selected_priorities.append(priority_2nd)
-        if priority_3rd:
-            selected_priorities.append(priority_3rd)
-        if priority_4th:
-            selected_priorities.append(priority_4th)
-        if priority_5th:
-            selected_priorities.append(priority_5th)
-        
-        # Calculate equal weight for each selected priority
-        equal_weight = 1.0 / len(selected_priorities) if selected_priorities else 0
-        
-        # Build user priorities dictionary from selections with equal weights
-        user_priorities = {}
-        for priority in selected_priorities:
-            if priority in user_priorities:
-                # If duplicate selection, add the weights together
-                user_priorities[priority] += equal_weight
-            else:
-                user_priorities[priority] = equal_weight
-        
-        # Also check for legacy priority parameters for backwards compatibility
-        legacy_priorities = {
-            'price': float(request.args.get('priority_price', 0)),
-            'range': float(request.args.get('priority_range', 0)),
-            'speed': float(request.args.get('priority_speed', 0)),
-            'passengers': float(request.args.get('priority_passengers', 0)),
-            'total_hourly_cost': float(request.args.get('priority_operating_cost', 0)),
-            'runway_length': float(request.args.get('priority_runway', 0))
+    # Get query parameters for filtering
+    budget = request.args.get('budget', type=int)
+    range_requirement = request.args.get('range_requirement', type=int)
+    passengers = request.args.get('passengers', type=int)
+    sort_by = request.args.get('sort', 'score_desc')  # Default to score-based sorting
+    search_query = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+    
+    # Financial analysis filters
+    max_annual_cost = request.args.get('max_annual_cost', type=float)
+    max_hourly_cost = request.args.get('max_hourly_cost', type=float)
+    
+    # Advanced analysis filters
+    min_speed = request.args.get('min_speed', type=int)
+    min_altitude = request.args.get('min_altitude', type=int)
+    max_runway = request.args.get('max_runway', type=int)
+    min_cabin_volume = request.args.get('min_cabin_volume', type=int)
+    fuel_price = request.args.get('fuel_price', type=float)
+    ownership_years = request.args.get('ownership_years', type=int)
+    
+    # Get user priority selections from dropdowns
+    priority_1st = request.args.get('priority_1st', 'best_speed_dollar')
+    priority_2nd = request.args.get('priority_2nd', 'best_range_dollar')
+    priority_3rd = request.args.get('priority_3rd', 'best_performance_dollar')
+    priority_4th = request.args.get('priority_4th', 'best_efficiency_dollar')
+    priority_5th = request.args.get('priority_5th', 'best_all_around_dollar')
+    
+    # Collect all selected priorities (skip empty selections)
+    selected_priorities = []
+    if priority_1st:
+        selected_priorities.append(priority_1st)
+    if priority_2nd:
+        selected_priorities.append(priority_2nd)
+    if priority_3rd:
+        selected_priorities.append(priority_3rd)
+    if priority_4th:
+        selected_priorities.append(priority_4th)
+    if priority_5th:
+        selected_priorities.append(priority_5th)
+    
+    # Calculate equal weight for each selected priority
+    equal_weight = 1.0 / len(selected_priorities) if selected_priorities else 0
+    
+    # Build user priorities dictionary from selections with equal weights
+    user_priorities = {}
+    for priority in selected_priorities:
+        if priority in user_priorities:
+            # If duplicate selection, add the weights together
+            user_priorities[priority] += equal_weight
+        else:
+            user_priorities[priority] = equal_weight
+    
+    # Also check for legacy priority parameters for backwards compatibility
+    legacy_priorities = {
+        'price': float(request.args.get('priority_price', 0)),
+        'range': float(request.args.get('priority_range', 0)),
+        'speed': float(request.args.get('priority_speed', 0)),
+        'passengers': float(request.args.get('priority_passengers', 0)),
+        'total_hourly_cost': float(request.args.get('priority_operating_cost', 0)),
+        'runway_length': float(request.args.get('priority_runway', 0))
+    }
+    
+    # Merge legacy priorities into user_priorities
+    for key, value in legacy_priorities.items():
+        if value > 0:
+            user_priorities[key] = user_priorities.get(key, 0) + value
+    
+    # Start with unified data (CSV + marketplace)
+    filtered_aircraft = get_unified_aircraft_data()
+
+    
+    # Apply search filter (manufacturer/model/name)
+    if search_query:
+        filtered_aircraft = [
+            aircraft for aircraft in filtered_aircraft
+            if search_query.lower() in aircraft.get('aircraft_name', '').lower() or
+               search_query.lower() in aircraft.get('manufacturer', '').lower() or
+               search_query.lower() in aircraft.get('model', '').lower()
+        ]
+    
+    # Apply basic filters
+    if budget:
+        # Exclude unknown price (0) when budget filter is set
+        filtered_aircraft = [
+            a for a in filtered_aircraft
+            if a.get('price', 0) > 0 and a.get('price', 0) <= budget
+        ]
+    
+    if range_requirement:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('range', 0) >= range_requirement]
+    
+    if passengers:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('passengers', 0) >= passengers]
+    
+    # Apply financial analysis filters
+    if max_annual_cost:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('adjusted_annual_budget', 0) <= max_annual_cost]
+    
+    if max_hourly_cost:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('total_hourly_cost', 0) <= max_hourly_cost]
+    
+    # Apply advanced analysis filters
+    min_speed = request.args.get('min_speed', type=int)
+    min_altitude = request.args.get('min_altitude', type=int)
+    max_runway = request.args.get('max_runway', type=int)
+    min_cabin_volume = request.args.get('min_cabin_volume', type=int)
+    lowest_year = request.args.get('lowest_year', type=int)
+    
+    if min_speed:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('speed', 0) >= min_speed]
+    
+    if min_altitude:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('max_altitude', 0) >= min_altitude]
+    
+    if max_runway:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('runway_length', 0) <= max_runway]
+    
+    if min_cabin_volume:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('cabin_volume', 0) >= min_cabin_volume]
+
+    if lowest_year:
+        filtered_aircraft = [a for a in filtered_aircraft if a.get('year', 0) >= lowest_year]
+    
+    # Build user inputs for scoring
+    user_inputs = {
+        'budget': budget or 0,
+        'range_requirement': range_requirement or 0,
+        'passengers': passengers or 0,
+        'max_annual_cost': max_annual_cost or 0,
+        'max_hourly_cost': max_hourly_cost or 0,
+        'min_speed': request.args.get('min_speed', type=int) or 0,
+        'min_altitude': request.args.get('min_altitude', type=int) or 0,
+        'max_runway': request.args.get('max_runway', type=int) or 0,
+        'min_cabin_volume': request.args.get('min_cabin_volume', type=int) or 0,
+    }
+
+    # Use the filtered set for normalization during this request
+    global SCORING_DATASET
+    SCORING_DATASET = filtered_aircraft
+
+    # Apply final scoring using strict 50/50 methodology
+    for aircraft in filtered_aircraft:
+        score_result = calculate_final_recommendation_score(aircraft, user_priorities, user_inputs)
+        aircraft['display_score'] = score_result['final_score']
+        aircraft['score_breakdown'] = {
+            'final_score': score_result['final_score'],
+            'spreadsheet_score': score_result['spreadsheet_score'],
+            'priority_score': score_result['priority_score'],
+            'value_rating': 'Excellent' if score_result['final_score'] <= 20 else \
+                            'Very Good' if score_result['final_score'] <= 40 else \
+                            'Good' if score_result['final_score'] <= 60 else \
+                            'Fair' if score_result['final_score'] <= 80 else 'Poor'
         }
-        
-        # Merge legacy priorities into user_priorities
-        for key, value in legacy_priorities.items():
-            if value > 0:
-                user_priorities[key] = user_priorities.get(key, 0) + value
-        
-        # Start with unified data (CSV + marketplace)
-        filtered_aircraft = get_unified_aircraft_data()
-        
-        # Apply search filter (manufacturer/model/name)
-        if search_query:
-            filtered_aircraft = [
-                aircraft for aircraft in filtered_aircraft
-                if search_query.lower() in aircraft.get('aircraft_name', '').lower() or
-                   search_query.lower() in aircraft.get('manufacturer', '').lower() or
-                   search_query.lower() in aircraft.get('model', '').lower()
-            ]
-        
-        # Apply basic filters
-        if budget:
-            # Exclude unknown price (0) when budget filter is set
-            filtered_aircraft = [
-                a for a in filtered_aircraft
-                if a.get('price', 0) > 0 and a.get('price', 0) <= budget
-            ]
-        
-        if range_requirement:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('range', 0) >= range_requirement]
-        
-        if passengers:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('passengers', 0) >= passengers]
-        
-        # Apply financial analysis filters
-        if max_annual_cost:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('adjusted_annual_budget', 0) <= max_annual_cost]
-        
-        if max_hourly_cost:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('total_hourly_cost', 0) <= max_hourly_cost]
-        
-        # Apply advanced analysis filters
-        min_speed = request.args.get('min_speed', type=int)
-        min_altitude = request.args.get('min_altitude', type=int)
-        max_runway = request.args.get('max_runway', type=int)
-        min_cabin_volume = request.args.get('min_cabin_volume', type=int)
-        lowest_year = request.args.get('lowest_year', type=int)
-        
-        if min_speed:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('speed', 0) >= min_speed]
-        
-        if min_altitude:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('max_altitude', 0) >= min_altitude]
-        
-        if max_runway:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('runway_length', 0) <= max_runway]
-        
-        if min_cabin_volume:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('cabin_volume', 0) >= min_cabin_volume]
 
-        if lowest_year:
-            filtered_aircraft = [a for a in filtered_aircraft if a.get('year', 0) >= lowest_year]
-        
-        # Build user inputs for scoring
-        user_inputs = {
-            'budget': budget or 0,
-            'range_requirement': range_requirement or 0,
-            'passengers': passengers or 0,
-            'max_annual_cost': max_annual_cost or 0,
-            'max_hourly_cost': max_hourly_cost or 0,
-            'min_speed': request.args.get('min_speed', type=int) or 0,
-            'min_altitude': request.args.get('min_altitude', type=int) or 0,
-            'max_runway': request.args.get('max_runway', type=int) or 0,
-            'min_cabin_volume': request.args.get('min_cabin_volume', type=int) or 0,
-        }
+    # Annotate upgrade/value intelligence to help decide on deals
+    annotate_deal_intelligence(filtered_aircraft, SCORING_DATASET)
+    
+    # Reset scoring dataset after scoring
+    SCORING_DATASET = None
 
-        # Use the filtered set for normalization during this request
-        global SCORING_DATASET
-        SCORING_DATASET = filtered_aircraft
-
-        # Apply final scoring using strict 50/50 methodology
-        for aircraft in filtered_aircraft:
-            score_result = calculate_final_recommendation_score(aircraft, user_priorities, user_inputs)
-            aircraft['display_score'] = score_result['final_score']
-            aircraft['score_breakdown'] = {
-                'final_score': score_result['final_score'],
-                'spreadsheet_score': score_result['spreadsheet_score'],
-                'priority_score': score_result['priority_score'],
-                'value_rating': 'Excellent' if score_result['final_score'] <= 20 else \
-                                'Very Good' if score_result['final_score'] <= 40 else \
-                                'Good' if score_result['final_score'] <= 60 else \
-                                'Fair' if score_result['final_score'] <= 80 else 'Poor'
-            }
-
-        # Annotate upgrade/value intelligence to help decide on deals
-        annotate_deal_intelligence(filtered_aircraft, SCORING_DATASET)
-        
-        # Reset scoring dataset after scoring
-        SCORING_DATASET = None
-
-        # Apply sorting (LOWEST SCORE FIRST)
-        if sort_by == 'score_desc':
-            filtered_aircraft.sort(key=lambda x: x.get('display_score', 0))  # Ascending: lowest is best
-        elif sort_by == 'score_asc':
-            filtered_aircraft.sort(key=lambda x: x.get('display_score', 0), reverse=True)
-        elif sort_by == 'price_asc':
-            filtered_aircraft.sort(key=lambda x: x.get('price', 0))
-        elif sort_by == 'price_desc':
-            filtered_aircraft.sort(key=lambda x: x.get('price', 0), reverse=True)
-        elif sort_by == 'name':
-            filtered_aircraft.sort(key=lambda x: x.get('aircraft_name', ''))
-        elif sort_by == 'passengers':
-            filtered_aircraft.sort(key=lambda x: x.get('passengers', 0), reverse=True)
-        elif sort_by == 'range':
-            filtered_aircraft.sort(key=lambda x: x.get('range', 0), reverse=True)
-        
-        # Implement proper pagination with configurable aircraft per page
-        total = len(filtered_aircraft)
-        per_page = request.args.get('per_page', 12, type=int)
-        pages = (total + per_page - 1) // per_page  # Ceiling division
-        
-        # Calculate start and end indices for current page
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        aircraft_page = filtered_aircraft[start_idx:end_idx]
-        
-        # Create pagination object
-        pagination = {
-            'page': page,
-            'per_page': per_page,
-            'total': total,
-            'pages': pages,
-            'has_prev': page > 1,
-            'has_next': page < pages,
-            'prev_num': page - 1 if page > 1 else None,
-            'next_num': page + 1 if page < pages else None
-        }
-        
-        # Build priority selections for template
-        priority_selections = {
-            'priority_1st': priority_1st,
-            'priority_2nd': priority_2nd,
-            'priority_3rd': priority_3rd,
-            'priority_4th': priority_4th,
-            'priority_5th': priority_5th
-        }
-        
-        return render_template('index.html', 
-                             filtered_aircraft=aircraft_page,
-                             pagination=pagination,
-                             total_aircraft=total,
-                             search_query=search_query,
-                             user_priorities=user_priorities,
-                             priority_selections=priority_selections,
-                             current_criteria={
-                                 'budget': budget,
-                                 'range_requirement': range_requirement,
-                                 'passengers': passengers,
-                                 'max_annual_cost': max_annual_cost,
-                                 'max_hourly_cost': max_hourly_cost,
-                                 'sort_by': sort_by
-                             })
-    except Exception as e:
-        import traceback
-        error_msg = str(e)
-        error_traceback = traceback.format_exc()
-        logger.error(f"Error in home route: {error_msg}\n{error_traceback}")
-        print(f"Error in home route: {error_msg}\n{error_traceback}")
-        # Return a simple error page instead of crashing
-        return f"<h1>Error loading page</h1><p>{error_msg}</p><pre>{error_traceback}</pre>", 500
+    # Apply sorting (LOWEST SCORE FIRST)
+    if sort_by == 'score_desc':
+        filtered_aircraft.sort(key=lambda x: x.get('display_score', 0))  # Ascending: lowest is best
+    elif sort_by == 'score_asc':
+        filtered_aircraft.sort(key=lambda x: x.get('display_score', 0), reverse=True)
+    elif sort_by == 'price_asc':
+        filtered_aircraft.sort(key=lambda x: x.get('price', 0))
+    elif sort_by == 'price_desc':
+        filtered_aircraft.sort(key=lambda x: x.get('price', 0), reverse=True)
+    elif sort_by == 'name':
+        filtered_aircraft.sort(key=lambda x: x.get('aircraft_name', ''))
+    elif sort_by == 'passengers':
+        filtered_aircraft.sort(key=lambda x: x.get('passengers', 0), reverse=True)
+    elif sort_by == 'range':
+        filtered_aircraft.sort(key=lambda x: x.get('range', 0), reverse=True)
+    
+    # Implement proper pagination with configurable aircraft per page
+    total = len(filtered_aircraft)
+    per_page = request.args.get('per_page', 12, type=int)
+    pages = (total + per_page - 1) // per_page  # Ceiling division
+    
+    # Calculate start and end indices for current page
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    aircraft_page = filtered_aircraft[start_idx:end_idx]
+    
+    # Create pagination object
+    pagination = {
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'pages': pages,
+        'has_prev': page > 1,
+        'has_next': page < pages,
+        'prev_num': page - 1 if page > 1 else None,
+        'next_num': page + 1 if page < pages else None
+    }
+    
+    # Build priority selections for template
+    priority_selections = {
+        'priority_1st': priority_1st,
+        'priority_2nd': priority_2nd,
+        'priority_3rd': priority_3rd,
+        'priority_4th': priority_4th,
+        'priority_5th': priority_5th
+    }
+    
+    return render_template('index.html', 
+                         filtered_aircraft=aircraft_page,
+                         pagination=pagination,
+                         total_aircraft=total,
+                         search_query=search_query,
+                         user_priorities=user_priorities,
+                         priority_selections=priority_selections,
+                         current_criteria={
+                             'budget': budget,
+                             'range_requirement': range_requirement,
+                             'passengers': passengers,
+                             'max_annual_cost': max_annual_cost,
+                             'max_hourly_cost': max_hourly_cost,
+                             'sort_by': sort_by
+                         })
 
 # Unify aircraft listings under Jet Finder
 @app.route('/aircraft-listings')
@@ -4867,8 +4811,6 @@ def api_performance_profiles():
 def api_user_listings():
     """API endpoint to get user-created listings"""
     try:
-        # Ensure instance directory exists
-        os.makedirs('instance', exist_ok=True)
         conn = sqlite3.connect('instance/jet_finder.db')
         cursor = conn.cursor()
         
@@ -4957,12 +4899,8 @@ def api_user_listings():
         return jsonify(listings)
         
     except Exception as e:
-        import traceback
-        error_msg = str(e)
-        error_traceback = traceback.format_exc()
-        logger.error(f"Error loading user listings: {error_msg}\n{error_traceback}")
-        print(f"Error loading user listings: {error_msg}\n{error_traceback}")
-        return jsonify({'error': error_msg, 'traceback': error_traceback}), 500
+        print(f"Error loading user listings: {e}")
+        return jsonify([]), 500
 
 @app.route('/api/user-listings', methods=['POST'])
 def api_create_user_listing():
@@ -5498,7 +5436,4 @@ def admin_populate_profiles():
 if __name__ == '__main__':
     with app.app_context():
         init_db()
-    # Use PORT environment variable for production (Railway/Render), fallback to 5015 for local dev
-    port = int(os.environ.get('PORT', 5015))
-    debug = os.environ.get('FLASK_ENV') != 'production'
-    app.run(debug=debug, host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=5015)
