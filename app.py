@@ -1314,6 +1314,11 @@ def get_unified_aircraft_data():
 
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Handle favicon requests"""
+    return '', 204  # No Content
+
 @app.route('/')
 @app.route('/jet-finder')
 def home():
