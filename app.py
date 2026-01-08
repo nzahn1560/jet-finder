@@ -1319,6 +1319,21 @@ def favicon():
     """Handle favicon requests"""
     return '', 204  # No Content
 
+@app.route('/api/health')
+def health():
+    """Health check endpoint"""
+    try:
+        return jsonify({
+            'status': 'ok',
+            'aircraft_data_loaded': len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
 @app.route('/')
 @app.route('/jet-finder')
 def home():
