@@ -1318,7 +1318,8 @@ def get_unified_aircraft_data():
 @app.route('/jet-finder')
 def home():
     """Home route - Jet Finder with comprehensive scoring and pagination"""
-    # Get query parameters for filtering
+    try:
+        # Get query parameters for filtering
     budget = request.args.get('budget', type=int)
     range_requirement = request.args.get('range_requirement', type=int)
     passengers = request.args.get('passengers', type=int)
@@ -1540,6 +1541,14 @@ def home():
                              'max_hourly_cost': max_hourly_cost,
                              'sort_by': sort_by
                          })
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        logger.error(f"Error in home route: {error_msg}\n{error_traceback}")
+        print(f"Error in home route: {error_msg}\n{error_traceback}")
+        # Return a simple error page instead of crashing
+        return f"<h1>Error loading page</h1><p>{error_msg}</p><pre>{error_traceback}</pre>", 500
 
 # Unify aircraft listings under Jet Finder
 @app.route('/aircraft-listings')
