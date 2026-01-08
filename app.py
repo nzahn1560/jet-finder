@@ -87,6 +87,8 @@ app.register_blueprint(marketplace)
 # Database initialization
 def init_db():
     """Initialize the database with user and subscription tables"""
+    # Ensure instance directory exists
+    os.makedirs('instance', exist_ok=True)
     conn = sqlite3.connect('instance/jet_finder.db')
     cursor = conn.cursor()
     
@@ -4837,6 +4839,8 @@ def api_performance_profiles():
 def api_user_listings():
     """API endpoint to get user-created listings"""
     try:
+        # Ensure instance directory exists
+        os.makedirs('instance', exist_ok=True)
         conn = sqlite3.connect('instance/jet_finder.db')
         cursor = conn.cursor()
         
@@ -4925,8 +4929,12 @@ def api_user_listings():
         return jsonify(listings)
         
     except Exception as e:
-        print(f"Error loading user listings: {e}")
-        return jsonify([]), 500
+        import traceback
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        logger.error(f"Error loading user listings: {error_msg}\n{error_traceback}")
+        print(f"Error loading user listings: {error_msg}\n{error_traceback}")
+        return jsonify({'error': error_msg, 'traceback': error_traceback}), 500
 
 @app.route('/api/user-listings', methods=['POST'])
 def api_create_user_listing():
