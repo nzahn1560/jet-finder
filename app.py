@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session
+from flask_cors import CORS
 import os
 import json
 import pandas as pd
@@ -29,7 +30,22 @@ except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
+
+# Configure CORS for production
+allowed_origins = [
+    'https://jetschoolusa.com',
+    'https://www.jetschoolusa.com',
+    'https://jetschoolusa.pages.dev',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    # Allow Railway frontend if deployed there
+    os.environ.get('FRONTEND_URL', ''),
+]
+# Filter out empty strings
+allowed_origins = [origin for origin in allowed_origins if origin]
+CORS(app, origins=allowed_origins, supports_credentials=True)
+
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 
@@ -5436,4 +5452,7 @@ def admin_populate_profiles():
 if __name__ == '__main__':
     with app.app_context():
         init_db()
-    app.run(debug=True, host="0.0.0.0", port=5015)
+    # Use PORT environment variable for production (Railway/Render), fallback to 5015 for local dev
+    port = int(os.environ.get('PORT', 5015))
+    debug = os.environ.get('FLASK_ENV') != 'production'
+    app.run(debug=debug, host="0.0.0.0", port=port)

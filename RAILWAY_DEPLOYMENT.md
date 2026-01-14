@@ -1,138 +1,124 @@
-# Railway Full-Stack Deployment Guide
+# Railway Full Stack Deployment Guide
 
-Deploy your entire Jet Finder app to Railway (Python backend + React frontend).
+Deploy your Python Flask backend + React frontend to Railway.
 
-## Step 1: Create Railway Account & Project
+## Step 1: Create Railway Project
 
 1. Go to https://railway.app
-2. Sign up/Login (use GitHub login for easiest setup)
-3. Click **"New Project"**
-4. Select **"Deploy from GitHub repo"**
+2. Sign in with GitHub
+3. Click "New Project"
+4. Select "Deploy from GitHub repo"
 5. Choose your repository: `nzahn1560/jet-finder`
-6. Railway will auto-detect it's a Python project
+6. Railway will detect your project
 
-## Step 2: Configure Backend Service (Flask API)
+## Step 2: Deploy Backend (Python Flask)
 
-Railway should automatically:
-- Detect `Procfile` (uses gunicorn to run Flask)
-- Detect `requirements.txt` (installs Python dependencies)
-- Detect `runtime.txt` (uses Python 3.10)
+Railway should auto-detect your Python app. If not:
 
-### If Railway doesn't auto-detect:
+1. In your Railway project, click "New Service"
+2. Select "GitHub Repo" → Choose `nzahn1560/jet-finder`
+3. Railway will detect:
+   - `Procfile` → Uses it for start command
+   - `requirements.txt` → Installs Python dependencies
+   - `runtime.txt` → Uses Python 3.10
 
-1. In your Railway project → **Settings**
-2. Under **"Build & Deploy"**:
-   - **Root Directory:** `/` (root)
-   - **Build Command:** (leave blank - Railway handles it)
-   - **Start Command:** Railway will use your `Procfile` automatically
+### Configure Backend Service
 
-## Step 3: Add Environment Variables
+1. Click on your service → Settings
+2. **Start Command:** Should auto-detect from Procfile:
+   ```
+   gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120
+   ```
+3. **Root Directory:** Leave blank (or `/`)
 
-Go to Railway Project → **Variables** tab and add:
+### Add Environment Variables (Backend)
 
-### Required Variables:
+Go to your service → Variables tab, add:
 
-```
-SECRET_KEY=your-random-secret-key-here
-FLASK_ENV=production
-PORT=5000
-```
+- `SECRET_KEY` = (generate a random string, e.g., use `openssl rand -hex 32`)
+- `FLASK_ENV` = `production`
+- `PORT` = (Railway sets this automatically, don't add manually)
+- `STRIPE_SECRET_KEY` = (your Stripe secret key if using)
+- `STRIPE_PUBLISHABLE_KEY` = (your Stripe publishable key if using)
 
-**Generate SECRET_KEY:**
-```bash
-# Run this locally to generate a secret key
-python3 -c "import secrets; print(secrets.token_hex(32))"
-```
+### Get Your Backend URL
 
-### Optional Variables (if you use them):
+1. Go to your service → Settings → Networking
+2. Click "Generate Domain" (or use the auto-generated one)
+3. Copy the URL (e.g., `https://your-app.up.railway.app`)
+4. This is your backend API URL!
 
-```
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_PUBLISHABLE_KEY=pk_live_...
-STRIPE_CHARTER_SEARCH_PRICE_ID=price_...
-STRIPE_EMPTY_LEG_PRICE_ID=price_...
-STRIPE_PARTS_PRICE_ID=price_...
-```
+## Step 3: Deploy Frontend (Optional - or keep on Cloudflare Pages)
 
-## Step 4: Deploy Backend
+**Option A: Deploy Frontend to Railway**
 
-1. Railway will automatically start deploying when you connect the repo
-2. Check the **Deployments** tab to watch the build
-3. Once deployed, Railway will give you a URL like:
-   - `https://jet-finder-production-xxxx.up.railway.app`
-
-## Step 5: Deploy Frontend (Optional - on Railway)
-
-### Option A: Deploy Frontend on Railway Too
-
-1. In your Railway project, click **"+ New"** → **"GitHub Repo"**
-2. Select the same repo: `nzahn1560/jet-finder`
-3. Railway will detect a second service
-4. Configure it:
+1. Add another service in Railway
+2. Select the same repo
+3. Settings:
    - **Root Directory:** `frontend`
    - **Build Command:** `npm ci && npm run build`
-   - **Start Command:** `npx serve dist -s -l $PORT`
-   - **Output Directory:** `dist`
+   - **Start Command:** `npx serve -s dist -l $PORT`
+4. Add environment variables:
+   - `VITE_API_URL` = (your Railway backend URL from Step 2)
+   - `VITE_SUPABASE_URL` = `https://thjvacmcpvwxdrfouymp.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` = (your key)
 
-5. Add Environment Variables to Frontend service:
+**Option B: Keep Frontend on Cloudflare Pages (Recommended)**
+
+- Your frontend is already on Cloudflare Pages
+- Just update `VITE_API_URL` to point to your Railway backend URL
+- This is simpler and faster
+
+## Step 4: Update Frontend to Use Railway Backend
+
+If keeping frontend on Cloudflare Pages:
+
+1. Go to Cloudflare Pages → Your project → Settings → Environment Variables
+2. Update `VITE_API_URL` to your Railway backend URL:
    ```
-   VITE_API_URL=https://your-backend-service-url.up.railway.app
-   VITE_SUPABASE_URL=https://thjvacmcpvwxdrfouymp.supabase.co
-   VITE_SUPABASE_ANON_KEY=your-supabase-key
+   https://your-app.up.railway.app
    ```
+3. Trigger a rebuild
 
-### Option B: Keep Frontend on Cloudflare Pages (Recommended)
+## Step 5: Set Up Database (If Needed)
 
-This is actually better - keep your frontend on Cloudflare Pages (fast CDN) and only deploy the backend to Railway.
+Your Flask app uses SQLite by default. For production:
 
-1. Keep Cloudflare Pages for frontend
-2. Set `VITE_API_URL` in Cloudflare Pages to your Railway backend URL
-3. You get: Fast frontend (Cloudflare) + Full-featured backend (Railway)
+1. In Railway, add a PostgreSQL database:
+   - Click "New" → "Database" → "Add PostgreSQL"
+2. Railway will create a database and set `DATABASE_URL` automatically
+3. Update your Flask app to use PostgreSQL instead of SQLite (optional, SQLite works for small apps)
 
-## Step 6: Get Your Railway Backend URL
+## Step 6: Custom Domain (Optional)
 
-1. After deployment, go to your backend service
-2. Click **"Settings"** → **"Generate Domain"** (if needed)
-3. Copy the public URL (e.g., `https://jet-finder-production.up.railway.app`)
+1. In Railway → Your service → Settings → Networking
+2. Click "Custom Domain"
+3. Add your domain (e.g., `api.jetschoolusa.com`)
+4. Railway will give you DNS records to add in Cloudflare
 
-## Step 7: Update Frontend API URL
+## Quick Start Commands
 
-### If using Cloudflare Pages:
-Update `VITE_API_URL` in Cloudflare Pages to your Railway backend URL.
+```bash
+# Generate a secure SECRET_KEY
+openssl rand -hex 32
 
-### If using Railway for frontend:
-The environment variables you set will be used.
-
-## Step 8: Connect Custom Domain (api.jetschoolusa.com)
-
-1. In Railway → Your backend service → **Settings** → **Domains**
-2. Click **"Custom Domain"**
-3. Enter: `api.jetschoolusa.com`
-4. Railway will show you DNS records to add
-5. Go to Cloudflare DNS and add the CNAME record Railway provides
-6. Wait for DNS propagation (5-10 minutes)
+# Test locally with Railway's PORT
+PORT=8080 gunicorn app:app --bind 0.0.0.0:$PORT
+```
 
 ## Troubleshooting
 
-### Build Fails
+**Build fails:**
 - Check build logs in Railway
-- Verify `requirements.txt` is correct
-- Make sure `Procfile` exists and is correct
+- Make sure `requirements.txt` is correct
+- Verify Python version in `runtime.txt`
 
-### App Crashes on Start
-- Check logs in Railway → Deployments → Logs
-- Verify environment variables are set
-- Make sure `SECRET_KEY` is set
+**App won't start:**
+- Check logs in Railway dashboard
+- Verify `Procfile` is correct
+- Make sure `PORT` environment variable is set (Railway does this automatically)
 
-### API Not Working
-- Check backend logs in Railway
-- Verify CORS is configured (already done in app.py)
-- Make sure the Railway URL is accessible
-
-## Quick Check Commands (in Railway)
-
-Railway provides a terminal - you can SSH in and check:
-- `python --version` (should be 3.10)
-- `gunicorn --version` (should be installed)
-- `ls -la` (see your files)
-
+**API calls fail:**
+- Check CORS settings in `app.py`
+- Verify your Railway backend URL is correct
+- Check environment variables are set
