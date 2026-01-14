@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session
-from flask_cors import CORS
 import os
 import json
 import pandas as pd
@@ -30,21 +29,7 @@ except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
-
-# Configure CORS for production
-allowed_origins = [
-    'https://jetschoolusa.com',
-    'https://www.jetschoolusa.com',
-    'https://jetschoolusa.pages.dev',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    # Allow Railway frontend if deployed there
-    os.environ.get('FRONTEND_URL', ''),
-]
-# Filter out empty strings
-allowed_origins = [origin for origin in allowed_origins if origin]
-CORS(app, origins=allowed_origins, supports_credentials=True)
+app.secret_key = 'your-secret-key-change-this'
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
@@ -77,9 +62,6 @@ app.register_blueprint(marketplace)
 # Database initialization
 def init_db():
     """Initialize the database with user and subscription tables"""
-    # Ensure instance directory exists (needed for Railway/ephemeral filesystems)
-    import os
-    os.makedirs('instance', exist_ok=True)
     conn = sqlite3.connect('instance/jet_finder.db')
     cursor = conn.cursor()
     
@@ -1766,33 +1748,13 @@ def api_airports():
         
         # Load airports data
         import json
-        import os
-        airports = None
-        airports_file = None
-        
-        # Try multiple possible paths (for different deployment environments)
-        possible_paths = [
-            'static/data/airports.json',
-            'airports.json',
-            os.path.join(os.path.dirname(__file__), 'static/data/airports.json'),
-            os.path.join(os.path.dirname(__file__), 'airports.json'),
-        ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        airports = json.load(f)
-                        airports_file = path
-                        logger.info(f"Loaded airports from: {path} ({len(airports) if airports else 0} airports)")
-                        break
-                except Exception as e:
-                    logger.warning(f"Failed to load airports from {path}: {e}")
-                    continue
-        
-        if not airports:
-            logger.error(f"Could not find airports.json in any of these paths: {possible_paths}")
-            return jsonify({'error': 'Airport data file not found'}), 500
+        try:
+            with open('static/data/airports.json', 'r') as f:
+                airports = json.load(f)
+        except FileNotFoundError:
+            # Fallback to root directory
+            with open('airports.json', 'r') as f:
+                airports = json.load(f)
         
         # Search airports by IATA code, ICAO code, name, or city
         matching_airports = []
@@ -1847,7 +1809,7 @@ def api_airports():
         return jsonify(matching_airports[:20])
         
     except Exception as e:
-        logger.error(f"Error in airports API: {e}", exc_info=True)
+        print(f"Error in airports API: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/available-columns')
