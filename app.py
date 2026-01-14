@@ -5475,7 +5475,4 @@ def admin_populate_profiles():
 if __name__ == '__main__':
     with app.app_context():
         init_db()
-    # Use PORT environment variable for production (Railway/Render), fallback to 5015 for local dev
-    port = int(os.environ.get('PORT', 5015))
-    debug = os.environ.get('FLASK_ENV') != 'production'
-    app.run(debug=debug, host="0.0.0.0", port=port)
+    app.run(debug=True, host="0.0.0.0", port=5015)
