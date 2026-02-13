@@ -1,124 +1,101 @@
-# Railway Full Stack Deployment Guide
+# Railway Deployment Guide
 
-Deploy your Python Flask backend + React frontend to Railway.
+## Quick Deploy (5 minutes)
 
-## Step 1: Create Railway Project
+### Step 1: Create Railway Account & Project
 
 1. Go to https://railway.app
-2. Sign in with GitHub
+2. Sign up / Log in (use GitHub to connect)
 3. Click "New Project"
 4. Select "Deploy from GitHub repo"
-5. Choose your repository: `nzahn1560/jet-finder`
-6. Railway will detect your project
+5. Authorize Railway to access your GitHub
+6. Select repository: `nzahn1560/jet-finder`
 
-## Step 2: Deploy Backend (Python Flask)
+### Step 2: Configure Service
 
-Railway should auto-detect your Python app. If not:
+Railway will auto-detect:
+- ✅ Python (from `runtime.txt`)
+- ✅ Start command (from `Procfile`)
+- ✅ Dependencies (from `requirements.txt`)
 
-1. In your Railway project, click "New Service"
-2. Select "GitHub Repo" → Choose `nzahn1560/jet-finder`
-3. Railway will detect:
-   - `Procfile` → Uses it for start command
-   - `requirements.txt` → Installs Python dependencies
-   - `runtime.txt` → Uses Python 3.10
+**If it doesn't auto-detect:**
+- **Root Directory:** `/` (leave blank)
+- **Start Command:** `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120`
 
-### Configure Backend Service
+### Step 3: Add Environment Variables
 
-1. Click on your service → Settings
-2. **Start Command:** Should auto-detect from Procfile:
-   ```
-   gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 2 --timeout 120
-   ```
-3. **Root Directory:** Leave blank (or `/`)
+Go to your service → Variables tab → Add:
 
-### Add Environment Variables (Backend)
-
-Go to your service → Variables tab, add:
-
-- `SECRET_KEY` = (generate a random string, e.g., use `openssl rand -hex 32`)
+**Required:**
+- `SECRET_KEY` = (generate a random string, e.g., use: `openssl rand -hex 32`)
 - `FLASK_ENV` = `production`
-- `PORT` = (Railway sets this automatically, don't add manually)
-- `STRIPE_SECRET_KEY` = (your Stripe secret key if using)
-- `STRIPE_PUBLISHABLE_KEY` = (your Stripe publishable key if using)
+- `PORT` = (Railway sets this automatically, but you can add it if needed)
 
-### Get Your Backend URL
+**Optional (if using):**
+- `STRIPE_SECRET_KEY` = (your Stripe secret key)
+- `STRIPE_PUBLISHABLE_KEY` = (your Stripe publishable key)
+- `STRIPE_CHARTER_SEARCH_PRICE_ID` = (if using)
+- `STRIPE_EMPTY_LEG_PRICE_ID` = (if using)
+- `STRIPE_PARTS_PRICE_ID` = (if using)
 
-1. Go to your service → Settings → Networking
-2. Click "Generate Domain" (or use the auto-generated one)
+### Step 4: Get Your Railway URL
+
+1. Go to your service → Settings
+2. Find "Public Domain" or "Generate Domain"
 3. Copy the URL (e.g., `https://your-app.up.railway.app`)
-4. This is your backend API URL!
 
-## Step 3: Deploy Frontend (Optional - or keep on Cloudflare Pages)
+### Step 5: Connect Custom Domain (Optional)
 
-**Option A: Deploy Frontend to Railway**
+To use `api.jetschoolusa.com`:
 
-1. Add another service in Railway
-2. Select the same repo
-3. Settings:
-   - **Root Directory:** `frontend`
-   - **Build Command:** `npm ci && npm run build`
-   - **Start Command:** `npx serve -s dist -l $PORT`
-4. Add environment variables:
-   - `VITE_API_URL` = (your Railway backend URL from Step 2)
-   - `VITE_SUPABASE_URL` = `https://thjvacmcpvwxdrfouymp.supabase.co`
-   - `VITE_SUPABASE_ANON_KEY` = (your key)
+1. In Railway → Your Service → Settings → Networking
+2. Add Custom Domain: `api.jetschoolusa.com`
+3. Railway will give you DNS instructions
+4. Go to Cloudflare DNS and add the CNAME record Railway provides
 
-**Option B: Keep Frontend on Cloudflare Pages (Recommended)**
+### Step 6: Update Frontend to Use Railway Backend
 
-- Your frontend is already on Cloudflare Pages
-- Just update `VITE_API_URL` to point to your Railway backend URL
-- This is simpler and faster
+**If using Railway backend instead of Cloudflare Worker:**
 
-## Step 4: Update Frontend to Use Railway Backend
-
-If keeping frontend on Cloudflare Pages:
-
-1. Go to Cloudflare Pages → Your project → Settings → Environment Variables
-2. Update `VITE_API_URL` to your Railway backend URL:
-   ```
-   https://your-app.up.railway.app
-   ```
+1. Go to Cloudflare Pages → Settings → Environment Variables
+2. Update `VITE_API_URL` to your Railway URL:
+   - `https://your-app.up.railway.app`
+   - OR `https://api.jetschoolusa.com` (if you set up custom domain)
 3. Trigger a rebuild
-
-## Step 5: Set Up Database (If Needed)
-
-Your Flask app uses SQLite by default. For production:
-
-1. In Railway, add a PostgreSQL database:
-   - Click "New" → "Database" → "Add PostgreSQL"
-2. Railway will create a database and set `DATABASE_URL` automatically
-3. Update your Flask app to use PostgreSQL instead of SQLite (optional, SQLite works for small apps)
-
-## Step 6: Custom Domain (Optional)
-
-1. In Railway → Your service → Settings → Networking
-2. Click "Custom Domain"
-3. Add your domain (e.g., `api.jetschoolusa.com`)
-4. Railway will give you DNS records to add in Cloudflare
-
-## Quick Start Commands
-
-```bash
-# Generate a secure SECRET_KEY
-openssl rand -hex 32
-
-# Test locally with Railway's PORT
-PORT=8080 gunicorn app:app --bind 0.0.0.0:$PORT
-```
 
 ## Troubleshooting
 
-**Build fails:**
+### Build Fails
 - Check build logs in Railway
-- Make sure `requirements.txt` is correct
-- Verify Python version in `runtime.txt`
+- Make sure `requirements.txt` has all dependencies
+- Verify Python version in `runtime.txt` matches Railway's supported versions
 
-**App won't start:**
+### App Won't Start
 - Check logs in Railway dashboard
 - Verify `Procfile` is correct
-- Make sure `PORT` environment variable is set (Railway does this automatically)
+- Make sure `SECRET_KEY` is set
 
-**API calls fail:**
-- Check CORS settings in `app.py`
-- Verify your Railway backend URL is correct
-- Check environment variables are set
+### Database Issues
+- Your app uses SQLite (`instance/jet_finder.db`)
+- Railway's filesystem is ephemeral - data will be lost on redeploy
+- Consider using Railway PostgreSQL addon for persistent storage
+
+### CORS Errors
+- Your Flask app already has CORS configured
+- Make sure `jetschoolusa.com` and `jetschoolusa.pages.dev` are in allowed origins
+
+## Current Setup Recommendation
+
+**Best approach:**
+- ✅ Frontend: Cloudflare Pages (already working)
+- ✅ Backend API: Cloudflare Worker (already deployed at `jetschoolusa-api.nick-zahn777.workers.dev`)
+- ⚠️ Python Flask: Only deploy to Railway if you need features the Worker doesn't have
+
+**You don't need Railway if:**
+- Your Cloudflare Worker handles all API needs
+- You're happy with the current setup
+
+**Deploy to Railway if:**
+- You need Python-specific features
+- You want to use the Flask app's full functionality
+- You need persistent SQLite database (though Railway filesystem is ephemeral)
