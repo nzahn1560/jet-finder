@@ -1,0 +1,4419 @@
+{% extends "base.html" %}
+
+<!-- Rolling Stock Ticker -->
+<div id="stockTicker" class="stock-ticker">
+    <div class="ticker-wrapper">
+        <div class="ticker-content" id="tickerContent">
+            <!-- Dynamic content loaded via JavaScript -->
+        </div>
+    </div>
+</div>
+
+{% block title %}Jet Finder - JetSchool{% endblock %}
+
+{% block additional_css %}
+<!-- Leaflet CSS for maps -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+<!-- Leaflet Geocoder for airport search -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+
+<style>
+    /* Stock Ticker Styles */
+    .stock-ticker {
+        background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
+        border-bottom: 2px solid #F05545;
+        padding: 8px 0;
+        overflow: hidden;
+        white-space: nowrap;
+        position: relative;
+        font-family: 'Rajdhani', sans-serif;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .ticker-wrapper {
+        width: 100%;
+        overflow: hidden;
+    }
+
+    .ticker-content {
+        display: inline-block;
+        animation: scroll-left 60s linear infinite;
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .ticker-item {
+        display: inline-block;
+        margin-right: 40px;
+        padding: 4px 12px;
+        background: rgba(240, 85, 69, 0.1);
+        border-radius: 20px;
+        border: 1px solid rgba(240, 85, 69, 0.3);
+    }
+
+    .ticker-item.positive {
+        color: #00ff88;
+        border-color: rgba(0, 255, 136, 0.3);
+        background: rgba(0, 255, 136, 0.1);
+    }
+
+    .ticker-item.negative {
+        color: #ff4757;
+        border-color: rgba(255, 71, 87, 0.3);
+        background: rgba(255, 71, 87, 0.1);
+    }
+
+    @keyframes scroll-left {
+        0% {
+            transform: translateX(100%);
+        }
+
+        100% {
+            transform: translateX(-100%);
+        }
+    }
+
+    /* Custom styles for route planning */
+    .distance-label {
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+        border: 1px solid #F05545;
+        white-space: nowrap;
+    }
+
+    /* Styling for range ring tooltips */
+    .range-tooltip {
+        background-color: rgba(0, 0, 0, 0.8) !important;
+        color: white !important;
+        border: 1px solid #F05545 !important;
+        border-radius: 4px !important;
+        padding: 5px 10px !important;
+        font-family: 'Rajdhani', sans-serif !important;
+        font-weight: 600 !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+    }
+
+    .range-tooltip:before {
+        border-color: transparent !important;
+    }
+
+    /* Range rings legend styling */
+    .range-legend {
+        font-family: 'Rajdhani', sans-serif;
+        margin-bottom: 10px !important;
+    }
+
+    .range-legend .bg-dark {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        transition: opacity 0.3s;
+    }
+
+    .range-legend:hover .bg-dark {
+        opacity: 0.95;
+    }
+
+    .route-icon {
+        background-color: #F05545;
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        width: 100%;
+        height: 100%;
+    }
+
+    .airport-icon {
+        background-color: #343a40;
+        color: white;
+        border: 2px solid #F05545;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        width: 100%;
+        height: 100%;
+    }
+
+    /* Auto-update notification */
+    .auto-update-info {
+        font-size: 0.8rem;
+        color: #6c757d;
+        font-style: italic;
+        margin-top: 0.25rem;
+    }
+
+    /* Financial inputs styling */
+    .financial-input-group.updating .form-control {
+        border-color: #ffc107;
+        box-shadow: 0 0 0 0.25rem rgba(255, 193, 7, 0.25);
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .form-control.applied {
+        border-color: #28a745;
+        box-shadow: 0 0 0 0.25rem rgba(40, 167, 69, 0.25);
+        animation: pulse-success 1s;
+    }
+
+    @keyframes pulse-success {
+        0% {
+            box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
+        }
+
+        70% {
+            box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
+        }
+
+        100% {
+            box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+        }
+    }
+
+    #aircraft-table.loading {
+        opacity: 0.6;
+        pointer-events: none;
+    }
+
+    /* Custom multi-select styling */
+    .custom-multi-select {
+        max-height: none;
+        height: 38px;
+        /* Match Bootstrap form-control height */
+        overflow: hidden;
+        transition: height 0.3s ease;
+        position: relative;
+    }
+
+    .custom-multi-select:focus-within {
+        height: 38px;
+        overflow: visible;
+        z-index: 1000;
+    }
+
+    .custom-multi-select:focus-within .selected-options {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        box-shadow: 0 0 0 0.25rem rgba(240, 85, 69, 0.25);
+        border-color: #F05545;
+    }
+
+    .custom-multi-select .options-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+        background-color: #212529;
+        border: 1px solid #F05545;
+        border-top: none;
+        border-bottom-left-radius: 4px;
+        border-bottom-right-radius: 4px;
+        z-index: 1001;
+    }
+
+    .custom-multi-select:focus-within .options-list {
+        max-height: 200px;
+        overflow-y: auto;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .custom-multi-select .option-item {
+        padding: 6px 10px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin-bottom: 2px;
+        transition: background-color 0.2s;
+    }
+
+    .custom-multi-select .option-item:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .custom-multi-select .option-item.selected {
+        background-color: rgba(240, 85, 69, 0.2);
+        border-left: 3px solid #F05545;
+    }
+
+    .custom-multi-select .selected-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        min-height: 24px;
+        background-color: #212529;
+        border-radius: 4px;
+    }
+
+    .custom-multi-select .selected-option {
+        background-color: #F05545;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+    }
+
+    .custom-multi-select .selected-option .remove-option {
+        margin-left: 5px;
+        cursor: pointer;
+        opacity: 0.7;
+    }
+
+    .custom-multi-select .selected-option .remove-option:hover {
+        opacity: 1;
+    }
+
+    /* Priority Sorter Styles */
+    .metrics-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .metric-chip {
+        background-color: #495057;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        cursor: grab;
+        user-select: none;
+        border: 1px solid #6c757d;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .metric-chip:hover {
+        background-color: #6c757d;
+        border-color: #adb5bd;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .metric-chip.dragging {
+        opacity: 0.5;
+        cursor: grabbing;
+        transform: rotate(5deg);
+    }
+
+    .metric-chip.in-priority {
+        background-color: #F05545;
+        border-color: #F05545;
+        color: white;
+    }
+
+    .metric-chip.in-priority:hover {
+        background-color: #d63384;
+        border-color: #d63384;
+    }
+
+    .priority-drop-zone {
+        transition: all 0.3s ease;
+        position: relative;
+    }
+
+    .priority-drop-zone.drag-over {
+        border-style: dashed !important;
+        background-color: rgba(240, 85, 69, 0.2) !important;
+        transform: scale(1.02);
+    }
+
+    .priority-drop-zone.has-metric {
+        background-color: rgba(240, 85, 69, 0.1) !important;
+    }
+
+    .priority-drop-zone .placeholder-text {
+        transition: opacity 0.3s ease;
+    }
+
+    .priority-drop-zone.has-metric .placeholder-text {
+        display: none;
+    }
+
+    .priority-slot {
+        animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    .metric-icon {
+        font-size: 0.7rem;
+        opacity: 0.8;
+    }
+
+    /* Preset button animations */
+    .btn-outline-success:hover,
+    .btn-outline-danger:hover,
+    .btn-outline-info:hover,
+    .btn-outline-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .custom-multi-select .selected-option .remove-option {
+        margin-left: 5px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+
+    /* Column selector styling */
+    #column-selector {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .column-toggle {
+        margin-right: 10px;
+        margin-bottom: 10px;
+        white-space: nowrap;
+    }
+
+    .column-toggle label {
+        margin-left: 5px;
+        cursor: pointer;
+    }
+
+    .dropdown-menu.bg-dark .dropdown-header {
+        color: #F05545;
+    }
+
+    /* Individual Metric Scores Styles */
+    .individual-metrics {
+        margin-top: 1rem;
+        padding: 1rem;
+        background-color: rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .individual-metrics h6 {
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .metric-category {
+        background-color: rgba(0, 0, 0, 0.2);
+        padding: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .metric-category h7 {
+        display: block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .metric-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+        padding: 0.25rem 0;
+    }
+
+    .metric-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .metric-row.highlight {
+        background-color: rgba(255, 193, 7, 0.1);
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        margin: 0.25rem -0.5rem;
+    }
+
+    .metric-label {
+        font-size: 0.75rem;
+        color: #adb5bd;
+        min-width: 80px;
+        flex-shrink: 0;
+    }
+
+    .metric-score-bar {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-left: 0.5rem;
+    }
+
+    .score-bar {
+        flex: 1;
+        height: 8px;
+        background: linear-gradient(90deg, #dc3545 0%, #ffc107 50%, #28a745 100%);
+        border-radius: 4px;
+        position: relative;
+        overflow: hidden;
+        min-width: 60px;
+    }
+
+    .score-text {
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: #fff;
+        min-width: 35px;
+        text-align: right;
+    }
+
+    /* Responsive adjustments */
+    @media (min-width: 768px) {
+        .metrics-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+
+    @media (max-width: 767px) {
+        .metric-score-bar {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.25rem;
+        }
+
+        .score-text {
+            text-align: center;
+        }
+    }
+
+    .priority-dropdown {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 10px;
+    }
+
+    /* Custom dropdown multi-select styling */
+    .custom-dropdown {
+        position: relative;
+        height: auto;
+        min-height: 38px;
+        background-color: #212529;
+        border: 1px solid #F05545;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .custom-dropdown.open {
+        z-index: 1000;
+    }
+
+    .custom-dropdown .selected-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding: 5px;
+        min-height: 24px;
+    }
+
+    .custom-dropdown .selected-option {
+        background-color: #F05545;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        margin: 2px;
+    }
+
+    .custom-dropdown .selected-option .remove-option {
+        margin-left: 5px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+
+    .custom-dropdown .options-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 0;
+        overflow: hidden;
+        background-color: #212529;
+        border: 1px solid #F05545;
+        border-top: none;
+        border-bottom-left-radius: 4px;
+        border-bottom-right-radius: 4px;
+        z-index: 1001;
+        transition: max-height 0.3s ease;
+    }
+
+    .custom-dropdown.open .options-dropdown {
+        max-height: 200px;
+        overflow-y: auto;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .custom-dropdown .option-item {
+        padding: 8px 12px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .custom-dropdown .option-item:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .custom-dropdown .option-item.selected {
+        background-color: rgba(240, 85, 69, 0.2);
+        border-left: 3px solid #F05545;
+    }
+
+    .custom-dropdown .option-item[data-value=""] {
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    .custom-dropdown .option-item[data-value=""]:hover {
+        background-color: rgba(108, 117, 125, 0.1);
+    }
+
+    .custom-dropdown .option-item[data-value=""].selected {
+        background-color: rgba(108, 117, 125, 0.2);
+        border-left: 3px solid #6c757d;
+    }
+
+    /* Route planning styles */
+    .airport-results {
+        position: absolute;
+        width: 100%;
+        max-height: 300px;
+        overflow-y: auto;
+        z-index: 1000;
+    }
+
+    .route-item {
+        background-color: rgba(33, 37, 41, 0.8);
+        transition: background-color 0.2s;
+    }
+
+    .route-item:hover {
+        background-color: rgba(33, 37, 41, 1);
+    }
+
+    .route-item .delete-route {
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .route-item:hover .delete-route {
+        opacity: 1;
+    }
+
+    /* Aircraft range circles */
+    .range-circle {
+        stroke-dasharray: 5, 5;
+        animation: dash 20s linear infinite;
+    }
+
+    @keyframes dash {
+        to {
+            stroke-dashoffset: 1000;
+        }
+    }
+
+    /* Route lines */
+    .route-line {
+        stroke-dasharray: 5, 5;
+        animation: dash 20s linear infinite;
+        pointer-events: none;
+    }
+
+    .route-marker {
+        pointer-events: auto;
+        cursor: pointer;
+    }
+
+    /* Airport search results */
+    .airport-results .list-group-item {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        transition: all 0.2s;
+    }
+
+    .airport-results .list-group-item:first-child {
+        border-top: none;
+    }
+
+    .airport-results .list-group-item:last-child {
+        border-bottom: none;
+    }
+
+    .airport-results .list-group-item:hover {
+        background-color: rgba(240, 85, 69, 0.1) !important;
+        border-left: 3px solid #F05545;
+    }
+
+    /* Map container */
+    #map {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: border-color 0.3s;
+    }
+
+    #map:hover {
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Routes container */
+    #routes-container {
+        scrollbar-width: thin;
+        scrollbar-color: #F05545 #212529;
+    }
+
+    #routes-container::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    #routes-container::-webkit-scrollbar-track {
+        background: #212529;
+    }
+
+    #routes-container::-webkit-scrollbar-thumb {
+        background-color: #F05545;
+        border-radius: 3px;
+    }
+
+    /* Add CSS for dark-theme popups */
+    .dark-popup .leaflet-popup-content-wrapper {
+        background-color: #1a202c;
+        color: white;
+        border-radius: 5px;
+        box-shadow: 0 3px 14px rgba(0, 0, 0, 0.4);
+    }
+
+    .dark-popup .leaflet-popup-tip {
+        background-color: #1a202c;
+    }
+
+    .leaflet-container {
+        background-color: #1a202c;
+        outline: 0;
+    }
+
+    /* Improve visibility of map controls on dark background */
+    .leaflet-control-zoom a {
+        background-color: #2d3748 !important;
+        color: white !important;
+        border-color: #4a5568 !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+        background-color: #4a5568 !important;
+    }
+
+    /* Make attribution more visible on dark background */
+    .leaflet-control-attribution {
+        background-color: rgba(0, 0, 0, 0.5) !important;
+        color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    .leaflet-control-attribution a {
+        color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    /* Aircraft count display */
+    .aircraft-count-display {
+        display: inline-block;
+        background-color: #212529;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        margin-left: 10px;
+        border: 1px solid #F05545;
+        font-family: 'Orbitron', sans-serif;
+    }
+
+    .aircraft-count-label {
+        font-size: 0.75rem;
+        color: #adb5bd;
+        margin-right: 5px;
+    }
+
+    .aircraft-count-value {
+        font-weight: 700;
+        color: #F05545;
+    }
+
+    /* Clean Aircraft Grid Layout */
+    .aircraft-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5rem;
+        width: 100%;
+        margin: 0 auto;
+        padding: 0;
+        justify-items: center;
+        align-items: start;
+    }
+
+    /* Clean Container Layout */
+    .aircraft-listings-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 0 2rem;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .aircraft-card {
+        background: linear-gradient(145deg, #1a1a1a, #2d2d2d);
+        border: 1px solid #404040;
+        border-radius: 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        height: 520px;
+        width: 100%;
+        max-width: 310px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        align-self: stretch;
+    }
+
+    .aircraft-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 16px 48px rgba(240, 85, 69, 0.3);
+        border-color: #F05545;
+    }
+
+    .aircraft-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .aircraft-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+        border-color: #F05545;
+    }
+
+    .aircraft-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px rgba(240, 85, 69, 0.3);
+        border-color: #F05545;
+    }
+
+    .aircraft-image {
+        height: 250px;
+        overflow: hidden;
+        background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .aircraft-image::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.3) 100%);
+        z-index: 1;
+    }
+
+    .aircraft-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 2;
+        position: relative;
+    }
+
+    .aircraft-card:hover .aircraft-image img {
+        transform: scale(1.05);
+    }
+
+    .final-score-overlay {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        z-index: 10;
+    }
+
+    .final-score-badge {
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        font-weight: 800;
+        text-align: center;
+        min-width: 70px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+        border: 3px solid rgba(255, 255, 255, 0.4);
+        backdrop-filter: blur(10px);
+        background: rgba(0, 0, 0, 0.8);
+    }
+
+    .final-score-badge.excellent {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: white;
+        border-color: rgba(40, 167, 69, 0.6);
+    }
+
+    .final-score-badge.very-good {
+        background: linear-gradient(135deg, #007bff, #17a2b8);
+        color: white;
+        border-color: rgba(0, 123, 255, 0.6);
+    }
+
+    .final-score-badge.good {
+        background: linear-gradient(135deg, #ffc107, #fd7e14);
+        color: #000;
+        border-color: rgba(255, 193, 7, 0.6);
+    }
+
+    .final-score-badge.fair {
+        background: linear-gradient(135deg, #6c757d, #495057);
+        color: white;
+        border-color: rgba(108, 117, 125, 0.6);
+    }
+
+    .final-score-badge.poor {
+        background: linear-gradient(135deg, #dc3545, #c82333);
+        color: white;
+        border-color: rgba(220, 53, 69, 0.6);
+    }
+
+    .aircraft-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .aircraft-card:hover .aircraft-image img {
+        transform: scale(1.05);
+    }
+
+    .aircraft-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .score-overlay {
+        position: absolute;
+        top: -10px;
+        right: -10px;
+        z-index: 10;
+    }
+
+    .score-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.9rem;
+        color: white;
+        border: 3px solid #212529;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .score-circle.excellent {
+        background: linear-gradient(135deg, #F05545, #d44437);
+    }
+
+    .score-circle.very-good {
+        background: linear-gradient(135deg, #ff6b5b, #F05545);
+    }
+
+    .score-circle.good {
+        background: linear-gradient(135deg, #ff8a80, #ff6b5b);
+    }
+
+    .score-circle.fair {
+        background: linear-gradient(135deg, #ffab91, #ff8a80);
+    }
+
+    .score-circle.poor {
+        background: linear-gradient(135deg, #ffcdd2, #ffab91);
+    }
+
+    .aircraft-content {
+        padding: 1rem;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
+        overflow-y: auto;
+        min-height: 350px;
+    }
+
+    .aircraft-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 0.5rem;
+    }
+
+    .aircraft-title {
+        flex: 1;
+    }
+
+    .aircraft-name {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #F05545;
+        margin: 0 0 0.25rem 0;
+        line-height: 1.2;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .aircraft-category {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .score-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        min-width: 40px;
+        text-align: center;
+    }
+
+    .aircraft-info {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.4rem;
+        margin-bottom: 0.25rem;
+        flex-shrink: 0;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.75rem;
+    }
+
+    .info-item {
+        flex: 1;
+    }
+
+    .info-label {
+        font-size: 0.65rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.2rem;
+    }
+
+    .info-value {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #F05545;
+    }
+
+    .specifications {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.4rem;
+        margin-bottom: 0.25rem;
+        flex-shrink: 0;
+    }
+
+    .spec-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.4rem;
+    }
+
+    .spec-item {
+        text-align: center;
+    }
+
+    .spec-value {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #17a2b8;
+        margin-bottom: 0.2rem;
+    }
+
+    .spec-label {
+        font-size: 0.6rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .aircraft-name {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #F05545;
+        margin: 0;
+        line-height: 1.3;
+    }
+
+    .aircraft-category {
+        font-size: 0.75rem;
+        color: #6c757d;
+    }
+
+    .aircraft-price-hours {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        background: rgba(240, 85, 69, 0.1);
+        border-radius: 8px;
+    }
+
+    .price-section .price-value {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #F05545;
+    }
+
+    .hours-section {
+        text-align: right;
+    }
+
+    .hours-value {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #17a2b8;
+    }
+
+    .hours-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+    }
+
+    .enhanced-specs-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 0;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .operating-costs {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.3rem;
+        margin-bottom: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .cost-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.1rem;
+    }
+
+    .cost-label {
+        font-size: 0.6rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .cost-value {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #28a745;
+    }
+
+    .cost-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.25rem 0;
+        border-bottom: 1px solid rgba(108, 117, 125, 0.2);
+    }
+
+    .cost-item:last-child {
+        border-bottom: none;
+    }
+
+    .cost-label {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    .cost-value {
+        font-size: 0.9rem;
+        font-weight: bold;
+        color: #17a2b8;
+    }
+
+    .priority-performance {
+        background: rgba(255, 193, 7, 0.05);
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .priority-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #ffc107;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .priority-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+    }
+
+    .priority-item {
+        padding: 0.5rem;
+        border-radius: 4px;
+        text-align: center;
+        font-size: 0.7rem;
+    }
+
+    .priority-label {
+        font-size: 0.65rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+
+    .priority-value {
+        font-weight: 600;
+    }
+
+    .priority-header {
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: #ffc107;
+        margin-bottom: 0.5rem;
+    }
+
+    .priority-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+    }
+
+    .priority-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
+
+    .priority-item.excellent {
+        background: rgba(40, 167, 69, 0.2);
+        color: #28a745;
+    }
+
+    .priority-item.very-good {
+        background: rgba(23, 162, 184, 0.2);
+        color: #17a2b8;
+    }
+
+    .priority-item.good {
+        background: rgba(255, 193, 7, 0.2);
+        color: #ffc107;
+    }
+
+    .priority-item.fair {
+        background: rgba(253, 126, 20, 0.2);
+        color: #fd7e14;
+    }
+
+    .priority-item.poor {
+        background: rgba(220, 53, 69, 0.2);
+        color: #dc3545;
+    }
+
+    .priority-item.neutral {
+        background: rgba(108, 117, 125, 0.2);
+        color: #6c757d;
+    }
+
+    .priority-label {
+        font-weight: bold;
+    }
+
+    .priority-value {
+        font-weight: bold;
+    }
+
+    .card-actions {
+        margin-top: auto;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+        padding-top: 0.5rem;
+        border-top: 2px solid rgba(240, 85, 69, 0.2);
+        flex-shrink: 0;
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        font-size: 0.8rem;
+        font-weight: 600;
+        padding: 0.75rem;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .card-actions .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        font-size: 0.75rem;
+        padding: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        max-width: 120px;
+    }
+
+    /* Pagination Styling */
+    .pagination .page-link {
+        background: linear-gradient(145deg, #212529, #343a40);
+        border: 1px solid #495057;
+        color: #F05545;
+        padding: 0.75rem 1rem;
+        margin: 0 2px;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .pagination .page-link:hover {
+        background: linear-gradient(145deg, #F05545, #d44437);
+        border-color: #F05545;
+        color: white;
+        transform: translateY(-2px);
+    }
+
+    .pagination .page-item.active .page-link {
+        background: linear-gradient(135deg, #F05545, #d44437);
+        border-color: #F05545;
+        color: white;
+        box-shadow: 0 4px 12px rgba(240, 85, 69, 0.3);
+    }
+
+    .pagination .page-item.disabled .page-link {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.5);
+        cursor: not-allowed;
+    }
+
+    /* Responsive Grid Adjustments */
+    @media (max-width: 1200px) {
+        .aircraft-listings-container {
+            max-width: 1200px;
+            padding: 0 1rem;
+        }
+
+        .aircraft-grid {
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.75rem;
+            padding: 0 0.5rem;
+            justify-items: start;
+        }
+
+        .aircraft-card {
+            max-width: 280px;
+            height: 500px;
+        }
+
+        .aircraft-image {
+            height: 160px;
+        }
+
+        .aircraft-content {
+            min-height: 320px;
+            padding: 0.6rem;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .aircraft-listings-container {
+            max-width: 100%;
+            padding: 0 1rem;
+        }
+
+        .aircraft-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            padding: 0;
+            justify-items: start;
+        }
+
+        .aircraft-card {
+            max-width: 100%;
+            height: 480px;
+        }
+
+        .aircraft-image {
+            height: 140px;
+        }
+
+        .aircraft-content {
+            min-height: 320px;
+            padding: 0.6rem;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .aircraft-listings-container {
+            max-width: 100%;
+            padding: 0 0.5rem;
+        }
+
+        .aircraft-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            padding: 0;
+            justify-items: start;
+        }
+
+        .aircraft-card {
+            max-width: 100%;
+            height: 450px;
+        }
+
+        .aircraft-image {
+            height: 120px;
+        }
+
+        .aircraft-content {
+            min-height: 310px;
+            padding: 0.5rem;
+        }
+    }
+
+    /* Sorting Controls Styles */
+    .sorting-controls {
+        background: linear-gradient(145deg, #212529, #343a40);
+        border: 1px solid #495057;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .sorting-controls .form-select {
+        background: #343a40;
+        border: 1px solid #495057;
+        color: white;
+        border-radius: 8px;
+    }
+
+    .sorting-controls .form-select:focus {
+        background: #495057;
+        border-color: #F05545;
+        color: white;
+        box-shadow: 0 0 0 0.2rem rgba(240, 85, 69, 0.25);
+    }
+
+    .sorting-controls .form-select option {
+        background: #343a40;
+        color: white;
+    }
+
+    .sorting-controls .btn-group .btn {
+        background: #343a40;
+        border: 1px solid #495057;
+        color: #adb5bd;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .sorting-controls .btn-group .btn:hover,
+    .sorting-controls .btn-group .btn.active {
+        background: #F05545;
+        border-color: #F05545;
+        color: white;
+    }
+
+    .sorting-controls .btn-group .btn:first-child {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    .sorting-controls .btn-group .btn:last-child {
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+    }
+
+    /* List View Styles */
+    .aircraft-grid.list-view {
+        display: block;
+    }
+
+    .aircraft-grid.list-view .aircraft-card {
+        display: flex;
+        flex-direction: row;
+        height: auto;
+        min-height: 200px;
+        max-height: none;
+        margin-bottom: 1rem;
+    }
+
+    .aircraft-grid.list-view .aircraft-image {
+        width: 200px;
+        height: 200px;
+        flex-shrink: 0;
+    }
+
+    .aircraft-grid.list-view .aircraft-details {
+        flex: 1;
+        padding: 1.5rem;
+    }
+
+    .aircraft-grid.list-view .enhanced-specs-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+
+    .aircraft-grid.list-view .operating-costs {
+        display: flex;
+        gap: 2rem;
+        margin: 1rem 0;
+    }
+
+    .aircraft-grid.list-view .priority-indicators {
+        margin: 1rem 0;
+    }
+
+    .aircraft-grid.list-view .card-actions {
+        margin-top: auto;
+    }
+
+    /* Professional Action Buttons */
+    .card-actions {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 0.75rem;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        font-size: 0.85rem;
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        font-weight: 600;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-width: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .card-actions .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-actions .btn-outline-primary {
+        border-color: #3b82f6;
+        color: #3b82f6;
+    }
+
+    .card-actions .btn-outline-primary:hover {
+        background: #3b82f6;
+        border-color: #3b82f6;
+        color: white;
+    }
+
+    .card-actions .btn-outline-success {
+        border-color: #10b981;
+        color: #10b981;
+    }
+
+    .card-actions .btn-outline-success:hover {
+        background: #10b981;
+        border-color: #10b981;
+        color: white;
+    }
+
+    /* Professional Aircraft Header */
+    .aircraft-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1.25rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .aircraft-title-section {
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid rgba(240, 85, 69, 0.3);
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .aircraft-title-section::after {
+        content: '';
+        position: absolute;
+        bottom: -2px;
+        left: 0;
+        width: 50px;
+        height: 2px;
+        background: linear-gradient(90deg, #F05545, transparent);
+    }
+
+    .score-section {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.3rem;
+        margin-bottom: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .score-section:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .score-header {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-bottom: 0.1rem;
+    }
+
+    .score-header i {
+        font-size: 0.6rem;
+        color: #6c757d;
+    }
+
+    .score-header span {
+        font-size: 0.6rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .score-display {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .score-value {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #F05545;
+    }
+
+    .score-label {
+        font-size: 0.55rem;
+        color: #6c757d;
+    }
+
+    .card-actions {
+        display: flex;
+        gap: 0.25rem;
+        padding: 0.3rem;
+        margin-top: auto;
+        flex-shrink: 0;
+    }
+
+    .card-actions .btn {
+        flex: 1;
+        font-size: 0.6rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .informational-score .score-header {
+        color: #17a2b8;
+    }
+
+    .priority-score .score-header {
+        color: #ffc107;
+    }
+
+    .score-display {
+        text-align: center;
+    }
+
+    .score-value {
+        font-size: 1.25rem;
+        font-weight: 800;
+        margin-bottom: 0.25rem;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .informational-score .score-value {
+        color: #17a2b8;
+    }
+
+    .priority-score .score-value {
+        color: #ffc107;
+    }
+
+    .score-label {
+        font-size: 0.65rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .aircraft-name {
+        font-size: 1.2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        line-height: 1.3;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+    }
+
+    .aircraft-category {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        margin-bottom: 0;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .score-display {
+        margin-left: 0.75rem;
+    }
+
+    .score-badge {
+        padding: 0.5rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-align: center;
+        min-width: 50px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .score-badge.excellent {
+        background: linear-gradient(135deg, #00ff88, #00cc6a);
+        color: #000;
+    }
+
+    .score-badge.very-good {
+        background: linear-gradient(135deg, #4CAF50, #45a049);
+        color: white;
+    }
+
+    .score-badge.good {
+        background: linear-gradient(135deg, #ffd700, #ffb347);
+        color: #000;
+    }
+
+    .score-badge.fair {
+        background: linear-gradient(135deg, #ff9800, #f57c00);
+        color: white;
+    }
+
+    .score-badge.poor {
+        background: linear-gradient(135deg, #ff4757, #ee5a52);
+        color: white;
+    }
+
+    /* Enhanced Aircraft Details */
+    .aircraft-details {
+        overflow: visible;
+        padding: 1.5rem;
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(180deg, rgba(45, 45, 45, 0.8), rgba(26, 26, 26, 0.9));
+    }
+
+    /* Professional Specifications Grid */
+    .enhanced-specs-grid {
+        margin: 1.5rem 0;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.75rem;
+        padding: 1rem;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .spec-item {
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        transition: all 0.3s ease;
+    }
+
+    .spec-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+        transform: translateY(-2px);
+    }
+
+    .spec-value {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin-bottom: 0.25rem;
+    }
+
+    .spec-label {
+        font-size: 0.7rem;
+        color: #9ca3af;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* Professional Operating Costs */
+    .operating-costs {
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background: rgba(240, 85, 69, 0.1);
+        border-radius: 12px;
+        border: 1px solid rgba(240, 85, 69, 0.2);
+    }
+
+    .cost-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+    }
+
+    .cost-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .cost-label {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        font-weight: 500;
+    }
+
+    .cost-value {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #F05545;
+    }
+
+    /* Professional Priority Indicators */
+    .priority-indicators {
+        margin: 1.5rem 0;
+    }
+
+    .priority-header {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #ffffff;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+    }
+
+    .priority-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+    }
+
+    .priority-item {
+        padding: 0.5rem;
+        border-radius: 8px;
+        text-align: center;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        transition: all 0.3s ease;
+    }
+
+    .priority-item:hover {
+        background: rgba(255, 255, 255, 0.08);
+        transform: translateY(-2px);
+    }
+
+    .priority-label {
+        font-size: 0.7rem;
+        color: #9ca3af;
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+    }
+
+    .priority-value {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: #ffffff;
+    }
+
+    /* Ensure proper spacing */
+    .aircraft-card {
+        overflow: visible;
+        min-height: 400px;
+        max-height: none;
+    }
+
+    /* Aircraft Count Display */
+    .aircraft-count-info {
+        text-align: right;
+        background: rgba(240, 85, 69, 0.1);
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        border: 1px solid rgba(240, 85, 69, 0.2);
+    }
+
+    .aircraft-count-info #resultsCount {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0;
+        font-size: 0.9rem;
+    }
+
+    #currentCount {
+        color: #F05545;
+        font-weight: 700;
+    }
+
+    #totalCount {
+        color: #17a2b8;
+        font-weight: 700;
+    }
+
+    .count-details {
+        margin-top: 0.25rem;
+    }
+
+    .count-details small {
+        font-size: 0.75rem;
+        opacity: 0.8;
+    }
+
+    .aircraft-price {
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: #28a745;
+        margin-bottom: 1rem;
+    }
+
+    .key-specs-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .spec-item {
+        text-align: center;
+        padding: 0.75rem 0.5rem;
+        background: #343a40;
+        border-radius: 8px;
+        border: 1px solid #495057;
+    }
+
+    .spec-value {
+        font-size: 1rem;
+        font-weight: bold;
+        color: #F05545;
+        margin-bottom: 0.25rem;
+    }
+
+    .spec-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .operating-cost {
+        background: #2c3034;
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid #28a745;
+    }
+
+    .cost-label {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+
+    .cost-value {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #28a745;
+    }
+
+    .value-rating {
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+    }
+
+    .value-rating.excellent {
+        background: rgba(40, 167, 69, 0.2);
+        color: #28a745;
+        border: 1px solid rgba(40, 167, 69, 0.3);
+    }
+
+    .value-rating.very-good {
+        background: rgba(23, 162, 184, 0.2);
+        color: #17a2b8;
+        border: 1px solid rgba(23, 162, 184, 0.3);
+    }
+
+    .value-rating.good {
+        background: rgba(255, 193, 7, 0.2);
+        color: #ffc107;
+        border: 1px solid rgba(255, 193, 7, 0.3);
+    }
+
+    .value-rating.fair {
+        background: rgba(253, 126, 20, 0.2);
+        color: #fd7e14;
+        border: 1px solid rgba(253, 126, 20, 0.3);
+    }
+
+    .value-rating.poor {
+        background: rgba(220, 53, 69, 0.2);
+        color: #dc3545;
+        border: 1px solid rgba(220, 53, 69, 0.3);
+    }
+
+    .card-actions {
+        margin-top: auto;
+        text-align: center;
+    }
+
+    .card-actions .btn {
+        width: 100%;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+
+    .score-breakdown {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: linear-gradient(135deg, rgba(0, 123, 255, 0.1) 0%, rgba(40, 167, 69, 0.1) 100%);
+        border-radius: 12px;
+        border-left: 4px solid #F05545;
+    }
+
+    .score-breakdown h6 {
+        color: #F05545;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+    }
+
+    .score-breakdown h6 i {
+        margin-right: 8px;
+    }
+
+    .score-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .score-metric {
+        text-align: center;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+    }
+
+    .score-metric .metric-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: white;
+        margin-bottom: 2px;
+    }
+
+    .score-metric .metric-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .value-rating {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-align: center;
+        margin-top: 8px;
+    }
+
+    .value-rating.excellent {
+        background: rgba(40, 167, 69, 0.9);
+        color: white;
+    }
+
+    .value-rating.very-good {
+        background: rgba(0, 123, 255, 0.9);
+        color: white;
+    }
+
+    .value-rating.good {
+        background: rgba(255, 193, 7, 0.9);
+        color: #000;
+    }
+
+    .value-rating.fair {
+        background: rgba(108, 117, 125, 0.9);
+        color: white;
+    }
+
+    .value-rating.poor {
+        background: rgba(220, 53, 69, 0.9);
+        color: white;
+    }
+
+    .aircraft-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+    }
+
+    .aircraft-actions button {
+        flex: 1;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        transition: all 0.2s ease;
+        border: 1px solid;
+    }
+
+    .aircraft-actions .btn-outline-info {
+        color: #17a2b8;
+        border-color: #17a2b8;
+        background: transparent;
+    }
+
+    .aircraft-actions .btn-outline-info:hover {
+        background: #17a2b8;
+        color: white;
+        transform: translateY(-1px);
+    }
+
+    /* Score Overlay Styles */
+    .score-overlay {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 10;
+    }
+
+    .score-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.8rem;
+        color: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .score-circle.excellent {
+        background: linear-gradient(135deg, #28a745, #20c997);
+    }
+
+    .score-circle.very-good {
+        background: linear-gradient(135deg, #007bff, #17a2b8);
+    }
+
+    .score-circle.good {
+        background: linear-gradient(135deg, #ffc107, #fd7e14);
+    }
+
+    .score-circle.fair {
+        background: linear-gradient(135deg, #6c757d, #495057);
+    }
+
+    .score-circle.poor {
+        background: linear-gradient(135deg, #dc3545, #e83e8c);
+    }
+
+    /* Aircraft Category Styles */
+    .aircraft-category {
+        background: rgba(240, 85, 69, 0.2);
+        color: #F05545;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border: 1px solid rgba(240, 85, 69, 0.3);
+    }
+
+    /* Performance Metrics Styles */
+    .performance-metrics {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: rgba(23, 162, 184, 0.1);
+        border-radius: 12px;
+        border-left: 4px solid #17a2b8;
+    }
+
+    .performance-metrics h6 {
+        color: #17a2b8;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+    }
+
+    .performance-metrics h6 i {
+        margin-right: 8px;
+    }
+
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+
+    .metric-item {
+        text-align: center;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        transition: background 0.2s ease;
+    }
+
+    .metric-item:hover {
+        background: rgba(23, 162, 184, 0.1);
+    }
+
+    .metric-item .metric-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+
+    .metric-item .metric-value {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: white;
+    }
+
+    /* Cost Analysis Styles */
+    .cost-analysis {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: rgba(40, 167, 69, 0.1);
+        border-radius: 12px;
+        border-left: 4px solid #28a745;
+    }
+
+    .cost-analysis h6 {
+        color: #28a745;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+    }
+
+    .cost-analysis h6 i {
+        margin-right: 8px;
+    }
+
+    .cost-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+
+    .cost-item {
+        text-align: center;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        transition: background 0.2s ease;
+    }
+
+    .cost-item:hover {
+        background: rgba(40, 167, 69, 0.1);
+    }
+
+    .cost-item .cost-label {
+        font-size: 0.7rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+
+    .cost-item .cost-value {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: #28a745;
+    }
+
+    /* Value Performance Metrics Styles */
+    .value-metrics {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: rgba(255, 193, 7, 0.1);
+        border-radius: 12px;
+        border-left: 4px solid #ffc107;
+    }
+
+    .value-metrics h6 {
+        color: #ffc107;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+    }
+
+    .value-metrics h6 i {
+        margin-right: 8px;
+    }
+
+    .value-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .value-item {
+        text-align: center;
+        padding: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        transition: background 0.2s ease;
+    }
+
+    .value-item.highlight {
+        background: rgba(255, 193, 7, 0.2);
+        border: 1px solid rgba(255, 193, 7, 0.3);
+    }
+
+    .value-item:hover {
+        background: rgba(255, 193, 7, 0.1);
+    }
+
+    .value-item .value-label {
+        font-size: 0.6rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+    }
+
+    .value-item .value-score {
+        font-size: 0.8rem;
+        font-weight: 700;
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+
+    .value-score.excellent {
+        background: rgba(40, 167, 69, 0.9);
+        color: white;
+    }
+
+    .value-score.good {
+        background: rgba(0, 123, 255, 0.9);
+        color: white;
+    }
+
+    .value-score.fair {
+        background: rgba(255, 193, 7, 0.9);
+        color: #000;
+    }
+
+    .value-score.poor {
+        background: rgba(220, 53, 69, 0.9);
+        color: white;
+    }
+
+    /* Enhanced Score Breakdown Styles */
+    .score-breakdown {
+        margin-bottom: 20px;
+        padding: 16px;
+        background: linear-gradient(135deg, rgba(0, 123, 255, 0.1) 0%, rgba(40, 167, 69, 0.1) 100%);
+        border-radius: 12px;
+        border-left: 4px solid #F05545;
+    }
+
+    .score-breakdown h6 {
+        color: #F05545;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+    }
+
+    .score-breakdown h6 i {
+        margin-right: 8px;
+    }
+
+    .score-metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .score-metric.final {
+        background: rgba(240, 85, 69, 0.2);
+        border: 1px solid rgba(240, 85, 69, 0.3);
+    }
+
+    .score-metric.final .metric-value {
+        color: #F05545;
+        font-size: 1.2rem;
+    }
+
+    .aircraft-actions .btn-outline-warning {
+        color: #ffc107;
+        border-color: #ffc107;
+        background: transparent;
+    }
+
+    .aircraft-actions .btn-outline-warning:hover {
+        background: #ffc107;
+        color: #000;
+        transform: translateY(-1px);
+    }
+
+    /* Remove old badge styles */
+    .score-badge,
+    .price-badge {
+        display: none;
+    }
+
+    /* Score Badge Styles */
+    .score-badge {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        padding: 8px 12px;
+        border-radius: 25px;
+        font-weight: bold;
+        font-size: 1.1rem;
+        text-align: center;
+        min-width: 65px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        z-index: 5;
+    }
+
+    .score-badge.excellent {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.3);
+        animation: pulse-success 2s infinite;
+    }
+
+    .score-badge.very-good {
+        background: linear-gradient(135deg, #007bff, #17a2b8);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .score-badge.good {
+        background: linear-gradient(135deg, #ffc107, #fd7e14);
+        color: #000;
+        border-color: rgba(0, 0, 0, 0.1);
+    }
+
+    .score-badge.fair {
+        background: linear-gradient(135deg, #6c757d, #495057);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .score-badge.poor {
+        background: linear-gradient(135deg, #dc3545, #c82333);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    @keyframes pulse-success {
+
+        0%,
+        100% {
+            transform: scale(1);
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        50% {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.5);
+        }
+    }
+
+    /* Price Badge Styles */
+    .price-badge {
+        background-color: #ff6b5b;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        margin-bottom: 5px;
+    }
+
+    .price-badge.poa {
+        background-color: #6c757d;
+        color: white;
+    }
+
+    /* Value Rating Styles */
+    .value-rating {
+        position: absolute;
+        top: 70px;
+        right: 15px;
+        padding: 4px 8px;
+        border-radius: 15px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-align: center;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        z-index: 4;
+    }
+
+    .value-rating.excellent {
+        background: rgba(40, 167, 69, 0.9);
+        color: white;
+    }
+
+    .value-rating.very-good {
+        background: rgba(0, 123, 255, 0.9);
+        color: white;
+    }
+
+    .value-rating.good {
+        background: rgba(255, 193, 7, 0.9);
+        color: #000;
+    }
+
+    .value-rating.fair {
+        background: rgba(108, 117, 125, 0.9);
+        color: white;
+    }
+
+    .value-rating.poor {
+        background: rgba(220, 53, 69, 0.9);
+        color: white;
+    }
+
+    /* Score Breakdown Styles */
+    .score-breakdown-section {
+        margin-bottom: 15px;
+        padding: 10px;
+        background: rgba(0, 123, 255, 0.1);
+        border-radius: 6px;
+        border-left: 3px solid #007bff;
+    }
+
+    .score-breakdown-section h6 {
+        color: #007bff;
+        font-size: 0.8rem;
+        margin-bottom: 5px;
+    }
+
+    .score-breakdown-section .spec-row {
+        color: white;
+        font-size: 0.9rem;
+    }
+
+    .score-breakdown-section .spec-label {
+        font-weight: 500;
+    }
+
+    .score-breakdown-section .spec-value {
+        font-weight: bold;
+    }
+
+    /* Aircraft Actions Styles */
+    .aircraft-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+    }
+
+    .aircraft-actions button {
+        flex: 1;
+        margin-right: 10px;
+    }
+
+    .aircraft-actions button:last-child {
+        margin-right: 0;
+    }
+
+    /* Pagination Styles */
+    .pagination {
+        display: flex;
+        justify-content: center;
+        margin-top: 20px;
+    }
+
+    .pagination .page-item {
+        margin: 0 5px;
+    }
+
+    .pagination .page-link {
+        background-color: #343a40;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        transition: background-color 0.3s;
+    }
+
+    .pagination .page-link:hover {
+        background-color: #4a5568;
+    }
+
+    .pagination .active .page-link {
+        background-color: #F05545;
+        border-color: #F05545;
+    }
+
+    .pagination .disabled .page-link {
+        background-color: #6c757d;
+        pointer-events: none;
+    }
+
+    .score-metric.final .metric-value {
+        color: #F05545;
+        font-size: 1.2rem;
+    }
+
+    /* Scoring Explanation Styles */
+    .scoring-explanation {
+        margin-bottom: 30px;
+    }
+
+    .formula-breakdown {
+        margin-top: 15px;
+    }
+
+    .formula-step {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 12px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        border-left: 3px solid #17a2b8;
+    }
+
+    .step-number {
+        background: #17a2b8;
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.8rem;
+        margin-right: 12px;
+        flex-shrink: 0;
+    }
+
+    .step-text {
+        color: #e9ecef;
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    .score-ranges {
+        margin-top: 15px;
+    }
+
+    .score-range {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .score-range.excellent {
+        background: rgba(40, 167, 69, 0.2);
+        border: 1px solid rgba(40, 167, 69, 0.3);
+        color: #28a745;
+    }
+
+    .score-range.very-good {
+        background: rgba(0, 123, 255, 0.2);
+        border: 1px solid rgba(0, 123, 255, 0.3);
+        color: #007bff;
+    }
+
+    .score-range.good {
+        background: rgba(255, 193, 7, 0.2);
+        border: 1px solid rgba(255, 193, 7, 0.3);
+        color: #ffc107;
+    }
+
+    .score-range.fair {
+        background: rgba(108, 117, 125, 0.2);
+        border: 1px solid rgba(108, 117, 125, 0.3);
+        color: #6c757d;
+    }
+
+    .score-range.poor {
+        background: rgba(220, 53, 69, 0.2);
+        border: 1px solid rgba(220, 53, 69, 0.3);
+        color: #dc3545;
+    }
+
+    .range-label {
+        font-weight: 700;
+    }
+
+    .range-description {
+        font-weight: 500;
+    }
+
+    .aircraft-image {
+        height: 180px;
+        overflow: hidden;
+        background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+        position: relative;
+        flex-shrink: 0;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .aircraft-image:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 12px rgba(240, 85, 69, 0.3);
+    }
+
+    /* Photo Gallery Styles */
+    .photo-overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+        color: white;
+        padding: 0.5rem;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        font-size: 0.8rem;
+        text-align: center;
+    }
+
+    .aircraft-image:hover .photo-overlay {
+        opacity: 1;
+    }
+
+    /* Photo Gallery Modal */
+    .photo-gallery-modal {
+        display: none;
+        position: fixed;
+        z-index: 10000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.95);
+    }
+
+    .photo-gallery-content {
+        position: relative;
+        width: 90%;
+        height: 90%;
+        margin: 5% auto;
+        background: #1a1a1a;
+        border-radius: 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .gallery-header {
+        background: #2d2d2d;
+        padding: 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #404040;
+    }
+
+    .gallery-title {
+        color: #F05545;
+        font-size: 1.2rem;
+        font-weight: bold;
+        flex: 1;
+    }
+
+    .gallery-close {
+        background: none;
+        border: none;
+        color: #fff;
+        font-size: 1.5rem;
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 50%;
+        transition: background 0.3s ease;
+    }
+
+    .gallery-close:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .gallery-main {
+        flex: 1;
+        display: flex;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .gallery-image-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        background: #000;
+    }
+
+    .gallery-main-image {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        transition: transform 0.3s ease;
+    }
+
+    .zoom-controls {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        display: flex;
+        gap: 10px;
+    }
+
+    .zoom-btn {
+        background: rgba(0, 0, 0, 0.7);
+        border: 1px solid #F05545;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .zoom-btn:hover {
+        background: #F05545;
+    }
+
+    .gallery-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        border: 1px solid #F05545;
+        color: white;
+        padding: 12px 16px;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 1.2rem;
+    }
+
+    .gallery-nav:hover {
+        background: #F05545;
+    }
+
+    .gallery-prev {
+        left: 20px;
+    }
+
+    .gallery-next {
+        right: 20px;
+    }
+
+    /* Score Breakdown Styles */
+    .score-breakdown-section {
+        background: linear-gradient(135deg, #2d2d2d, #1a1a1a);
+        border: 1px solid #F05545;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+
+    .final-score-display {
+        text-align: center;
+        margin-bottom: 1rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #404040;
+    }
+
+    .final-score-value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #F05545;
+        margin: 0.5rem 0;
+    }
+
+    .score-calculation {
+        font-size: 0.8rem;
+        color: #aaa;
+        font-style: italic;
+    }
+
+    .component-scores {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    .component-score {
+        background: rgba(240, 85, 69, 0.1);
+        border: 1px solid rgba(240, 85, 69, 0.3);
+        border-radius: 6px;
+        padding: 0.75rem;
+        text-align: center;
+    }
+
+    .component-label {
+        font-size: 0.8rem;
+        color: #ccc;
+        margin-bottom: 0.5rem;
+    }
+
+    .component-value {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #F05545;
+    }
+
+    /* Filter Display Styles */
+    .filter-tags .badge {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Toast Notification Styles */
+    .toast-notification {
+        animation: slideInRight 0.3s ease-out;
+    }
+
+    @keyframes slideInRight {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    .aircraft-content {
+        padding: 0.75rem;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
+        overflow-y: auto;
+        min-height: 340px;
+    }
+
+    .aircraft-name {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #F05545;
+        margin: 0 0 0.2rem 0;
+        line-height: 1.2;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .aircraft-info {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.3rem;
+        margin-bottom: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.4rem;
+        margin-bottom: 0.15rem;
+        font-size: 0.7rem;
+    }
+
+    .info-label {
+        font-size: 0.6rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.15rem;
+    }
+
+    .info-value {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #F05545;
+    }
+
+    .specifications {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 0.3rem;
+        margin-bottom: 0.2rem;
+        flex-shrink: 0;
+    }
+
+    .spec-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.3rem;
+    }
+
+    .spec-value {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #17a2b8;
+        margin-bottom: 0.15rem;
+    }
+
+    .spec-label {
+        font-size: 0.55rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4 position-relative">
+    <!-- Route Planning Tools Section -->
+    <div class="row mb-4">
+        <!-- Range Filter Tool (Left Column) -->
+        <div class="col-md-6">
+            <div class="card bg-black border border-secondary h-100">
+                <div class="card-header d-flex align-items-center">
+                    <h4 class="mb-0 me-auto">Range Filter Tool</h4>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <!-- Home Airport Selection -->
+                        <div class="form-group mb-3">
+                            <label for="home-airport-search" class="form-label">Select Home Airport</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control bg-dark text-white border-secondary"
+                                    id="home-airport-search" placeholder="Search for airport...">
+                                <button class="btn btn-outline-danger" type="button" id="search-home-btn">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                            <div id="home-airport-results" class="airport-results d-none">
+                                <div id="home-airport-list" class="list-group"></div>
+                            </div>
+                        </div>
+
+                        <!-- Range Slider -->
+                        <div class="form-group mb-3">
+                            <label for="range-slider" class="form-label">Range Filter (nm)</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="range" class="form-range flex-grow-1" id="range-slider" min="0" max="7000"
+                                    step="50" value="500">
+                                <span id="range-value" class="badge bg-secondary">500</span>
+                                <button id="reset-range-btn" class="btn btn-sm btn-outline-secondary"
+                                    title="Reset to average trip length">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                            </div>
+                            <small class="text-muted">Filter aircraft by range from home airport</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Route Planning Tool (Right Column) -->
+        <div class="col-md-6">
+            <div class="card bg-black border border-secondary h-100">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <h4 class="mb-0">Route Planning Tool</h4>
+                    <div class="d-flex gap-2">
+                        <button id="clear-routes-btn" class="btn btn-sm btn-outline-danger">
+                            <i class="fas fa-trash"></i> Clear All
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Route Selection -->
+                    <div class="row mb-3">
+                        <div class="col-md-5">
+                            <label for="from-airport" class="form-label">From</label>
+                            <div class="position-relative">
+                                <input type="text" class="form-control bg-dark text-white border-secondary"
+                                    id="from-airport" placeholder="Search airports...">
+                                <div id="from-airport-results" class="airport-results d-none">
+                                    <div id="from-airport-list" class="list-group"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end justify-content-center">
+                            <button id="add-route-btn" class="btn btn-danger mb-2" title="Add Route">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div class="col-md-5">
+                            <label for="to-airport" class="form-label">To</label>
+                            <div class="position-relative">
+                                <input type="text" class="form-control bg-dark text-white border-secondary"
+                                    id="to-airport" placeholder="Search airports...">
+                                <div id="to-airport-results" class="airport-results d-none">
+                                    <div id="to-airport-list" class="list-group"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Route Summary -->
+                    <div class="mb-3">
+                        <h6 class="text-secondary">Route Summary</h6>
+                        <div class="small text-muted">
+                            Total: <span id="total-distance" class="text-danger">0 nm avg, 0 nm longest, 0 trips</span>
+                        </div>
+                    </div>
+
+                    <!-- Routes List -->
+                    <div id="routes-container" style="max-height: 200px; overflow-y: auto;">
+                        <div class="text-secondary text-center">No routes added</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-black border border-secondary">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0">
+                            Range Map
+                            <span class="aircraft-count-display ms-3">
+                                <span class="aircraft-count-label">Aircraft:</span>
+                                <span class="aircraft-count-value" id="aircraft-count">0</span>
+                            </span>
+                        </h4>
+
+                        <!-- Range Slider Tool -->
+                        <div class="range-slider-tool d-flex align-items-center gap-3">
+                            <label for="map-range-slider" class="form-label text-white mb-0">
+                                Range Filter:
+                            </label>
+                            <div class="range-slider-container d-flex align-items-center gap-2">
+                                <span class="text-secondary" style="font-size: 0.8rem;">0</span>
+                                <input type="range" class="form-range" id="map-range-slider" min="0" max="8000"
+                                    step="100" value="3000" style="width: 200px;">
+                                <span class="text-secondary" style="font-size: 0.8rem;">8000</span>
+                            </div>
+                            <div class="range-display">
+                                <span id="map-range-value" class="text-danger fw-bold">3,000 NM</span>
+                            </div>
+                            <button id="apply-range-filter" class="btn btn-sm btn-outline-danger">
+                                <i class="fas fa-filter"></i> Apply
+                            </button>
+                            <button id="clear-range-filter" class="btn btn-sm btn-outline-secondary">
+                                <i class="fas fa-times"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div id="map" style="height: 500px; border-radius: 0 0 8px 8px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Google Sheets Integration Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card bg-black border border-secondary">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">Financial Analysis Inputs</h4>
+                    <div class="text-muted small">
+                        <i class="fas fa-info-circle me-1"></i>
+                        These values are automatically calculated from your route planning
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-group mb-3 financial-input-group">
+                                <label for="range-input" class="form-label">
+                                    Range Requirement (nm)
+                                    <i class="fas fa-magic text-warning ms-1" title="Auto-updated from longest leg"></i>
+                                </label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="range-input" placeholder="Auto-calculated"
+                                    value="{{ request.args.get('range_requirement', '') }}">
+                                <div class="auto-update-info">
+                                    Updates automatically based on your longest route leg
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group mb-3 financial-input-group">
+                                <label for="avg-trip-length" class="form-label">
+                                    Average Trip Length (nm)
+                                    <i class="fas fa-magic text-warning ms-1"
+                                        title="Auto-updated from route average"></i>
+                                </label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="avg-trip-length" placeholder="Auto-calculated"
+                                    value="{{ request.args.get('avg_trip_length', '') }}">
+                                <div class="auto-update-info">
+                                    Weighted average based on route frequencies
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group mb-3 financial-input-group">
+                                <label for="number-of-trips" class="form-label">
+                                    Number of Trips per Year
+                                    <i class="fas fa-magic text-warning ms-1"
+                                        title="Auto-updated from route frequencies"></i>
+                                </label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="number-of-trips" placeholder="Auto-calculated"
+                                    value="{{ request.args.get('yearly_trips', '') }}">
+                                <div class="auto-update-info">
+                                    Sum of all route frequencies per year
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="budget" class="form-label">Aircraft Budget ($)</label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="budget" placeholder="e.g., 5000000"
+                                    value="{{ request.args.get('budget', '') }}">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="passengers" class="form-label">Typical Passengers</label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="passengers" placeholder="e.g., 6"
+                                    value="{{ request.args.get('passengers', '') }}">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group mb-3">
+                                <label for="lowest-year" class="form-label">Lowest Acceptable Year</label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="lowest-year" placeholder="e.g., 2000" min="1950" max="2024"
+                                    value="{{ request.args.get('lowest_year', '') }}">
+                                <small class="text-muted">Minimum manufacturing year</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Analysis Section -->
+                    <div class="card bg-dark border-secondary mb-3">
+                        <div class="card-header" data-bs-toggle="collapse" data-bs-target="#advancedAnalysisSection"
+                            style="cursor: pointer; background: linear-gradient(135deg, #f05545, #d44437);">
+                            <h5 class="mb-0 text-white">
+                                <i class="fas fa-cogs me-2"></i>Advanced Analysis
+                                <small class="float-end">
+                                    <i class="fas fa-chevron-down"></i>
+                                </small>
+                            </h5>
+                        </div>
+                        <div id="advancedAnalysisSection" class="collapse">
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6 class="text-warning"><i class="fas fa-filter me-2"></i>Additional Filtering
+                                        </h6>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Min Speed (KTS)</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_min_speed" placeholder="200" min="0" step="10">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Min Altitude (ft)</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_min_altitude" placeholder="40000" min="0" step="1000">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Max Runway Length (ft)</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_max_runway" placeholder="5000" min="0" step="100">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Min Cabin Volume (cu ft)</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_min_cabin_volume" placeholder="100" min="0" step="10">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6 class="text-warning"><i class="fas fa-calculator me-2"></i>Cost Analysis
+                                        </h6>
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Max Annual Cost</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_max_annual_cost" placeholder="500000" min="0"
+                                                    step="10000">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Max Hourly Cost</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_max_hourly_cost" placeholder="3000" min="0" step="100">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Fuel Price $/gal</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_fuel_price" placeholder="6.50" min="0" step="0.1"
+                                                    value="6.50">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label text-light">Ownership Years</label>
+                                                <input type="number"
+                                                    class="form-control bg-dark text-white border-secondary"
+                                                    id="advanced_ownership_years" placeholder="5" min="1" max="20"
+                                                    value="5">
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Priority Selection Section -->
+                    <div class="card bg-dark border-secondary mb-3">
+                        <div class="card-header" style="background: linear-gradient(135deg, #ffc107, #f05545);">
+                            <h5 class="mb-0 text-white">
+                                <i class="fas fa-bullseye me-2"></i>Set Your Priorities
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-2">
+                                    <label for="priority_1st" class="form-label">1st Priority</label>
+                                    <select class="form-select" id="priority_1st" name="priority_1st">
+                                        <option value="best_speed_dollar">Speed/$</option>
+                                        <option value="best_range_dollar">Range/$</option>
+                                        <option value="best_performance_dollar">Performance/$</option>
+                                        <option value="best_efficiency_dollar">Efficiency/$</option>
+                                        <option value="best_all_around_dollar">All-Around/$</option>
+                                        <option value="price">Price</option>
+                                        <option value="range">Range</option>
+                                        <option value="speed">Speed</option>
+                                        <option value="passengers">Passengers</option>
+                                        <option value="total_hourly_cost">Hourly Cost</option>
+                                        <option value="runway_length">Runway Length</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="priority_2nd" class="form-label">2nd Priority</label>
+                                    <select class="form-select" id="priority_2nd" name="priority_2nd">
+                                        <option value="best_speed_dollar">Speed/$</option>
+                                        <option value="best_range_dollar">Range/$</option>
+                                        <option value="best_performance_dollar">Performance/$</option>
+                                        <option value="best_efficiency_dollar">Efficiency/$</option>
+                                        <option value="best_all_around_dollar">All-Around/$</option>
+                                        <option value="price">Price</option>
+                                        <option value="range">Range</option>
+                                        <option value="speed">Speed</option>
+                                        <option value="passengers">Passengers</option>
+                                        <option value="total_hourly_cost">Hourly Cost</option>
+                                        <option value="runway_length">Runway Length</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="priority_3rd" class="form-label">3rd Priority</label>
+                                    <select class="form-select" id="priority_3rd" name="priority_3rd">
+                                        <option value="best_speed_dollar">Speed/$</option>
+                                        <option value="best_range_dollar">Range/$</option>
+                                        <option value="best_performance_dollar">Performance/$</option>
+                                        <option value="best_efficiency_dollar">Efficiency/$</option>
+                                        <option value="best_all_around_dollar">All-Around/$</option>
+                                        <option value="price">Price</option>
+                                        <option value="range">Range</option>
+                                        <option value="speed">Speed</option>
+                                        <option value="passengers">Passengers</option>
+                                        <option value="total_hourly_cost">Hourly Cost</option>
+                                        <option value="runway_length">Runway Length</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="priority_4th" class="form-label">4th Priority</label>
+                                    <select class="form-select" id="priority_4th" name="priority_4th">
+                                        <option value="best_speed_dollar">Speed/$</option>
+                                        <option value="best_range_dollar">Range/$</option>
+                                        <option value="best_performance_dollar">Performance/$</option>
+                                        <option value="best_efficiency_dollar">Efficiency/$</option>
+                                        <option value="best_all_around_dollar">All-Around/$</option>
+                                        <option value="price">Price</option>
+                                        <option value="range">Range</option>
+                                        <option value="speed">Speed</option>
+                                        <option value="passengers">Passengers</option>
+                                        <option value="total_hourly_cost">Hourly Cost</option>
+                                        <option value="runway_length">Runway Length</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="priority_5th" class="form-label">5th Priority</label>
+                                    <select class="form-select" id="priority_5th" name="priority_5th">
+                                        <option value="best_speed_dollar">Speed/$</option>
+                                        <option value="best_range_dollar">Range/$</option>
+                                        <option value="best_performance_dollar">Performance/$</option>
+                                        <option value="best_efficiency_dollar">Efficiency/$</option>
+                                        <option value="best_all_around_dollar">All-Around/$</option>
+                                        <option value="price">Price</option>
+                                        <option value="range">Range</option>
+                                        <option value="speed">Speed</option>
+                                        <option value="passengers">Passengers</option>
+                                        <option value="total_hourly_cost">Hourly Cost</option>
+                                        <option value="runway_length">Runway Length</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <small class="text-muted mt-2 d-block">Select up to 5 priorities. All selected priorities
+                                are weighted equally in the recommendation score.</small>
+                        </div>
+                    </div>
+
+                    <div class="text-center mt-3">
+                        <!-- IMMEDIATE TEST BUTTON -->
+                        <button class="btn btn-success btn-sm mb-2"
+                            onclick="alert('✅ Button click works! runAnalysis type: ' + typeof window.runAnalysis)">
+                            🧪 TEST: Check if functions work
+                        </button>
+                        <br>
+                        <button class="btn btn-danger btn-lg" onclick="runAnalysis()">
+                            <i class="fas fa-search me-2"></i>Find Matching Aircraft
+                        </button>
+                        <br><br>
+                        <!-- Emergency client-side filtering buttons for testing -->
+                        <div class="emergency-filters">
+                            <button class="btn btn-warning btn-sm me-2" onclick="applyImmediateRangeFilter(634)">
+                                🧪 Test DFW→ATL Filter (634nm)
+                            </button>
+                            <button class="btn btn-warning btn-sm me-2" onclick="applyImmediateRangeFilter(5573)">
+                                🧪 Test DFW→NRT Filter (5573nm)
+                            </button>
+                            <button class="btn btn-info btn-sm me-2" onclick="testMainFiltering()">
+                                🔧 Test Main Button
+                            </button>
+                            <button class="btn btn-success btn-sm me-2" onclick="emergencyTest()">
+                                🆘 JS Test
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="resetAircraftView()">
+                                🔄 Reset View
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Aircraft Listings Section -->
+    {% if filtered_aircraft %}
+    <div class="row mt-5">
+        <div class="col-12">
+            <!-- Sorting Controls -->
+            <div class="sorting-controls mb-4">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center">
+                            <label for="sortSelect" class="form-label me-3 mb-0 text-white">
+                                <i class="fas fa-sort me-1"></i>Sort by:
+                            </label>
+                            <select id="sortSelect" class="form-select form-select-sm" style="max-width: 200px;">
+                                <option value="score">Best Match Score</option>
+                                <option value="price_low">Price: Low to High</option>
+                                <option value="price_high">Price: High to Low</option>
+                                <option value="range">Range: High to Low</option>
+                                <option value="speed">Speed: High to Low</option>
+                                <option value="passengers">Passengers: High to Low</option>
+                                <option value="year_new">Year: Newest First</option>
+                                <option value="year_old">Year: Oldest First</option>
+                                <option value="hourly_cost_low">Hourly Cost: Low to High</option>
+                                <option value="hourly_cost_high">Hourly Cost: High to Low</option>
+                                <option value="runway_length">Runway Length: Low to High</option>
+                                <option value="altitude">Max Altitude: High to Low</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-6 text-md-end">
+                        <div class="d-flex align-items-center justify-content-md-end">
+                            <div class="aircraft-count-info me-3">
+                                <span class="text-white" id="resultsCount">
+                                    Showing <span id="currentCount">{{ filtered_aircraft|length }}</span> out of <span
+                                        id="totalCount">{{ total_aircraft }}</span> aircraft available
+                                </span>
+                            </div>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-light" onclick="toggleView('grid')"
+                                    id="gridViewBtn">
+                                    <i class="fas fa-th"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-light" onclick="toggleView('list')"
+                                    id="listViewBtn">
+                                    <i class="fas fa-list"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aircraft Grid -->
+            <div class="aircraft-listings-container">
+                <div class="aircraft-grid" id="aircraftGrid">
+                    {% for aircraft in filtered_aircraft %}
+                    <div class="aircraft-card" {% if loop.first %}id="first-listing" {% endif %}
+                        data-range="{{ aircraft.range or 0 }}">
+                        <!-- Aircraft Image - Main Focus -->
+                        <div class="aircraft-image"
+                            onclick="openPhotoGallery('{{ aircraft.aircraft_name | safe }}', '{{ aircraft.image | default('/static/images/aircraft_placeholder.jpg') | safe }}')">
+                            {% if aircraft.image %}
+                            <img src="{{ aircraft.image }}" alt="{{ aircraft.model }}" class="img-fluid">
+                            {% else %}
+                            <img src="/static/images/aircraft_placeholder.jpg" alt="{{ aircraft.aircraft_name }}"
+                                class="img-fluid">
+                            {% endif %}
+                            <!-- Photo Overlay -->
+                            <div class="photo-overlay">
+                                <i class="fas fa-search-plus me-2"></i>View All Photos
+                            </div>
+                        </div>
+
+                        <!-- Scoring Badges Overlay -->
+                        <div class="position-absolute top-0 start-0 m-2" style="z-index: 10;">
+                            <div class="d-flex flex-column gap-1">
+                                <!-- Priority Score -->
+                                <div class="badge bg-info text-dark fw-bold" style="font-size: 0.7rem;">
+                                    Priority: <span class="priority-score">--</span>/100
+                                </div>
+                                <!-- Data Score -->
+                                <div class="badge bg-success text-dark fw-bold" style="font-size: 0.7rem;">
+                                    Data: <span class="data-score">--</span>%
+                                </div>
+                                <!-- Match Score -->
+                                <div class="badge bg-warning text-dark fw-bold" style="font-size: 0.7rem;">
+                                    Match: <span class="match-score">--</span>%
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Aircraft Content -->
+                        <div class="aircraft-content">
+                            <!-- Title Section -->
+                            <div class="aircraft-title-section">
+                                <h3 class="aircraft-name">{{ aircraft.year or 'N/A' }} {{ aircraft.manufacturer }}
+                                    {{ aircraft.aircraft_name }}</h3>
+                                <div class="aircraft-category">{{ aircraft.category or 'N/A' }}</div>
+                            </div>
+
+                            <!-- Final Score Section (moved from photo) -->
+                            {% if aircraft.display_score is not none %}
+                            {% set inverted_score = 100 - aircraft.display_score %}
+                            <div class="score-section final-score-section">
+                                <div class="score-header">
+                                    <i class="fas fa-star"></i>
+                                    <span>Mission Fit Score</span>
+                                </div>
+                                <div class="score-display">
+                                    <div class="score-value text-danger">{{ "%.0f"|format(inverted_score) }}%</div>
+                                    <div class="score-label">Based on your requirements</div>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <!-- Key Information -->
+                            <div class="aircraft-info">
+                                <div class="info-row">
+                                    <div class="info-item">
+                                        <div class="info-label">Price</div>
+                                        <div class="info-value">
+                                            {% if aircraft.price > 0 %}
+                                            ${{ "{:,.0f}".format(aircraft.price) }}
+                                            {% else %}
+                                            Price on Application
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Year Range</div>
+                                        <div class="info-value">{{ aircraft.lowest_year or 'N/A' }} - {{
+                                            aircraft.highest_year or 'N/A' }}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Specifications -->
+                            <div class="specifications">
+                                <div class="spec-grid">
+                                    <div class="spec-item">
+                                        <div class="spec-value">{{ "{:,}".format(aircraft.range) if aircraft.range else
+                                            'N/A' }}</div>
+                                        <div class="spec-label">Range (nm)</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value">{{ aircraft.passengers or 'N/A' }}</div>
+                                        <div class="spec-label">Passengers</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value">{{ "{:,}".format(aircraft.speed) if aircraft.speed else
+                                            'N/A' }}</div>
+                                        <div class="spec-label">Speed (kts)</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value">{{ "{:,}".format(aircraft.max_altitude) if
+                                            aircraft.max_altitude else 'N/A' }}</div>
+                                        <div class="spec-label">Altitude (ft)</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value">{{ "{:,}".format(aircraft.runway_length) if
+                                            aircraft.runway_length else 'N/A' }}</div>
+                                        <div class="spec-label">Runway (ft)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Operating Costs -->
+                            <div class="operating-costs">
+                                <div class="cost-item">
+                                    <div class="cost-label">Total Cost to Own</div>
+                                    <div class="cost-value">
+                                        {% if aircraft.multi_year_total_cost %}
+                                        ${{ "{:,}".format(aircraft.multi_year_total_cost) }}
+                                        {% else %}
+                                        N/A
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="cost-item">
+                                    <div class="cost-label">Total Cost to Charter</div>
+                                    <div class="cost-value">
+                                        {% if aircraft.cost_to_charter %}
+                                        ${{ "{:,}".format(aircraft.cost_to_charter) }}
+                                        {% else %}
+                                        N/A
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Priority Score Section -->
+                            <div class="score-section priority-score">
+                                <div class="score-header">
+                                    <i class="fas fa-chart-line"></i>
+                                    <span>Priority Score</span>
+                                </div>
+                                <div class="score-display">
+                                    <div class="score-value">92%</div>
+                                    <div class="score-label">Based on your priorities</div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="card-actions d-flex gap-2">
+                                <button class="btn btn-outline-primary btn-sm" data-action="details"
+                                    data-aircraft-id="{{ aircraft.id }}"
+                                    data-aircraft-name="{{ aircraft.manufacturer }} {{ aircraft.aircraft_name }}">
+                                    <i class="fas fa-info-circle"></i>
+                                    <span>Details</span>
+                                </button>
+                                <button class="btn btn-outline-success btn-sm" data-action="compare"
+                                    data-aircraft-id="{{ aircraft.id }}"
+                                    data-aircraft-name="{{ aircraft.manufacturer }} {{ aircraft.aircraft_name }}">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Compare</span>
+                                </button>
+                                <button class="btn btn-outline-warning btn-sm" data-action="favorite"
+                                    data-aircraft-id="{{ aircraft.id }}"
+                                    data-aircraft-name="{{ aircraft.manufacturer }} {{ aircraft.aircraft_name }}">
+                                    <i class="fas fa-heart"></i>
+                                    <span>Save</span>
+                                </button>
+                                <button class="btn btn-outline-light btn-sm" data-action="share"
+                                    data-aircraft-id="{{ aircraft.id }}"
+                                    data-aircraft-name="{{ aircraft.manufacturer }} {{ aircraft.aircraft_name }}">
+                                    <i class="fas fa-share"></i>
+                                    <span>Share</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+{% endif %}
+</div>
+{% endblock %}
+
+<!-- Aircraft Comparison Modal -->
+<div class="modal fade" id="comparisonModal" tabindex="-1" aria-labelledby="comparisonModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="comparisonModalLabel">
+                    <i class="fas fa-chart-radar me-2"></i>Aircraft Comparison
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-warning mb-3">Performance Radar Chart</h6>
+                        <canvas id="performanceRadarChart" width="400" height="400"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-warning mb-3">Cost Comparison</h6>
+                        <canvas id="costComparisonChart" width="400" height="400"></canvas>
+                    </div>
+                </div>
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <h6 class="text-warning mb-3">Detailed Comparison Table</h6>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped" id="comparisonTable">
+                                <thead>
+                                    <tr id="comparisonTableHeader">
+                                        <th>Metric</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="comparisonTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <div id="comparisonAircraft" class="me-auto">
+                    <small class="text-muted">Select aircraft to compare (max 4)</small>
+                </div>
+                <button type="button" class="btn btn-outline-danger" id="clearComparisonBtn">
+                    <i class="fas fa-trash me-1"></i>Clear All
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Aircraft Details Modal -->
+<div class="modal fade" id="detailsModal" tabindex="-1" aria-labelledby="detailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="detailsModalLabel">
+                    <i class="fas fa-plane me-2"></i>Aircraft Details
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="detailsModalBody">
+                <!-- Details will be populated here -->
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-info" id="addCurrentToComparisonBtn">
+                    <i class="fas fa-plus me-1"></i>Add to Comparison
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Market Intelligence Modal -->
+<div class="modal fade" id="marketInsightsModal" tabindex="-1" aria-labelledby="marketInsightsModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="marketInsightsModalLabel">
+                    <i class="fas fa-chart-line me-2"></i>Market Intelligence Dashboard
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-warning mb-3">Price Distribution</h6>
+                        <canvas id="priceDistributionChart" width="400" height="300"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-warning mb-3">Manufacturer Market Share</h6>
+                        <canvas id="manufacturerChart" width="400" height="300"></canvas>
+                    </div>
+                </div>
+                <div class="row mt-4">
+                    <div class="col-md-4">
+                        <div class="card bg-secondary">
+                            <div class="card-body text-center">
+                                <h5 class="text-info" id="avgPrice">$0</h5>
+                                <small>Average Price</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-secondary">
+                            <div class="card-body text-center">
+                                <h5 class="text-success" id="avgRange">0 nm</h5>
+                                <small>Average Range</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-secondary">
+                            <div class="card-body text-center">
+                                <h5 class="text-warning" id="avgSpeed">0 kts</h5>
+                                <small>Average Speed</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI Recommendations Modal -->
+<div class="modal fade" id="aiRecommendationsModal" tabindex="-1" aria-labelledby="aiRecommendationsModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="aiRecommendationsModalLabel">
+                    <i class="fas fa-robot me-2"></i>AI-Powered Recommendations
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="aiRecommendationsBody">
+                <!-- AI recommendations will be populated here -->
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scenario Analysis Modal -->
+<div class="modal fade" id="scenarioAnalysisModal" tabindex="-1" aria-labelledby="scenarioAnalysisModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="scenarioAnalysisModalLabel">
+                    <i class="fas fa-calculator me-2"></i>What-If Scenario Analysis
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6 class="text-warning mb-3">Scenario Parameters</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Annual Flight Hours</label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                id="scenarioHours" value="100">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Fuel Price ($/gallon)</label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                id="scenarioFuelPrice" value="6.50" step="0.10">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Ownership Years</label>
+                            <input type="number" class="form-control bg-dark text-light border-secondary"
+                                id="scenarioYears" value="5">
+                        </div>
+                        <button class="btn btn-warning" id="runScenarioBtn">
+                            <i class="fas fa-play me-1"></i>Run Analysis
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <h6 class="text-warning mb-3">Cost Comparison</h6>
+                        <canvas id="scenarioChart" width="600" height="400"></canvas>
+                    </div>
+                </div>
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <h6 class="text-warning mb-3">Detailed Analysis</h6>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped" id="scenarioTable">
+                                <thead>
+                                    <tr>
+                                        <th>Aircraft</th>
+                                        <th>Annual Cost</th>
+                                        <th>Total Cost</th>
+                                        <th>Cost/Hour</th>
+                                        <th>Net Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scenarioTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block additional_js %}
+<!-- Leaflet JS for maps -->
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<!-- Leaflet Geocoder -->
+<script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+<!-- Custom JavaScript -->
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- MINIMAL TEST SCRIPT -->
+<script>
+    console.log('🔥 MINIMAL TEST SCRIPT STARTED');
+
+    // IMMEDIATE TEST - This should show immediately
+    alert('🔥 SCRIPT IS LOADING - Functions should be available soon!');
+
+    // Define ALL functions immediately with simple implementations
+    function runAnalysis() {
+        console.log('✅ runAnalysis called!');
+        alert('✅ runAnalysis function works!');
+    }
+
+    function applyImmediateRangeFilter(rangeReq) {
+        console.log('✅ applyImmediateRangeFilter called with:', rangeReq);
+        alert('✅ applyImmediateRangeFilter function works!');
+    }
+
+    function testMainFiltering() {
+        console.log('✅ testMainFiltering called!');
+        alert('✅ testMainFiltering function works!');
+    }
+
+    function emergencyTest() {
+        console.log('✅ emergencyTest called!');
+        alert('✅ emergencyTest function works!');
+    }
+
+    function clearAllFilters() {
+        console.log('✅ clearAllFilters called!');
+        alert('✅ clearAllFilters function works!');
+    }
+
+    function resetAircraftView() {
+        console.log('✅ resetAircraftView called!');
+        alert('✅ resetAircraftView function works!');
+    }
+
+    // Make ALL functions global IMMEDIATELY
+    window.runAnalysis = runAnalysis;
+    window.applyImmediateRangeFilter = applyImmediateRangeFilter;
+    window.testMainFiltering = testMainFiltering;
+    window.emergencyTest = emergencyTest;
+    window.clearAllFilters = clearAllFilters;
+    window.resetAircraftView = resetAircraftView;
+
+    // IMMEDIATE VERIFICATION
+    console.log('🔍 IMMEDIATE FUNCTION CHECK:');
+    console.log('runAnalysis:', typeof window.runAnalysis);
+    console.log('applyImmediateRangeFilter:', typeof window.applyImmediateRangeFilter);
+    console.log('testMainFiltering:', typeof window.testMainFiltering);
+    console.log('emergencyTest:', typeof window.emergencyTest);
+    console.log('clearAllFilters:', typeof window.clearAllFilters);
+    console.log('resetAircraftView:', typeof window.resetAircraftView);
+
+    // Test immediately
+    alert('Functions defined! runAnalysis type: ' + typeof window.runAnalysis);
+</script>
+
+    // Load all aircraft data from the server
+    async function loadAllAircraftData() {
+        try {
+            console.log('📡 Loading all aircraft data...');
+            const response = await fetch('/api/calculate-aircraft', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    // Empty criteria to get all aircraft
+                    budget: 0,
+                    range_requirement: 0,
+                    passengers: 0,
+                    lowest_year: 0
+                })
+            });
+
+            const data = await response.json();
+            if (data.success && data.aircraft) {
+                allAircraftData = data.aircraft;
+                filteredAircraftData = [...allAircraftData];
+                console.log(`✅ Loaded ${allAircraftData.length} aircraft from server`);
+                applyRealTimeFiltering();
+            } else {
+                console.error('❌ Failed to load aircraft data:', data);
+                // Fallback: use current page aircraft
+                loadCurrentPageAircraft();
+            }
+        } catch (error) {
+            console.error('❌ Error loading aircraft data:', error);
+            // Fallback: use current page aircraft
+            loadCurrentPageAircraft();
+        }
+    }
+
+    // Fallback: extract aircraft data from current page
+    function loadCurrentPageAircraft() {
+        console.log('🔄 Using fallback: extracting aircraft from current page');
+        const cards = document.querySelectorAll('.aircraft-card');
+        allAircraftData = [];
+
+        cards.forEach(card => {
+            const aircraftData = {
+                id: card.getAttribute('data-aircraft-id') || Math.random(),
+                name: card.querySelector('.aircraft-name')?.textContent?.trim() || 'Unknown',
+                range: parseInt(card.getAttribute('data-range')) || 0,
+                price: extractPrice(card),
+                passengers: extractPassengers(card),
+                speed: extractSpeed(card),
+                altitude: extractAltitude(card),
+                year: extractYear(card),
+                element: card
+            };
+            allAircraftData.push(aircraftData);
+        });
+
+        filteredAircraftData = [...allAircraftData];
+        console.log(`✅ Extracted ${allAircraftData.length} aircraft from current page`);
+    }
+
+    // Helper functions to extract data from aircraft cards
+    function extractPrice(card) {
+        const priceMatch = card.textContent.match(/\$([0-9,]+)/);
+        return priceMatch ? parseInt(priceMatch[1].replace(/,/g, '')) : 0;
+    }
+
+    function extractPassengers(card) {
+        const passengersMatch = card.textContent.match(/(\d+)\s*passengers?/i);
+        return passengersMatch ? parseInt(passengersMatch[1]) : 0;
+    }
+
+    function extractSpeed(card) {
+        const speedMatch = card.textContent.match(/(\d+)\s*kts/i);
+        return speedMatch ? parseInt(speedMatch[1]) : 0;
+    }
+
+    function extractAltitude(card) {
+        const altitudeMatch = card.textContent.match(/(\d+(?:,\d+)?)\s*ft/i);
+        return altitudeMatch ? parseInt(altitudeMatch[1].replace(/,/g, '')) : 0;
+    }
+
+    function extractYear(card) {
+        const yearMatch = card.textContent.match(/(\d{4})/);
+        return yearMatch ? parseInt(yearMatch[1]) : 0;
+    }
+
+    // Real-time filtering function
+    function applyRealTimeFiltering() {
+        console.log('🎯 Applying real-time filtering...');
+
+        // Get current filter values
+        currentFilters = {
+            range: document.getElementById('range-input')?.value || '',
+            passengers: document.getElementById('passengers')?.value || '',
+            budget: document.getElementById('budget')?.value || '',
+            minSpeed: document.getElementById('advanced_min_speed')?.value || '',
+            minAltitude: document.getElementById('advanced_min_altitude')?.value || '',
+            maxRunway: document.getElementById('advanced_max_runway')?.value || '',
+            minCabinVolume: document.getElementById('advanced_min_cabin_volume')?.value || '',
+            lowestYear: document.getElementById('lowest-year')?.value || ''
+        };
+
+        console.log('🔍 Current filters:', currentFilters);
+
+        // Filter aircraft data
+        filteredAircraftData = allAircraftData.filter(aircraft => {
+            // Range filter
+            if (currentFilters.range && aircraft.range < parseInt(currentFilters.range)) {
+                return false;
+            }
+
+            // Passengers filter
+            if (currentFilters.passengers && aircraft.passengers < parseInt(currentFilters.passengers)) {
+                return false;
+            }
+
+            // Budget filter
+            if (currentFilters.budget && aircraft.price > parseInt(currentFilters.budget)) {
+                return false;
+            }
+
+            // Speed filter
+            if (currentFilters.minSpeed && aircraft.speed < parseInt(currentFilters.minSpeed)) {
+                return false;
+            }
+
+            // Altitude filter
+            if (currentFilters.minAltitude && aircraft.altitude < parseInt(currentFilters.minAltitude)) {
+                return false;
+            }
+
+            // Year filter
+            if (currentFilters.lowestYear && aircraft.year < parseInt(currentFilters.lowestYear)) {
+                return false;
+            }
+
+            return true;
+        });
+
+        console.log(`✅ Filtered: ${filteredAircraftData.length}/${allAircraftData.length} aircraft match criteria`);
+
+        // Update display
+        updateAircraftDisplay();
+        updateFilterStatus();
+    }
+
+    // Update aircraft display
+    function updateAircraftDisplay() {
+        console.log('🔄 Updating aircraft display...');
+
+        // Get all aircraft cards on the current page
+        const allCards = document.querySelectorAll('.aircraft-card');
+        console.log(`📋 Found ${allCards.length} aircraft cards on current page`);
+
+        // Create a set of filtered aircraft IDs for quick lookup
+        const filteredIds = new Set(filteredAircraftData.map(aircraft => aircraft.id));
+        console.log(`🎯 Filtered aircraft IDs:`, Array.from(filteredIds));
+
+        let visibleCount = 0;
+
+        // Show/hide each aircraft card based on whether it's in the filtered data
+        allCards.forEach(card => {
+            const aircraftId = card.getAttribute('data-aircraft-id') ||
+                card.querySelector('.aircraft-name')?.textContent?.trim() ||
+                Math.random().toString();
+
+            const shouldShow = filteredIds.has(aircraftId) ||
+                filteredAircraftData.some(aircraft =>
+                    aircraft.name === card.querySelector('.aircraft-name')?.textContent?.trim()
+                );
+
+            if (shouldShow) {
+                card.style.display = '';
+                card.style.opacity = '1';
+                visibleCount++;
+                console.log(`✅ Showing: ${card.querySelector('.aircraft-name')?.textContent?.trim()}`);
+            } else {
+                card.style.display = 'none';
+                card.style.opacity = '0.3';
+                console.log(`❌ Hiding: ${card.querySelector('.aircraft-name')?.textContent?.trim()}`);
+            }
+        });
+
+        console.log(`📊 Displayed ${visibleCount}/${allCards.length} aircraft cards`);
+    }
+
+    // Update filter status
+    function updateFilterStatus() {
+        // Count actual visible cards on the page
+        const allCards = document.querySelectorAll('.aircraft-card');
+        const visibleCards = document.querySelectorAll('.aircraft-card[style*="display: ''"], .aircraft-card:not([style*="display: none"])');
+        const actualVisibleCount = visibleCards.length;
+        const totalCardsOnPage = allCards.length;
+
+        // Update count displays
+        const currentCountElement = document.getElementById('currentCount');
+        const totalCountElement = document.getElementById('totalCount');
+
+        if (currentCountElement) currentCountElement.textContent = actualVisibleCount;
+        if (totalCountElement) totalCountElement.textContent = totalCardsOnPage;
+
+        // Show filter status
+        const activeFilters = Object.entries(currentFilters)
+            .filter(([key, value]) => value && value !== '')
+            .map(([key, value]) => `${key}: ${value}`);
+
+        if (activeFilters.length > 0) {
+            showToast(`🎯 ${actualVisibleCount}/${totalCardsOnPage} aircraft cards visible (${activeFilters.length} filters active)`, 'success');
+        } else {
+            showToast(`📋 Showing all ${totalCardsOnPage} aircraft cards`, 'info');
+        }
+
+        console.log(`📊 Status: ${actualVisibleCount}/${totalCardsOnPage} aircraft cards visible`);
+    }
+
+    // Set up real-time event listeners
+    function setupRealTimeFiltering() {
+        console.log('🎧 Setting up real-time event listeners...');
+
+        const filterInputs = [
+            'range-input',
+            'passengers',
+            'budget',
+            'advanced_min_speed',
+            'advanced_min_altitude',
+            'advanced_max_runway',
+            'advanced_min_cabin_volume',
+            'lowest-year'
+        ];
+
+        filterInputs.forEach(inputId => {
+            const input = document.getElementById(inputId);
+            if (input) {
+                // Listen for input changes (typing, pasting, etc.)
+                input.addEventListener('input', debounce(applyRealTimeFiltering, 300));
+                input.addEventListener('change', applyRealTimeFiltering);
+                console.log(`✅ Added listener to ${inputId}`);
+            } else {
+                console.log(`⚠️ Input ${inputId} not found`);
+            }
+        });
+    }
+
+    // Debounce function to prevent too many calls
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // Legacy functions for button compatibility - REMOVED DUPLICATE runAnalysis
+
+    function applyImmediateRangeFilter(rangeReq) {
+        console.log('✅ applyImmediateRangeFilter called with:', rangeReq);
+        document.getElementById('range-input').value = rangeReq;
+        applyRealTimeFiltering();
+    }
+
+    function testMainFiltering() {
+        console.log('✅ testMainFiltering called!');
+        document.getElementById('range-input').value = '2000';
+        document.getElementById('passengers').value = '6';
+        document.getElementById('budget').value = '15000000';
+        applyRealTimeFiltering();
+    }
+
+    function emergencyTest() {
+        console.log('✅ emergencyTest called!');
+        alert('🆘 Emergency test works!');
+    }
+
+    // Clear all filters
+    function clearAllFilters() {
+        console.log('🧹 Clearing all filters');
+        document.getElementById('range-input').value = '';
+        document.getElementById('passengers').value = '';
+        document.getElementById('budget').value = '';
+        document.getElementById('advanced_min_speed').value = '';
+        document.getElementById('advanced_min_altitude').value = '';
+        document.getElementById('advanced_max_runway').value = '';
+        document.getElementById('advanced_min_cabin_volume').value = '';
+        document.getElementById('lowest-year').value = '';
+        applyRealTimeFiltering();
+    }
+
+    // Reset aircraft view
+    function resetAircraftView() {
+        console.log('🔄 Resetting aircraft view');
+        clearAllFilters();
+        // Show all aircraft cards
+        const aircraftCards = document.querySelectorAll('.aircraft-card');
+        aircraftCards.forEach(card => {
+            card.style.display = 'block';
+        });
+        console.log(`✅ Reset view - showing ${aircraftCards.length} aircraft`);
+    }
+
+    // Make ALL functions global
+    window.runAnalysis = runAnalysis;
+    window.applyImmediateRangeFilter = applyImmediateRangeFilter;
+    window.testMainFiltering = testMainFiltering;
+    window.emergencyTest = emergencyTest;
+    window.clearAllFilters = clearAllFilters;
+    window.resetAircraftView = resetAircraftView;
+
+    // IMMEDIATE VERIFICATION - Check functions are available
+    console.log('🔍 IMMEDIATE FUNCTION CHECK:');
+    console.log('runAnalysis:', typeof window.runAnalysis);
+    console.log('applyImmediateRangeFilter:', typeof window.applyImmediateRangeFilter);
+    console.log('testMainFiltering:', typeof window.testMainFiltering);
+    console.log('emergencyTest:', typeof window.emergencyTest);
+    console.log('clearAllFilters:', typeof window.clearAllFilters);
+    console.log('resetAircraftView:', typeof window.resetAircraftView);
+
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('🚀 DOM loaded - initializing real-time filtering...');
+
+        // First, load current page aircraft immediately
+        loadCurrentPageAircraft();
+
+        // Set up real-time event listeners
+        setupRealTimeFiltering();
+
+        // Then try to load all aircraft data from server
+        loadAllAircraftData();
+
+        console.log('🔥 REAL-TIME FILTERING INITIALIZED');
+        console.log('runAnalysis:', typeof runAnalysis);
+        console.log('applyImmediateRangeFilter:', typeof applyImmediateRangeFilter);
+        console.log('testMainFiltering:', typeof testMainFiltering);
+        console.log('emergencyTest:', typeof emergencyTest);
+        console.log('clearAllFilters:', typeof clearAllFilters);
+        console.log('resetAircraftView:', typeof resetAircraftView);
+    });
+</script>
+
+<!-- ORIGINAL COMPLEX SCRIPT REMOVED TO PREVENT SYNTAX ERRORS -->
+
+<!-- FINAL SCRIPT TAG - REMOVED TO PREVENT CONFLICTS -->
+{% endblock %}

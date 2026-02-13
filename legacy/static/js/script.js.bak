@@ -1,0 +1,2410 @@
+// Jet Finder JavaScript
+
+// Global variables
+let map;
+let circle;
+let marker;
+let geocoder;
+let aircraftData = [];
+let selectedAircraft = new Set();
+let activePriorityColumn = 'as';
+let activeFilters = {};
+let routeMarkers = [];
+let routeLegs = [];
+let totalDistance = 0;
+let selectedAirport = null;
+let selectedFromAirport = null;
+let selectedToAirport = null;
+let rangeMode = 'average'; // 'average' or 'full'
+let routePairs = [];
+let allRouteLines = new Map();
+let aircraftRangeCircles = new Map();
+let homeAirport = null;
+let rangeCircle = null;
+let avgTripRangeCircle = null;
+let longestLegRangeCircle = null;
+let currentRange = 500;
+let longestLegDistance = 0;
+let averageTripDistance = 0;
+let airportMarkers = {};
+let rangeCirlceSegments = [];
+let customRangePolygons = [];
+let avgTripRangePolygons = [];
+let longestLegRangePolygons = [];
+let airports = [];
+
+// Initialize the map
+function initMap() {
+    console.log('Initializing map...');
+
+    // Create map centered on Pacific Ocean to show both sides of date line
+    map = L.map('map', {
+        center: [30, 0], // Center on the equator
+        zoom: 2,
+        // Enable standard wrapping behavior
+        worldCopyJump: true,
+        // Allow continuous navigation
+        maxBounds: null,
+        // Remove bounds restrictions
+        maxBoundsViscosity: 0,
+        // Critical: enable continuous world wrapping
+        continuousWorld: true
+    });
+
+    // Create custom panes with specific z-index values for better layer control
+    map.createPane('rangeCirclePane');
+    map.createPane('aircraftCirclePane');
+    map.getPane('rangeCirclePane').style.zIndex = 200; // Base range circle behind
+    map.getPane('aircraftCirclePane').style.zIndex = 400;
+
+    // Add dark basemap with proper wrapping configuration
+    const darkBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19,
+        // Enable continuous world wrapping
+        continuousWorld: true,
+        // Critical: This must be false to enable wrapping
+        noWrap: false,
+        // Extend the bounds beyond normal limits to ensure full coverage
+        bounds: [[-90, -540], [90, 540]]
+    }).addTo(map);
+
+    // Add a second tile layer offset by 360 degrees to create seamless wrapping effect
+    const wrappedDarkBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        subdomains: 'abcd',
+        maxZoom: 19,
+        // Enable continuous world wrapping
+        continuousWorld: true,
+        noWrap: false,
+        // Shift this layer by 360 degrees
+        bounds: [[-90, -180 - 360], [90, 180 - 360]]
+    }).addTo(map);
+
+    // Add another tile layer offset in the opposite direction
+    const wrappedDarkBase2 = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        subdomains: 'abcd',
+        maxZoom: 19,
+        // Enable continuous world wrapping
+        continuousWorld: true,
+        noWrap: false,
+        // Shift this layer by 360 degrees in the opposite direction
+        bounds: [[-90, -180 + 360], [90, 180 + 360]]
+    }).addTo(map);
+
+    // Configure the map to handle panning across the date line
+    map.on('moveend', function () {
+        // Normalize the center longitude when panning
+        const center = map.getCenter();
+        // No need to force center adjustments - let Leaflet handle it naturally
+    });
+
+    // Add scale control
+    L.control.scale({
+        imperial: false,
+        position: 'bottomleft'
+    }).addTo(map);
+
+    // Set up event listener for map move end
+    map.on('moveend', debounce(handleMapMoveEnd, 300));
+
+    // Set up clicks on map to clear any selected airports
+    map.on('click', function (e) {
+        // Only clear if clicking on the map, not on markers or other overlays
+        if (e.originalEvent.target === map._container ||
+            e.originalEvent.target.classList.contains('leaflet-container')) {
+            // Clear any selected airports
+            selectedFromAirport = null;
+            selectedToAirport = null;
+
+            // Clear input fields
+            const fromAirportInput = document.getElementById('from-airport');
+            const toAirportInput = document.getElementById('to-airport');
+
+            if (fromAirportInput) fromAirportInput.value = '';
+            if (toAirportInput) toAirportInput.value = '';
+        }
+    });
+
+    // Initialize airport search
+    setupAirportSearch();
+
+    // Add event listeners for home airport search
+    const homeAirportSearch = document.getElementById('home-airport-search');
+    const homeAirportResults = document.getElementById('home-airport-results');
+    const homeAirportList = document.getElementById('home-airport-list');
+    const searchHomeBtn = document.getElementById('search-home-btn');
+
+    if (homeAirportSearch) {
+        homeAirportSearch.addEventListener('input', function () {
+            const query = this.value.trim();
+            if (query.length >= 2) {
+                searchHomeAirport(query, homeAirportList, homeAirportResults);
+            } else {
+                homeAirportResults.classList.add('d-none');
+            }
+        });
+    }
+
+    if (searchHomeBtn) {
+        searchHomeBtn.addEventListener('click', function () {
+            const query = homeAirportSearch.value.trim();
+            if (query.length >= 2) {
+                searchHomeAirport(query, homeAirportList, homeAirportResults);
+            }
+        });
+    }
+
+    // Load all aircraft ranges and create circles
+    loadAircraftRanges();
+}
+
+// Search for airports for home airport selection
+function searchHomeAirport(query, resultsList, resultsContainer) {
+    if (!query.trim()) {
+        resultsContainer.classList.add('d-none');
+        return;
+    }
+
+    resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">Searching...</div>';
+    resultsContainer.classList.remove('d-none');
+
+    fetch(`/api/airports?q=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(airports => {
+            resultsList.innerHTML = '';
+
+            if (airports.length === 0) {
+                resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">No airports found</div>';
+                return;
+            }
+
+            airports.forEach(airport => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'list-group-item list-group-item-action bg-dark text-white border-secondary';
+                item.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            ${airport.iata ? `<strong class="me-2">${airport.iata}</strong>` : ''}
+                            ${airport.icao ? `<span class="text-danger">${airport.icao}</span>` : ''}
+                        </div>
+                        ${airport.size ? `<span class="badge bg-danger">${airport.size}</span>` : ''}
+                    </div>
+                    <div class="text-truncate">${airport.name}</div>
+                    <small class="text-secondary text-truncate d-block">${airport.city}, ${airport.country}</small>
+                `;
+
+                item.addEventListener('click', function () {
+                    setHomeAirport(airport);
+                    resultsContainer.classList.add('d-none');
+                });
+
+                resultsList.appendChild(item);
+            });
+        })
+        .catch(error => {
+            console.error('Error searching airports:', error);
+            resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">Error searching airports</div>';
+        });
+}
+
+// Get color based on range
+function getColorForRange(range) {
+    // Gradient of colors from cool to warm based on range
+    if (range < 1000) return '#4a5568'; // Dark gray blue
+    if (range < 2000) return '#667eea'; // Indigo
+    if (range < 3000) return '#9f7aea'; // Purple
+    if (range < 4000) return '#ed64a6'; // Pink
+    if (range < 5000) return '#f56565'; // Red
+    if (range < 6000) return '#ed8936'; // Orange
+    return '#ecc94b'; // Yellow
+}
+
+// Function to load aircraft ranges from the API and display them on the map
+function loadAircraftRanges() {
+    // Instead of loading aircraft circles, we now create the three range rings
+    if (!homeAirport) {
+        console.log('No home airport set, cannot create range rings');
+        return;
+    }
+
+    console.log('Creating range rings for home airport');
+    updateRangeRings();
+}
+
+// Function to update the range rings
+function updateRangeRings() {
+    // Clear existing range circles
+    if (rangeCircle) {
+        map.removeLayer(rangeCircle);
+        rangeCircle = null;
+    }
+    if (customRangePolygons) {
+        customRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        customRangePolygons = [];
+    }
+    if (avgTripRangeCircle) {
+        map.removeLayer(avgTripRangeCircle);
+        avgTripRangeCircle = null;
+    }
+    if (avgTripRangePolygons) {
+        avgTripRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        avgTripRangePolygons = [];
+    }
+    if (longestLegRangeCircle) {
+        map.removeLayer(longestLegRangeCircle);
+        longestLegRangeCircle = null;
+    }
+    if (longestLegRangePolygons) {
+        longestLegRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        longestLegRangePolygons = [];
+    }
+
+    // Check if home airport is set
+    if (!homeAirport) {
+        console.log('No home airport set, cannot create range rings');
+        return;
+    }
+
+    // Get current ranges
+    const customRange = parseInt(document.getElementById('range-slider').value) || 500;
+    currentRange = customRange;
+
+    // Calculate average trip distance from route pairs
+    averageTripDistance = 0;
+    longestLegDistance = 0;
+
+    if (routePairs.length > 0) {
+        // Calculate total distance and total frequency
+        let totalDistance = 0;
+        let totalFrequency = 0;
+
+        routePairs.forEach(route => {
+            const frequency = route.frequency || 1;
+            totalDistance += route.distance * frequency;
+            totalFrequency += frequency;
+
+            // Track longest leg
+            if (route.distance > longestLegDistance) {
+                longestLegDistance = route.distance;
+            }
+        });
+
+        // Calculate average
+        if (totalFrequency > 0) {
+            averageTripDistance = totalDistance / totalFrequency;
+            // Round to nearest 50
+            averageTripDistance = Math.ceil(averageTripDistance / 50) * 50;
+        }
+    }
+
+    // Create custom range ring (red)
+    const customRangeInfo = createGeodesicCircle([homeAirport.lat, homeAirport.lon], customRange);
+
+    // Use different display methods based on range
+    if (customRange > 3400) {
+        // For very large ranges, use simple lines instead of polygons
+        if (customRangeInfo.isDateLineCrossing) {
+            // Create two polylines for date line crossing
+            customRangePolygons = [];
+
+            // Eastern hemisphere polyline - use only points where longitude >= 0
+            const eastLine = L.polyline(customRangeInfo.points.filter(p => p[1] >= 0), {
+                color: '#F05545',
+                weight: 2,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            // Western hemisphere polyline - use only points where longitude < 0
+            const westLine = L.polyline(customRangeInfo.points.filter(p => p[1] < 0), {
+                color: '#F05545',
+                weight: 2,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            customRangePolygons.push(eastLine, westLine);
+
+            // Add tooltip to the first line
+            eastLine.bindTooltip(`Custom Range: ${customRange} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        } else {
+            // Create a regular polyline if it doesn't cross the date line
+            const rangeLine = L.polyline(customRangeInfo.points, {
+                color: '#F05545',
+                weight: 2,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            customRangePolygons.push(rangeLine);
+
+            rangeLine.bindTooltip(`Custom Range: ${customRange} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        }
+    } else if (customRangeInfo.isDateLineCrossing) {
+        // Create two polygons for date line crossing
+        customRangePolygons = [];
+
+        // Eastern hemisphere polygon
+        const eastPolygon = L.polygon(customRangeInfo.eastPolygon, {
+            color: '#F05545',
+            weight: 2,
+            fillColor: '#F05545',
+            fillOpacity: 0.05,
+            dashArray: '5, 5',
+            pane: 'rangeCirclePane'
+        }).addTo(map);
+
+        // Western hemisphere polygon
+        const westPolygon = L.polygon(customRangeInfo.westPolygon, {
+            color: '#F05545',
+            weight: 2,
+            fillColor: '#F05545',
+            fillOpacity: 0.05,
+            dashArray: '5, 5',
+            pane: 'rangeCirclePane'
+        }).addTo(map);
+
+        customRangePolygons.push(eastPolygon, westPolygon);
+
+        // Add tooltip to the first polygon
+        eastPolygon.bindTooltip(`Custom Range: ${customRange} nm`, {
+            permanent: false,
+            direction: 'top',
+            className: 'range-tooltip'
+        });
+    } else {
+        // Create a regular circle if it doesn't cross the date line
+        rangeCircle = L.circle(customRangeInfo.center, {
+            radius: customRangeInfo.radius,
+            color: '#F05545',
+            weight: 2,
+            fillColor: '#F05545',
+            fillOpacity: 0.05,
+            dashArray: '5, 5',
+            pane: 'rangeCirclePane'
+        }).addTo(map);
+
+        rangeCircle.bindTooltip(`Custom Range: ${customRange} nm`, {
+            permanent: false,
+            direction: 'top',
+            className: 'range-tooltip'
+        });
+    }
+
+    // Create average trip range ring (white) if we have route data
+    if (averageTripDistance > 0) {
+        const avgRangeInfo = createGeodesicCircle([homeAirport.lat, homeAirport.lon], averageTripDistance);
+
+        if (averageTripDistance > 3400) {
+            // For very large ranges, use simple lines instead of polygons
+            if (avgRangeInfo.isDateLineCrossing) {
+                // Create two polylines for date line crossing
+                avgTripRangePolygons = [];
+
+                // Eastern hemisphere polyline
+                const eastLine = L.polyline(avgRangeInfo.points.filter(p => p[1] >= 0), {
+                    color: '#FFFFFF',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                // Western hemisphere polyline
+                const westLine = L.polyline(avgRangeInfo.points.filter(p => p[1] < 0), {
+                    color: '#FFFFFF',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                avgTripRangePolygons.push(eastLine, westLine);
+
+                // Add tooltip to the first line
+                eastLine.bindTooltip(`Average Trip: ${Math.round(averageTripDistance)} nm`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'range-tooltip'
+                });
+            } else {
+                // Create a regular polyline if it doesn't cross the date line
+                const rangeLine = L.polyline(avgRangeInfo.points, {
+                    color: '#FFFFFF',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                avgTripRangePolygons.push(rangeLine);
+
+                rangeLine.bindTooltip(`Average Trip: ${Math.round(averageTripDistance)} nm`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'range-tooltip'
+                });
+            }
+        } else if (avgRangeInfo.isDateLineCrossing) {
+            // Create two polygons for date line crossing
+            avgTripRangePolygons = [];
+
+            // Eastern hemisphere polygon
+            const eastPolygon = L.polygon(avgRangeInfo.eastPolygon, {
+                color: '#FFFFFF',
+                weight: 2,
+                fillColor: '#FFFFFF',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            // Western hemisphere polygon
+            const westPolygon = L.polygon(avgRangeInfo.westPolygon, {
+                color: '#FFFFFF',
+                weight: 2,
+                fillColor: '#FFFFFF',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            avgTripRangePolygons.push(eastPolygon, westPolygon);
+
+            // Add tooltip to the first polygon
+            eastPolygon.bindTooltip(`Average Trip: ${Math.round(averageTripDistance)} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        } else {
+            avgTripRangeCircle = L.circle(avgRangeInfo.center, {
+                radius: avgRangeInfo.radius,
+                color: '#FFFFFF',
+                weight: 2,
+                fillColor: '#FFFFFF',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            avgTripRangeCircle.bindTooltip(`Average Trip: ${Math.round(averageTripDistance)} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        }
+    }
+
+    // Create longest leg range ring (blue) if we have route data
+    if (longestLegDistance > 0) {
+        const longestLegInfo = createGeodesicCircle([homeAirport.lat, homeAirport.lon], longestLegDistance);
+
+        if (longestLegDistance > 3400) {
+            // For very large ranges, use simple lines instead of polygons
+            if (longestLegInfo.isDateLineCrossing) {
+                // Create two polylines for date line crossing
+                longestLegRangePolygons = [];
+
+                // Eastern hemisphere polyline
+                const eastLine = L.polyline(longestLegInfo.points.filter(p => p[1] >= 0), {
+                    color: '#3498DB',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                // Western hemisphere polyline
+                const westLine = L.polyline(longestLegInfo.points.filter(p => p[1] < 0), {
+                    color: '#3498DB',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                longestLegRangePolygons.push(eastLine, westLine);
+
+                // Add tooltip to the first line
+                eastLine.bindTooltip(`Longest Leg: ${Math.round(longestLegDistance)} nm`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'range-tooltip'
+                });
+            } else {
+                // Create a regular polyline if it doesn't cross the date line
+                const rangeLine = L.polyline(longestLegInfo.points, {
+                    color: '#3498DB',
+                    weight: 2,
+                    dashArray: '5, 5',
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+
+                longestLegRangePolygons.push(rangeLine);
+
+                rangeLine.bindTooltip(`Longest Leg: ${Math.round(longestLegDistance)} nm`, {
+                    permanent: false,
+                    direction: 'top',
+                    className: 'range-tooltip'
+                });
+            }
+        } else if (longestLegInfo.isDateLineCrossing) {
+            // Create two polygons for date line crossing
+            longestLegRangePolygons = [];
+
+            // Eastern hemisphere polygon
+            const eastPolygon = L.polygon(longestLegInfo.eastPolygon, {
+                color: '#3498DB',
+                weight: 2,
+                fillColor: '#3498DB',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            // Western hemisphere polygon
+            const westPolygon = L.polygon(longestLegInfo.westPolygon, {
+                color: '#3498DB',
+                weight: 2,
+                fillColor: '#3498DB',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            longestLegRangePolygons.push(eastPolygon, westPolygon);
+
+            // Add tooltip to the first polygon
+            eastPolygon.bindTooltip(`Longest Leg: ${Math.round(longestLegDistance)} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        } else {
+            longestLegRangeCircle = L.circle(longestLegInfo.center, {
+                radius: longestLegInfo.radius,
+                color: '#3498DB',
+                weight: 2,
+                fillColor: '#3498DB',
+                fillOpacity: 0.05,
+                dashArray: '5, 5',
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+
+            longestLegRangeCircle.bindTooltip(`Longest Leg: ${Math.round(longestLegDistance)} nm`, {
+                permanent: false,
+                direction: 'top',
+                className: 'range-tooltip'
+            });
+        }
+    }
+
+    // Add range legend
+    addRangeLegend();
+}
+
+// Create a simple circle with radius in nautical miles
+function createGeodesicCircle(centerLatLng, radiusNM) {
+    // Convert from nautical miles to meters (Leaflet uses meters)
+    const radiusMeters = radiusNM * 1852; // 1 NM = 1852 meters
+
+    // For geodesic circle, calculate points around the circumference
+    const numPoints = 144; // More points for smoother circle (every 2.5 degrees)
+    const points = [];
+
+    // Invalid inputs check
+    if (!centerLatLng || !Array.isArray(centerLatLng) || centerLatLng.length !== 2 ||
+        isNaN(centerLatLng[0]) || isNaN(centerLatLng[1]) || isNaN(radiusNM) || radiusNM <= 0) {
+        console.error("Invalid parameters for geodesic circle", centerLatLng, radiusNM);
+        return { center: centerLatLng, radius: radiusMeters };
+    }
+
+    const [lat, lng] = centerLatLng;
+
+    // Earth's radius in meters
+    const earthRadius = 6371000; // meters
+
+    // Angular radius (in radians)
+    const angularRadius = radiusMeters / earthRadius;
+
+    // For each point around the circle
+    for (let i = 0; i < numPoints; i++) {
+        const bearing = (i * 360 / numPoints) * (Math.PI / 180); // Convert to radians
+
+        // Calculate the lat/lon for this point
+        const latRad = deg2rad(lat);
+        const lngRad = deg2rad(lng);
+
+        const pointLat = Math.asin(
+            Math.sin(latRad) * Math.cos(angularRadius) +
+            Math.cos(latRad) * Math.sin(angularRadius) * Math.cos(bearing)
+        );
+
+        let pointLng = lngRad + Math.atan2(
+            Math.sin(bearing) * Math.sin(angularRadius) * Math.cos(latRad),
+            Math.cos(angularRadius) - Math.sin(latRad) * Math.sin(pointLat)
+        );
+
+        // Normalize longitude to -180 to 180
+        pointLng = ((pointLng + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+
+        points.push([rad2deg(pointLat), rad2deg(pointLng)]);
+    }
+
+    // Close the circle
+    points.push(points[0]);
+
+    // Check if circle crosses the international date line
+    if (detectDateLineCrossing(points)) {
+        // Split the circle into two polygons
+        const [eastPolygon, westPolygon] = splitCircleAtDateLine(points);
+
+        return {
+            center: centerLatLng,
+            radius: radiusMeters,
+            isDateLineCrossing: true,
+            eastPolygon: eastPolygon,
+            westPolygon: westPolygon
+        };
+    }
+
+    return {
+        center: centerLatLng,
+        radius: radiusMeters,
+        points: points,
+        isDateLineCrossing: false
+    };
+}
+
+// Helper function to split a circle that crosses the date line into two polygons
+function splitCircleAtDateLine(points) {
+    // Separate points into eastern and western hemispheres
+    const eastPoints = [];
+    const westPoints = [];
+
+    // First pass: separate points and find crossings
+    for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        const nextPoint = points[(i + 1) % points.length];
+
+        // Add current point to the appropriate hemisphere
+        if (point[1] >= 0) { // Eastern hemisphere
+            eastPoints.push([...point]); // Copy to avoid reference issues
+        } else { // Western hemisphere
+            westPoints.push([...point]); // Copy to avoid reference issues
+        }
+
+        // Check if we cross the date line between this point and the next
+        if (Math.abs(point[1] - nextPoint[1]) > 180) {
+            // Calculate the exact latitude where the line crosses the date line
+            const ratio = Math.abs(180 - Math.abs(point[1])) / Math.abs(point[1] - nextPoint[1]);
+            const crossingLat = point[0] + ratio * (nextPoint[0] - point[0]);
+
+            // Add the crossing points to both hemispheres
+            if (point[1] >= 0) { // Moving from east to west
+                eastPoints.push([crossingLat, 180]); // Eastern crossing at +180
+                westPoints.push([crossingLat, -180]); // Western crossing at -180
+            } else { // Moving from west to east
+                westPoints.push([crossingLat, -180]); // Western crossing at -180
+                eastPoints.push([crossingLat, 180]); // Eastern crossing at +180
+            }
+        }
+    }
+
+    // No points in one hemisphere, which shouldn't happen for a circle crossing the date line
+    if (eastPoints.length < 3 || westPoints.length < 3) {
+        console.error("Incomplete circle split: not enough points in one hemisphere");
+        return [points, []]; // Return original circle as fallback
+    }
+
+    // Find the northernmost and southernmost crossing points
+    // We want to sort all points with longitude ±180 by latitude
+    const eastBoundaryPoints = eastPoints.filter(p => Math.abs(p[1] - 180) < 0.001)
+        .sort((a, b) => b[0] - a[0]); // Sort by latitude, north to south
+
+    const westBoundaryPoints = westPoints.filter(p => Math.abs(p[1] + 180) < 0.001)
+        .sort((a, b) => b[0] - a[0]); // Sort by latitude, north to south
+
+    // We should have the same number of boundary points in each hemisphere
+    if (eastBoundaryPoints.length < 2 || westBoundaryPoints.length < 2) {
+        console.error("Not enough boundary points for proper split");
+        return [points, []]; // Return original points as fallback
+    }
+
+    // Extract east hemisphere points that aren't boundary points
+    const eastInteriorPoints = eastPoints.filter(p => Math.abs(p[1] - 180) >= 0.001);
+
+    // Create properly sorted eastern polygon with vertical boundary
+    const finalEastPolygon = [...eastInteriorPoints];
+
+    // Add boundary points in north-to-south order
+    for (const point of eastBoundaryPoints) {
+        finalEastPolygon.push([...point]);
+    }
+
+    // Extract west hemisphere points that aren't boundary points
+    const westInteriorPoints = westPoints.filter(p => Math.abs(p[1] + 180) >= 0.001);
+
+    // Create properly sorted western polygon with vertical boundary
+    const finalWestPolygon = [...westInteriorPoints];
+
+    // Add boundary points in south-to-north order (reverse of eastBoundaryPoints)
+    for (const point of westBoundaryPoints.slice().reverse()) {
+        finalWestPolygon.push([...point]);
+    }
+
+    // Ensure polygons are closed properly
+    if (finalEastPolygon.length > 0 &&
+        (finalEastPolygon[0][0] !== finalEastPolygon[finalEastPolygon.length - 1][0] ||
+            finalEastPolygon[0][1] !== finalEastPolygon[finalEastPolygon.length - 1][1])) {
+        finalEastPolygon.push([...finalEastPolygon[0]]);
+    }
+
+    if (finalWestPolygon.length > 0 &&
+        (finalWestPolygon[0][0] !== finalWestPolygon[finalWestPolygon.length - 1][0] ||
+            finalWestPolygon[0][1] !== finalWestPolygon[finalWestPolygon.length - 1][1])) {
+        finalWestPolygon.push([...finalWestPolygon[0]]);
+    }
+
+    return [finalEastPolygon, finalWestPolygon];
+}
+
+// Function to add a legend to the map
+function addRangeLegend() {
+    // Remove existing legend if present
+    const existingLegend = document.querySelector('.range-legend');
+    if (existingLegend) {
+        existingLegend.remove();
+    }
+
+    // Create new legend
+    const legend = L.control({ position: 'bottomleft' });
+
+    legend.onAdd = function () {
+        const div = L.DomUtil.create('div', 'range-legend');
+        div.innerHTML = `
+            <div class="bg-dark p-2 rounded" style="border: 1px solid rgba(255,255,255,0.2);">
+                <div style="font-weight: bold; margin-bottom: 8px; color: white; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">Range Rings</div>
+                <div class="d-flex align-items-center mb-2">
+                    <div style="width: 18px; height: 3px; background-color: #F05545; margin-right: 8px;"></div>
+                    <span style="color: white; font-size: 12px;">Custom: ${Math.round(currentRange)} nm</span>
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <div style="width: 18px; height: 3px; background-color: #FFFFFF; margin-right: 8px;"></div>
+                    <span style="color: white; font-size: 12px;">Average Trip: ${Math.round(averageTripDistance)} nm</span>
+                </div>
+                <div class="d-flex align-items-center">
+                    <div style="width: 18px; height: 3px; background-color: #3498DB; margin-right: 8px;"></div>
+                    <span style="color: white; font-size: 12px;">Longest Leg: ${Math.round(longestLegDistance)} nm</span>
+                </div>
+            </div>
+        `;
+
+        // Add CSS to prevent interaction with the legend so map clicks work
+        div.style.pointerEvents = 'none';
+
+        return div;
+    };
+
+    legend.addTo(map);
+}
+
+// Function to update range circles visibility based on range requirement
+function updateRangeCircles(requiredRange) {
+    // Update the custom range and refresh all rings
+    currentRange = requiredRange;
+    updateRangeRings();
+
+    // Update legend with new values
+    addRangeLegend();
+}
+
+// Function to load aircraft data on demand with the latest sheet data
+function forceRefreshAircraftRanges() {
+    // Empty function - refresh functionality is disabled
+    console.log('Refresh functionality is disabled');
+    return;
+}
+
+// Set the home airport for range circles
+function setHomeAirport(airport) {
+    homeAirport = airport;
+
+    // Remove existing range circles
+    if (rangeCircle) {
+        map.removeLayer(rangeCircle);
+        rangeCircle = null;
+    }
+    if (customRangePolygons) {
+        customRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        customRangePolygons = [];
+    }
+    if (avgTripRangeCircle) {
+        map.removeLayer(avgTripRangeCircle);
+        avgTripRangeCircle = null;
+    }
+    if (avgTripRangePolygons) {
+        avgTripRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        avgTripRangePolygons = [];
+    }
+    if (longestLegRangeCircle) {
+        map.removeLayer(longestLegRangeCircle);
+        longestLegRangeCircle = null;
+    }
+    if (longestLegRangePolygons) {
+        longestLegRangePolygons.forEach(polygon => map.removeLayer(polygon));
+        longestLegRangePolygons = [];
+    }
+
+    // Adjust center point based on airport location to ensure good visibility
+    // For airports near the date line, adjust the center to keep the whole range visible
+    let centerLng = airport.lon;
+
+    // If we're close to the international date line, adjust the view
+    // to ensure range circles are visible in our single world view
+    if (airport.lon > 140 || airport.lon < -140) {
+        // For western Pacific (east Asia), center more toward the east
+        // For eastern Pacific (west US/Canada), center more toward the west
+        centerLng = airport.lon > 0 ? airport.lon - 20 : airport.lon + 20;
+    }
+
+    // Set the map view, centered on the airport with a zoom level that shows the region
+    map.setView([airport.lat, centerLng], 4);
+
+    // Create new range rings
+    updateRangeRings();
+
+    // Show success message
+    showToast(`Home airport set to ${airport.iata} - ${airport.city}`, 'success');
+
+    // Update home airport display
+    document.getElementById('home-airport-search').value = `${airport.iata} - ${airport.city}`;
+    document.getElementById('home-airport-results').classList.add('d-none');
+}
+
+// Update range slider and related elements
+function updateRangeSlider(newRange) {
+    const rangeSlider = document.getElementById('range-slider');
+    if (!rangeSlider) {
+        console.log("Range slider element not found");
+        return;
+    }
+
+    // Use a safe default if no value provided
+    if (newRange === undefined || isNaN(parseInt(newRange))) {
+        console.log("Invalid range value provided, using current slider value");
+        newRange = parseInt(rangeSlider.value || 500);
+    }
+
+    // Ensure the range is an integer
+    newRange = parseInt(newRange);
+    console.log(`Setting range slider to ${newRange} nm`);
+
+    // Update the slider value first
+    rangeSlider.value = newRange;
+
+    // Then update visual display elements
+    const rangeValue = document.getElementById('range-value');
+    const rangeValue2 = document.getElementById('range-value-2');
+    if (rangeValue) rangeValue.textContent = newRange.toLocaleString();
+    if (rangeValue2) rangeValue2.textContent = newRange.toLocaleString();
+
+    // Update global current range value
+    currentRange = newRange;
+
+    // Apply the change to the map immediately
+    updateRangeCircles(newRange);
+
+    // Provide user feedback
+    showToast(`Updated range filter to ${newRange.toLocaleString()} nm`, 'info');
+}
+
+// Initialize range slider event listeners
+function initRangeSlider() {
+    const rangeSlider = document.getElementById('range-slider');
+    const resetRangeBtn = document.getElementById('reset-range-btn');
+    let rangeUpdateTimer;
+
+    if (rangeSlider) {
+        // Add a more responsive input event that updates on every change
+        rangeSlider.addEventListener('input', function () {
+            const range = parseInt(this.value);
+            if (isNaN(range)) return;
+
+            // Update range value display immediately
+            const rangeValue = document.getElementById('range-value');
+            const rangeValue2 = document.getElementById('range-value-2');
+            if (rangeValue) rangeValue.textContent = range.toLocaleString();
+            if (rangeValue2) rangeValue2.textContent = range.toLocaleString();
+
+            // Debounce the actual circle updates to prevent too many updates during sliding
+            clearTimeout(rangeUpdateTimer);
+            rangeUpdateTimer = setTimeout(() => {
+                console.log(`Range slider changed to: ${range} nm - updating custom range ring`);
+                currentRange = range; // Update current range immediately
+                updateRangeCircles(range); // Apply the new range
+            }, 50); // Small timeout for better performance during sliding
+        });
+
+        // When slider is released, ensure the final value is applied
+        rangeSlider.addEventListener('change', function () {
+            const range = parseInt(this.value);
+            if (isNaN(range)) return;
+
+            console.log(`Range slider final value: ${range} nm`);
+
+            // Cancel any pending updates
+            clearTimeout(rangeUpdateTimer);
+
+            // Apply the final range immediately
+            currentRange = range;
+            updateRangeCircles(range);
+
+            // Show user feedback
+            showToast(`Custom range set to ${range.toLocaleString()} nm`, 'success');
+        });
+    }
+
+    if (resetRangeBtn) {
+        resetRangeBtn.addEventListener('click', function () {
+            // If routes exist, set to average trip distance
+            if (routePairs.length > 0) {
+                const totalDistance = routePairs.reduce((sum, route) => sum + route.distance, 0);
+                const averageDistance = Math.round(totalDistance / routePairs.length);
+                console.log(`Reset range to route average: ${averageDistance} nm`);
+                updateRangeSlider(averageDistance);
+                showToast(`Custom range reset to average route distance: ${averageDistance.toLocaleString()} nm`, 'success');
+            } else {
+                // Default to 500 if no routes
+                console.log('Reset range to default: 500 nm');
+                updateRangeSlider(500);
+                showToast('Custom range reset to default: 500 nm', 'success');
+            }
+        });
+    }
+}
+
+// Update range slider when route pairs change
+function updateAverageLegDistance() {
+    let averageDistance = 500; // Default value
+    let totalFrequency = 0;
+    let totalWeightedDistance = 0;
+
+    if (routePairs.length > 0) {
+        // Calculate total distance and frequency for true weighted average
+        routePairs.forEach(route => {
+            totalWeightedDistance += route.distance * route.frequency;
+            totalFrequency += route.frequency;
+        });
+
+        // True weighted average: total miles / total trips
+        if (totalFrequency > 0) {
+            averageDistance = Math.round(totalWeightedDistance / totalFrequency);
+        } else {
+            // Fall back to simple average if no frequencies
+            const totalDistance = routePairs.reduce((sum, route) => sum + route.distance, 0);
+            averageDistance = Math.round(totalDistance / routePairs.length);
+        }
+    }
+
+    // Update the range slider with the new average distance
+    updateRangeSlider(averageDistance);
+
+    // Store the current range for the Google Sheet updates
+    currentRange = averageDistance;
+
+    // Update the Google Sheet with new values
+    updateGoogleSheetInputs();
+
+    // Display a toast message about the updated range
+    if (routePairs.length > 0) {
+        showToast(`Route average: ${averageDistance} nm (${totalFrequency} total trips)`, 'info');
+    }
+}
+
+// Add a route pair between two airports
+function addRoutePair(fromAirport, toAirport) {
+    if (!fromAirport || !toAirport) return;
+
+    // Default frequency is 1
+    const frequency = 1;
+
+    const legDistance = calculateDistance(fromAirport.lat, fromAirport.lon, toAirport.lat, toAirport.lon);
+
+    const routePair = {
+        id: `${fromAirport.iata}-${toAirport.iata}-${Date.now()}`,
+        from: fromAirport,
+        to: toAirport,
+        distance: legDistance,
+        frequency: frequency,
+        totalDistance: legDistance * frequency
+    };
+
+    routePairs.push(routePair);
+
+    console.log(`Adding route ${fromAirport.iata}-${toAirport.iata}, distance: ${Math.round(legDistance)} nm`);
+
+    // Generate route points for proper great circle path
+    const routePoints = generateGreatCirclePath(
+        [fromAirport.lat, fromAirport.lon],
+        [toAirport.lat, toAirport.lon],
+        Math.max(30, Math.min(120, Math.ceil(legDistance / 30)))
+    );
+
+    // Draw a single continuous route line
+    const routeLine = L.polyline(routePoints, {
+        color: '#F05545',
+        weight: 3,
+        opacity: 0.8
+    }).addTo(map);
+
+    // Store the route line
+    allRouteLines.set(routePair.id, [routeLine]);
+
+    // Add markers for each airport
+    const fromIcon = L.divIcon({
+        className: 'airport-marker',
+        html: `<div class="airport-icon">${fromAirport.iata}</div>`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+    });
+
+    const toIcon = L.divIcon({
+        className: 'airport-marker',
+        html: `<div class="airport-icon">${toAirport.iata}</div>`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+    });
+
+    const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
+        icon: fromIcon
+    }).addTo(map);
+
+    const toMarker = L.marker([toAirport.lat, toAirport.lon], {
+        icon: toIcon
+    }).addTo(map);
+
+    // Add popups with airport info and delete button
+    fromMarker.bindPopup(`
+        <strong>${fromAirport.iata}</strong><br>
+        ${fromAirport.name}<br>
+        ${fromAirport.city}, ${fromAirport.country || ''}<br>
+        <button class="btn btn-sm btn-danger mt-2 delete-route-btn" data-route-id="${routePair.id}">Delete Route</button>
+    `);
+
+    toMarker.bindPopup(`
+        <strong>${toAirport.iata}</strong><br>
+        ${toAirport.name}<br>
+        ${toAirport.city}, ${toAirport.country || ''}<br>
+        <button class="btn btn-sm btn-danger mt-2 delete-route-btn" data-route-id="${routePair.id}">Delete Route</button>
+    `);
+
+    // Add event listeners for delete buttons
+    fromMarker.on('popupopen', function () {
+        const btn = document.querySelector(`.delete-route-btn[data-route-id="${routePair.id}"]`);
+        if (btn) {
+            btn.addEventListener('click', function () {
+                deleteRoutePair(routePair.id);
+                fromMarker.closePopup();
+            });
+        }
+    });
+
+    toMarker.on('popupopen', function () {
+        const btn = document.querySelector(`.delete-route-btn[data-route-id="${routePair.id}"]`);
+        if (btn) {
+            btn.addEventListener('click', function () {
+                deleteRoutePair(routePair.id);
+                toMarker.closePopup();
+            });
+        }
+    });
+
+    // Update routes display
+    updateRoutesDisplay();
+
+    // Clear selections
+    selectedFromAirport = null;
+    selectedToAirport = null;
+    document.getElementById('from-airport').value = '';
+    document.getElementById('to-airport').value = '';
+
+    // Update range rings after adding a route
+    updateRangeRings();
+}
+
+// Generate a great circle path between two points
+function generateGreatCirclePath(from, to, numPoints) {
+    const points = [];
+
+    // Add the starting point
+    points.push(from);
+
+    // Calculate the great circle path
+    const fromLat = deg2rad(from[0]);
+    const fromLon = deg2rad(from[1]);
+    const toLat = deg2rad(to[0]);
+    const toLon = deg2rad(to[1]);
+
+    // Handle date line crossing by choosing the direction that avoids it
+    // We'll take the shorter path around the globe
+    let deltaLon = toLon - fromLon;
+
+    // Ensure we take the shorter path around the globe
+    if (Math.abs(deltaLon) > Math.PI) {
+        // If the difference is greater than 180 degrees, go the other way
+        deltaLon = deltaLon > 0 ? deltaLon - 2 * Math.PI : deltaLon + 2 * Math.PI;
+    }
+
+    // Angular distance between points
+    const d = 2 * Math.asin(
+        Math.sqrt(
+            Math.pow(Math.sin((fromLat - toLat) / 2), 2) +
+            Math.cos(fromLat) * Math.cos(toLat) *
+            Math.pow(Math.sin(deltaLon / 2), 2)
+        )
+    );
+
+    // Generate intermediate points
+    for (let i = 1; i < numPoints; i++) {
+        const f = i / numPoints; // Fraction along the path
+
+        // For very short distances, linear interpolation
+        if (d < 0.0001) {
+            const lat = from[0] + f * (to[0] - from[0]);
+
+            // Special handling for longitude to ensure we stay in -180 to 180 range
+            let lon = from[1] + f * (to[1] - from[1]);
+            while (lon > 180) lon -= 360;
+            while (lon < -180) lon += 360;
+
+            points.push([lat, lon]);
+            continue;
+        }
+
+        // Calculate intermediate point using spherical formulas
+        const a = Math.sin((1 - f) * d) / Math.sin(d);
+        const b = Math.sin(f * d) / Math.sin(d);
+
+        const x = a * Math.cos(fromLat) * Math.cos(fromLon) +
+            b * Math.cos(toLat) * Math.cos(toLon);
+        const y = a * Math.cos(fromLat) * Math.sin(fromLon) +
+            b * Math.cos(toLat) * Math.sin(toLon);
+        const z = a * Math.sin(fromLat) + b * Math.sin(toLat);
+
+        const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+        let lon = Math.atan2(y, x);
+
+        // Convert back to degrees
+        points.push([
+            rad2deg(lat),
+            rad2deg(lon)
+        ]);
+    }
+
+    // Add the ending point
+    points.push(to);
+
+    // Post-process the path to ensure longitude continuity
+    for (let i = 1; i < points.length; i++) {
+        const prevLon = points[i - 1][1];
+        let currentLon = points[i][1];
+
+        // If there's a large jump in longitude, adjust it
+        if (Math.abs(currentLon - prevLon) > 180) {
+            // Determine which way to wrap
+            if (currentLon > prevLon) {
+                // Current point is far east of previous point
+                while (currentLon - prevLon > 180) {
+                    currentLon -= 360;
+                }
+            } else {
+                // Current point is far west of previous point
+                while (prevLon - currentLon > 180) {
+                    currentLon += 360;
+                }
+            }
+            points[i][1] = currentLon;
+        }
+    }
+
+    return points;
+}
+
+// Detect if a path crosses the international date line
+function detectDateLineCrossing(points) {
+    // Check consecutive points for large longitude differences
+    for (let i = 0; i < points.length - 1; i++) {
+        const p1 = points[i];
+        const p2 = points[i + 1];
+
+        // If longitude difference is greater than 180°, it crosses the date line
+        if (Math.abs(p1[1] - p2[1]) > 180) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Create a geodesic line that follows the shortest path around the globe
+function createGeodesicLine(startLatLng, endLatLng) {
+    // Convert degrees to radians
+    const startLat = deg2rad(startLatLng[0]);
+    const startLng = deg2rad(startLatLng[1]);
+    const endLat = deg2rad(endLatLng[0]);
+    const endLng = deg2rad(endLatLng[1]);
+
+    // Number of intermediate points
+    const numPoints = 100;
+
+    // Array to hold the points
+    const points = [startLatLng];
+
+    // Check if we're going east-west (primarily longitude change)
+    const latDiff = Math.abs(endLatLng[0] - startLatLng[0]);
+    const lngDiff = Math.abs(endLatLng[1] - startLatLng[1]);
+    const isEastWestRoute = lngDiff > latDiff;
+
+    // Check if we cross the antimeridian (international date line)
+    const crossesAntimeridian = Math.abs(endLatLng[1] - startLatLng[1]) > 180;
+
+    // For routes crossing the date line with worldCopyJump enabled,
+    // we need a special handling to draw the shorter path
+    if (crossesAntimeridian) {
+        // Determine which direction to go around the world (east or west)
+        // We want the shorter path
+        const goEast = shouldGoEast(startLatLng[1], endLatLng[1]);
+
+        // Create the points
+        for (let i = 1; i < numPoints; i++) {
+            const fraction = i / numPoints;
+
+            // Handle longitude wrapping appropriately
+            let intermediateLng;
+            if (goEast) {
+                // Going east - ensure proper wrapping
+                if (startLatLng[1] > endLatLng[1]) {
+                    // When starting east and going west across the date line
+                    intermediateLng = startLatLng[1] + (360 - Math.abs(startLatLng[1] - endLatLng[1])) * fraction;
+                    if (intermediateLng > 180) intermediateLng -= 360;
+                } else {
+                    // Normal east movement
+                    intermediateLng = startLatLng[1] + (endLatLng[1] - startLatLng[1]) * fraction;
+                }
+            } else {
+                // Going west - ensure proper wrapping
+                if (startLatLng[1] < endLatLng[1]) {
+                    // When starting west and going east across the date line
+                    intermediateLng = startLatLng[1] - (360 - Math.abs(startLatLng[1] - endLatLng[1])) * fraction;
+                    if (intermediateLng < -180) intermediateLng += 360;
+                } else {
+                    // Normal west movement
+                    intermediateLng = startLatLng[1] + (endLatLng[1] - startLatLng[1]) * fraction;
+                }
+            }
+
+            // Linear interpolation for latitude
+            const intermediateLat = startLatLng[0] + (endLatLng[0] - startLatLng[0]) * fraction;
+
+            points.push([intermediateLat, intermediateLng]);
+        }
+    } else {
+        // For normal routes, use great circle path
+        for (let i = 1; i < numPoints; i++) {
+            const fraction = i / numPoints;
+            const point = intermediatePoint(startLat, startLng, endLat, endLng, fraction);
+            points.push([rad2deg(point[0]), rad2deg(point[1])]);
+        }
+    }
+
+    // Add end point
+    points.push(endLatLng);
+
+    return points;
+}
+
+// Determine whether to go east or west between two longitudes for the shortest path
+function shouldGoEast(lon1, lon2) {
+    // Normalize longitudes to be between -180 and 180
+    lon1 = ((lon1 + 180) % 360) - 180;
+    lon2 = ((lon2 + 180) % 360) - 180;
+
+    // Calculate distance going east and west
+    let distEast, distWest;
+
+    if (lon1 <= lon2) {
+        // Normal case
+        distEast = lon2 - lon1;
+        distWest = (lon1 + 360) - lon2;
+    } else {
+        // When lon1 > lon2
+        distEast = (lon2 + 360) - lon1;
+        distWest = lon1 - lon2;
+    }
+
+    // Return true if going east is shorter or equal
+    return distEast <= distWest;
+}
+
+// Calculate bearing from point 1 to point 2
+function calculateBearing(lat1, lon1, lat2, lon2) {
+    const lat1Rad = deg2rad(lat1);
+    const lat2Rad = deg2rad(lat2);
+    const lonDiff = deg2rad(lon2 - lon1);
+
+    const y = Math.sin(lonDiff) * Math.cos(lat2Rad);
+    const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+        Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lonDiff);
+
+    let bearing = Math.atan2(y, x);
+    bearing = rad2deg(bearing);
+    return (bearing + 360) % 360; // Normalize to 0-360
+}
+
+// Calculate intermediate point on a great circle
+function intermediatePoint(lat1, lng1, lat2, lng2, fraction) {
+    const d = 2 * Math.asin(
+        Math.sqrt(
+            Math.pow(Math.sin((lat1 - lat2) / 2), 2) +
+            Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin((lng1 - lng2) / 2), 2)
+        )
+    );
+
+    if (d === 0) {
+        return [rad2deg(lat1), rad2deg(lng1)];
+    }
+
+    const A = Math.sin((1 - fraction) * d) / Math.sin(d);
+    const B = Math.sin(fraction * d) / Math.sin(d);
+
+    const x = A * Math.cos(lat1) * Math.cos(lng1) + B * Math.cos(lat2) * Math.cos(lng2);
+    const y = A * Math.cos(lat1) * Math.sin(lng1) + B * Math.cos(lat2) * Math.sin(lng2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+
+    const lat = Math.atan2(z, Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2)));
+    const lng = Math.atan2(y, x);
+
+    return [lat, lng];
+}
+
+// Convert radians to degrees
+function rad2deg(rad) {
+    return rad * 180 / Math.PI;
+}
+
+// Update the route display in the UI
+function updateRoutesDisplay() {
+    const routesContainer = document.getElementById('routes-container');
+    const totalDistanceElement = document.getElementById('total-distance');
+
+    if (!routesContainer || !totalDistanceElement) return;
+
+    // Calculate various metrics
+    if (routePairs.length > 0) {
+        // Find the longest leg distance
+        longestLegDistance = Math.max(...routePairs.map(route => route.distance));
+
+        // Calculate weighted average distance
+        let totalWeightedDistance = 0;
+        let totalFrequency = 0;
+        routePairs.forEach(route => {
+            totalWeightedDistance += route.distance * route.frequency;
+            totalFrequency += route.frequency;
+        });
+        const weightedAvgDistance = totalFrequency > 0 ? Math.round(totalWeightedDistance / totalFrequency) : 0;
+
+        // Update the display to show average, longest leg, and total trips
+        totalDistanceElement.textContent = `${Math.round(weightedAvgDistance)} nm avg, ${Math.round(longestLegDistance)} nm longest, ${totalFrequency} trips`;
+
+        // Update average trip distance for the range rings
+        averageTripDistance = weightedAvgDistance;
+    } else {
+        totalDistanceElement.textContent = '0 nm avg, 0 nm longest, 0 trips';
+        longestLegDistance = 0;
+        averageTripDistance = 500;
+    }
+
+    // Update routes list
+    routesContainer.innerHTML = '';
+
+    if (routePairs.length === 0) {
+        routesContainer.innerHTML = '<div class="text-secondary text-center">No routes added</div>';
+        return;
+    }
+
+    // Calculate total weighted distance for percentage calculation
+    const totalWeightedDistance = routePairs.reduce((sum, route) => sum + (route.distance * route.frequency), 0);
+    const totalTrips = routePairs.reduce((sum, route) => sum + route.frequency, 0);
+
+    routePairs.forEach(route => {
+        const percentage = totalWeightedDistance > 0
+            ? Math.round((route.distance * route.frequency / totalWeightedDistance) * 100)
+            : 0;
+        const tripPercentage = totalTrips > 0
+            ? Math.round((route.frequency / totalTrips) * 100)
+            : 0;
+
+        // Highlight the longest leg
+        const isLongestLeg = Math.abs(route.distance - longestLegDistance) < 0.1;
+        const routeItemClass = isLongestLeg ? 'route-item p-2 mb-2 rounded border border-primary' : 'route-item p-2 mb-2 rounded';
+        const distanceClass = isLongestLeg ? 'text-primary' : 'text-danger';
+
+        const routeItem = document.createElement('div');
+        routeItem.className = routeItemClass;
+        routeItem.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <div>
+                    <strong>${route.from.iata}</strong> → <strong>${route.to.iata}</strong>
+                    <div class="text-secondary small">${route.from.city} to ${route.to.city}</div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger delete-route" data-id="${route.id}">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="${distanceClass}">
+                    <div>${Math.round(route.distance)} nm per leg ${isLongestLeg ? '(Longest)' : ''}</div>
+                    <div class="text-secondary small">
+                        ${Math.round(route.distance * route.frequency)} nm total (${percentage}%)
+                    </div>
+                    <div class="text-secondary small">
+                        ${route.frequency} legs per year (${tripPercentage}%)
+                    </div>
+                </div>
+                <div class="d-flex align-items-center">
+                    <label class="text-white me-2 small">Legs/Year:</label>
+                    <input type="number" class="form-control form-control-sm route-frequency" 
+                           style="width: 60px;" min="1" value="${route.frequency}" 
+                           data-id="${route.id}">
+                </div>
+            </div>
+        `;
+
+        const deleteBtn = routeItem.querySelector('.delete-route');
+        deleteBtn.addEventListener('click', () => deleteRoutePair(route.id));
+
+        // Add event listener for frequency changes
+        const frequencyInput = routeItem.querySelector('.route-frequency');
+        frequencyInput.addEventListener('change', function () {
+            const newFrequency = parseInt(this.value) || 1;
+            if (newFrequency < 1) this.value = 1;
+            updateRouteFrequency(route.id, newFrequency);
+        });
+
+        routesContainer.appendChild(routeItem);
+    });
+
+    // Update the range rings to reflect new route data
+    updateRangeRings();
+}
+
+// Delete a route pair by ID
+function deleteRoutePair(pairId) {
+    // Remove from the array
+    const index = routePairs.findIndex(route => route.id === pairId);
+    if (index !== -1) {
+        routePairs.splice(index, 1);
+    }
+
+    // Remove from the map
+    const routeLines = allRouteLines.get(pairId);
+    if (routeLines) {
+        // Remove each route segment
+        routeLines.forEach(line => {
+            map.removeLayer(line);
+        });
+        allRouteLines.delete(pairId);
+    }
+
+    // Update displays
+    updateRoutesDisplay();
+    updateRangeRings();
+
+    console.log(`Deleted route: ${pairId}`);
+}
+
+// Clear all routes
+function clearAllRoutes() {
+    // Remove all lines from map
+    allRouteLines.forEach(routeLines => {
+        // Each route may have multiple line segments
+        routeLines.forEach(line => {
+            map.removeLayer(line);
+        });
+    });
+
+    // Clear collections
+    allRouteLines.clear();
+    routePairs = [];
+
+    // Update displays
+    updateRoutesDisplay();
+    updateRangeRings();
+
+    console.log('Cleared all routes');
+}
+
+// Make sure to resize the map when the container size changes
+function resizeMap() {
+    if (map) {
+        // Force the map to resize after the layout has loaded
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 500);
+    }
+}
+
+// Event listener setup for the page
+document.addEventListener('DOMContentLoaded', function () {
+    console.log('JetFinder initializing...');
+
+    // Initialize the map
+    initMap();
+
+    // Show welcome message and instructions
+    showToast('Welcome to JetFinder! Please select a home airport', 'info');
+
+    // Enable typeahead search for home airport
+    setupAirportSearch();
+
+    // Set up Google Sheet interactions
+    setupGoogleSheetInteractions();
+
+    // Set up auto-update for Google Sheet data
+    setupGoogleSheetAutoUpdate();
+
+    // Initialize range slider
+    initRangeSlider();
+
+    // Add event listeners for route planning
+    setupRoutePlanning();
+
+    // Add resize handler for the map
+    window.addEventListener('resize', resizeMap);
+
+    // Ensure map is properly sized after page load
+    resizeMap();
+});
+
+// Setup airport search event listeners
+function setupAirportSearchEventListeners() {
+    const fromAirportInput = document.getElementById('from-airport');
+    const toAirportInput = document.getElementById('to-airport');
+    const searchFromBtn = document.getElementById('search-from-btn');
+    const searchToBtn = document.getElementById('search-to-btn');
+    const fromAirportResults = document.getElementById('from-airport-results');
+    const toAirportResults = document.getElementById('to-airport-results');
+    const fromAirportList = document.getElementById('from-airport-list');
+    const toAirportList = document.getElementById('to-airport-list');
+
+    if (fromAirportInput) {
+        fromAirportInput.addEventListener('input', function () {
+            const query = this.value.trim();
+            if (query.length >= 2) {
+                searchAirports(query, fromAirportList, fromAirportResults, 'from');
+            } else {
+                fromAirportResults.classList.add('d-none');
+            }
+        });
+    }
+
+    if (toAirportInput) {
+        toAirportInput.addEventListener('input', function () {
+            const query = this.value.trim();
+            if (query.length >= 2) {
+                searchAirports(query, toAirportList, toAirportResults, 'to');
+            } else {
+                toAirportResults.classList.add('d-none');
+            }
+        });
+    }
+
+    if (searchFromBtn) {
+        searchFromBtn.addEventListener('click', function () {
+            const query = fromAirportInput.value.trim();
+            if (query.length >= 2) {
+                searchAirports(query, fromAirportList, fromAirportResults, 'from');
+            }
+        });
+    }
+
+    if (searchToBtn) {
+        searchToBtn.addEventListener('click', function () {
+            const query = toAirportInput.value.trim();
+            if (query.length >= 2) {
+                searchAirports(query, toAirportList, toAirportResults, 'to');
+            }
+        });
+    }
+
+    // Close search results when clicking outside
+    document.addEventListener('click', function (event) {
+        if (fromAirportResults && !fromAirportInput.contains(event.target) && !fromAirportResults.contains(event.target)) {
+            fromAirportResults.classList.add('d-none');
+        }
+
+        if (toAirportResults && !toAirportInput.contains(event.target) && !toAirportResults.contains(event.target)) {
+            toAirportResults.classList.add('d-none');
+        }
+    });
+}
+
+// Setup route planning event listeners
+function setupRoutePlanningEventListeners() {
+    const addRouteBtn = document.getElementById('add-route-btn');
+    const clearRoutesBtn = document.getElementById('clear-routes-btn');
+
+    if (addRouteBtn) {
+        addRouteBtn.addEventListener('click', function () {
+            if (selectedFromAirport && selectedToAirport) {
+                addRoutePair(selectedFromAirport, selectedToAirport);
+            } else {
+                showToast('Please select both departure and arrival airports', 'warning');
+            }
+        });
+    }
+
+    if (clearRoutesBtn) {
+        clearRoutesBtn.addEventListener('click', function () {
+            clearAllRoutes();
+        });
+    }
+}
+
+// Handle airport search input
+function searchAirports(query, resultsList, resultsContainer, type = 'from') {
+    if (!query.trim()) {
+        resultsContainer.classList.add('d-none');
+        return;
+    }
+
+    // Show loading state
+    resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">Searching...</div>';
+    resultsContainer.classList.remove('d-none');
+
+    // Fetch airports from API
+    fetch(`/api/airports?q=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(airports => {
+            resultsList.innerHTML = '';
+
+            if (airports.length === 0) {
+                resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">No airports found</div>';
+                return;
+            }
+
+            airports.forEach(airport => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'list-group-item list-group-item-action bg-dark text-white border-secondary';
+
+                item.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    ${airport.iata ? `<strong class="me-2">${airport.iata}</strong>` : ''}
+                    ${airport.icao ? `<span class="text-info">${airport.icao}</span>` : ''}
+                </div>
+                ${airport.size ? `<span class="badge bg-danger">${airport.size}</span>` : ''}
+            </div>
+            <div class="text-truncate">${airport.name}</div>
+            <small class="text-secondary text-truncate d-block">${airport.city}, ${airport.country}</small>
+        `;
+
+                item.addEventListener('click', function () {
+                    if (type === 'from') {
+                        selectedFromAirport = airport;
+                        document.getElementById('from-airport').value = `${airport.iata} - ${airport.city}`;
+                    } else {
+                        selectedToAirport = airport;
+                        document.getElementById('to-airport').value = `${airport.iata} - ${airport.city}`;
+                    }
+                    resultsContainer.classList.add('d-none');
+                });
+
+                resultsList.appendChild(item);
+            });
+        })
+        .catch(error => {
+            console.error('Error searching airports:', error);
+            resultsList.innerHTML = '<div class="list-group-item bg-dark text-white">Error searching airports</div>';
+        });
+}
+
+// Calculate distance between two points using Haversine formula
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 3440.065; // Radius of the earth in nautical miles
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in nm
+    return distance;
+}
+
+// Convert degrees to radians
+function deg2rad(deg) {
+    return deg * (Math.PI / 180);
+}
+
+// Show toast message
+function showToast(message, type = 'info') {
+    // Disabled toast notifications - just log to console instead
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    // Original toast code removed
+}
+
+// Load aircraft data and apply filters
+function loadAircraftData() {
+    // Show loading indicator
+    const tableContainer = document.getElementById('aircraft-table-container');
+    if (tableContainer) {
+        tableContainer.classList.add('loading');
+    }
+
+    // Get filter values
+    const yearMin = document.getElementById('year-min')?.value || '';
+    const rangeMin = document.getElementById('range-min')?.value || '';
+    const passengersMin = document.getElementById('passengers-min')?.value || '';
+    const priceMax = document.getElementById('price-max')?.value || '';
+    const manufacturer = getMultiSelectValues('manufacturer') || [];
+    const aircraftType = getMultiSelectValues('aircraft-type') || [];
+    const multiEngine = document.getElementById('multi-engine')?.value || '';
+    const minCrew = document.getElementById('min-crew')?.value || '';
+    const maxAltitude = document.getElementById('max-altitude')?.value || '';
+    const balancedFieldLength = document.getElementById('balanced-field-length')?.value || '';
+    const aircraftHeight = document.getElementById('aircraft-height')?.value || '';
+    const aircraftWingspan = document.getElementById('aircraft-wingspan')?.value || '';
+    const aircraftLength = document.getElementById('aircraft-length')?.value || '';
+    const cabinHeight = document.getElementById('cabin-height')?.value || '';
+    const cabinWidth = document.getElementById('cabin-width')?.value || '';
+    const cabinLength = document.getElementById('cabin-length')?.value || '';
+    const baggageVolume = document.getElementById('baggage-volume')?.value || '';
+    const speedMin = document.getElementById('speed-min')?.value || '';
+
+    // Build URL with query parameters
+    const params = new URLSearchParams();
+    if (yearMin) params.append('year_min', yearMin);
+    if (rangeMin) params.append('range_min', rangeMin);
+    if (passengersMin) params.append('passengers_min', passengersMin);
+    if (priceMax) params.append('price_max', priceMax);
+    if (speedMin) params.append('speed_min', speedMin);
+
+    // Add manufacturer and aircraft type as multi-select parameters
+    manufacturer.forEach(m => params.append('manufacturer_list', m));
+    aircraftType.forEach(t => params.append('aircraft_type', t));
+
+    if (multiEngine) params.append('multi_engine', multiEngine);
+    if (minCrew) params.append('min_crew', minCrew);
+    if (maxAltitude) params.append('max_altitude', maxAltitude);
+    if (balancedFieldLength) params.append('balanced_field_length', balancedFieldLength);
+    if (aircraftHeight) params.append('aircraft_height', aircraftHeight);
+    if (aircraftWingspan) params.append('aircraft_wingspan', aircraftWingspan);
+    if (aircraftLength) params.append('aircraft_length', aircraftLength);
+    if (cabinHeight) params.append('cabin_height', cabinHeight);
+    if (cabinWidth) params.append('cabin_width', cabinWidth);
+    if (cabinLength) params.append('cabin_length', cabinLength);
+    if (baggageVolume) params.append('baggage_volume', baggageVolume);
+
+    // Add financial inputs
+    const depreciationRate = document.getElementById('depreciation-rate')?.value || '4';
+    const yearsOwnership = document.getElementById('years-ownership')?.value || '5';
+    const jetAPrice = document.getElementById('jet-a-price')?.value || '5.50';
+    const avgasPrice = document.getElementById('avgas-price')?.value || '6.50';
+    const numTrips = document.getElementById('num-trips')?.value || '50';
+    const plannedPassengers = document.getElementById('planned-passengers')?.value || '4';
+    const passengerPay = document.getElementById('passenger-pay')?.value || '200';
+    const charterTrips = document.getElementById('charter-trips')?.value || '25';
+
+    // Add calculated average trip length from route planning if available
+    let avgTripLength = '500'; // Default value
+    if (routePairs.length > 0) {
+        const totalDistance = routePairs.reduce((sum, route) => sum + route.distance, 0);
+        avgTripLength = Math.round(totalDistance / routePairs.length).toString();
+    }
+
+    params.append('depreciation_rate', depreciationRate);
+    params.append('years_ownership', yearsOwnership);
+    params.append('jet_a_price', jetAPrice);
+    params.append('avgas_price', avgasPrice);
+    params.append('avg_trip_length', avgTripLength);
+    params.append('num_trips', numTrips);
+    params.append('planned_passengers', plannedPassengers);
+    params.append('passenger_pay', passengerPay);
+    params.append('charter_trips', charterTrips);
+
+    // Add parameter to indicate whether to use Google Sheets
+    params.append('use_sheets', 'true');
+
+    // Fetch aircraft data from server using GET with URL parameters
+    fetch(`/api/aircraft?${params.toString()}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(responseData => {
+            // Check the response format and extract aircraft data
+            let dataSource = "unknown";
+            if (responseData.hasOwnProperty('aircraft') && responseData.hasOwnProperty('data_source')) {
+                // New response format with data source info
+                aircraftData = responseData.aircraft;
+                dataSource = responseData.data_source;
+            } else {
+                // Old response format (direct array)
+                aircraftData = Array.isArray(responseData) ? responseData : [];
+            }
+
+            // Update the range circles based on the current range filter
+            const requiredRange = parseInt(document.getElementById('range-slider')?.value || '0');
+            updateRangeCircles(requiredRange);
+
+            // Update the results count
+            const resultsCount = document.getElementById('results-count');
+            if (resultsCount) {
+                resultsCount.textContent = aircraftData.length;
+            }
+
+            // Display data source information
+            if (dataSource !== "unknown") {
+                const sourceIcon = dataSource === "google_sheets" ? "📊" : "📁";
+                const sourceText = dataSource === "google_sheets" ? "Google Sheets" : "Local CSV";
+                showToast(`${sourceIcon} Data source: ${sourceText}`, 'info');
+            }
+
+            // Render the aircraft table
+            renderAircraftTable();
+
+            // Hide loading indicator
+            if (tableContainer) {
+                tableContainer.classList.remove('loading');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading aircraft data:', error);
+
+            // Hide loading indicator
+            if (tableContainer) {
+                tableContainer.classList.remove('loading');
+            }
+
+            // Show detailed error message
+            const errorMessage = error.message || 'Error loading aircraft data';
+            showToast(`Error: ${errorMessage}. Check browser console for details.`, 'danger');
+        });
+}
+
+// Get values from multi-select inputs
+function getMultiSelectValues(inputId) {
+    const input = document.getElementById(inputId);
+    return input && input.value ? input.value.split(',').filter(v => v) : [];
+}
+
+// Render the aircraft table with filtered data
+function renderAircraftTable() {
+    const tableBody = document.querySelector('#aircraft-table tbody');
+    if (!tableBody) return;
+
+    // Clear the table
+    tableBody.innerHTML = '';
+
+    // If no data is available
+    if (!aircraftData || aircraftData.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="31" class="text-center">No aircraft matching the filters</td>`;
+        tableBody.appendChild(row);
+        return;
+    }
+
+    // Sort data if needed (implement your sorting logic here)
+    // Example: aircraftData.sort((a, b) => a.year_min - b.year_min);
+
+    // Render each aircraft row
+    aircraftData.forEach(aircraft => {
+        const row = document.createElement('tr');
+        row.dataset.id = aircraft.id;
+
+        // Add selection checkbox
+        row.innerHTML = `
+            <td><input type="checkbox" class="aircraft-select" data-id="${aircraft.id}"></td>
+            <td>${aircraft.model || ''}</td>
+            <td>${aircraft.manufacturer || ''}</td>
+            <td>${aircraft.type || ''}</td>
+            <td>${aircraft.multi_engine || ''}</td>
+            <td>${aircraft.year_range || ''}</td>
+            <td>${aircraft.min_crew || ''}</td>
+            <td>${formatNumber(aircraft.max_altitude) || ''}</td>
+            <td>${formatNumber(aircraft.balanced_field_length) || ''}</td>
+            <td>${formatNumber(aircraft.height, 1) || ''}</td>
+            <td>${formatNumber(aircraft.wingspan, 1) || ''}</td>
+            <td>${formatNumber(aircraft.length, 1) || ''}</td>
+            <td>${formatNumber(aircraft.volume, 1) || ''}</td>
+            <td>${formatNumber(aircraft.cabin_height, 1) || ''}</td>
+            <td>${formatNumber(aircraft.cabin_width, 1) || ''}</td>
+            <td>${formatNumber(aircraft.cabin_length, 1) || ''}</td>
+            <td>${formatNumber(aircraft.cabin_volume, 1) || ''}</td>
+            <td>${formatNumber(aircraft.baggage_volume, 1) || ''}</td>
+            <td>${formatNumber(aircraft.cabin_ratio, 2) || ''}</td>
+            <td>${formatNumber(aircraft.range) || ''}</td>
+            <td>${formatNumber(aircraft.speed) || ''}</td>
+            <td>${formatNumber(aircraft.passengers) || ''}</td>
+            <td>${formatCurrency(aircraft.price, 1) || ''}</td>
+            <td>${formatNumber(aircraft.speed_dollar_ratio, 2) || ''}</td>
+            <td>${formatNumber(aircraft.range_dollar_ratio, 2) || ''}</td>
+            <td>${formatCurrency(aircraft.annual_cost) || ''}</td>
+            <td>${formatCurrency(aircraft.multi_year_cost, 1) || ''}</td>
+            <td>${formatCurrency(aircraft.annual_fuel_cost) || ''}</td>
+            <td>${formatNumber(aircraft.performance_score, 2) || ''}</td>
+            <td>${formatNumber(aircraft.efficiency_score, 2) || ''}</td>
+            <td>${formatNumber(aircraft.all_around_score, 2) || ''}</td>
+        `;
+
+        tableBody.appendChild(row);
+    });
+
+    // Add event listeners for aircraft selection
+    document.querySelectorAll('.aircraft-select').forEach(checkbox => {
+        checkbox.addEventListener('change', function () {
+            toggleAircraftSelection(this.dataset.id);
+        });
+    });
+
+    // Update selected count
+    updateSelectedCount();
+}
+
+// Format currency values
+function formatCurrency(value, decimals = 0) {
+    if (value === undefined || value === null) return '';
+    return '$' + Number(value).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+// Format number values
+function formatNumber(value, decimals = 0) {
+    if (value === undefined || value === null) return '';
+    return Number(value).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+// Toggle selection of an aircraft
+function toggleAircraftSelection(aircraftId) {
+    // Implement your selection logic here
+    console.log(`Toggled selection for aircraft ID: ${aircraftId}`);
+    updateSelectedCount();
+}
+
+// Update the count of selected aircraft
+function updateSelectedCount() {
+    const selectedCount = document.querySelectorAll('.aircraft-select:checked').length;
+    const selectedCountElement = document.getElementById('selected-count');
+    const compareBtn = document.getElementById('compare-btn');
+
+    if (selectedCountElement) {
+        selectedCountElement.textContent = `${selectedCount} Selected`;
+    }
+
+    if (compareBtn) {
+        compareBtn.disabled = selectedCount < 2;
+    }
+}
+
+// Function to set up airport search functionality
+function setupAirportSearch() {
+    // Enable typeahead search for home airport
+    setupAirportSearchEventListeners();
+
+    // Add a message to the home airport search box
+    const homeAirportSearch = document.getElementById('home-airport-search');
+    if (homeAirportSearch) {
+        homeAirportSearch.setAttribute('placeholder', 'Search for a home airport to show range circles');
+    }
+}
+
+// Function to set up route planning
+function setupRoutePlanning() {
+    // Setup event listeners for route planning buttons
+    setupRoutePlanningEventListeners();
+
+    // Setup airport search event listeners for route planning
+    setupAirportSearchEventListeners();
+
+    // Initialize range-min event listener for communication with range slider
+    const rangeMinInput = document.getElementById('range-min');
+    if (rangeMinInput) {
+        rangeMinInput.addEventListener('change', function () {
+            const range = parseInt(this.value);
+            if (!isNaN(range)) {
+                updateRangeSlider(range);
+            }
+        });
+    }
+}
+
+// Function to periodically check for Google Sheet changes and update range circles
+function setupGoogleSheetAutoUpdate() {
+    console.log('Setting up Google Sheet auto-update...');
+
+    // Don't need to do anything since aircraft ranges are disabled
+    console.log('Auto-update for aircraft ranges is disabled');
+}
+
+// Setup Google Sheet iframe interactions
+function setupGoogleSheetInteractions() {
+    const googleSheetFrame = document.getElementById('google-sheet-frame');
+
+    if (googleSheetFrame) {
+        // Show loading message
+        showToast('Loading Google Sheet...', 'info');
+
+        // Add load event listener to the iframe
+        googleSheetFrame.addEventListener('load', function () {
+            console.log('Google Sheet iframe loaded');
+            showToast('Google Sheet loaded successfully. You can interact with it directly.', 'success');
+
+            // Add a class to indicate the sheet is loaded
+            googleSheetFrame.classList.add('sheet-loaded');
+
+            // Load aircraft ranges based on the Google Sheet data
+            loadAircraftRanges();
+
+            // Setup message listener for communication with the iframe
+            window.addEventListener('message', function (event) {
+                // Check if the message is from our Google Sheet
+                if (event.source === googleSheetFrame.contentWindow &&
+                    event.data && event.data.type === 'sheet_ready') {
+
+                    console.log('Google Sheet is ready for interaction');
+
+                    // If we have route data, update the sheet immediately
+                    if (routePairs.length > 0) {
+                        updateGoogleSheetInputs();
+                    }
+
+                    // Load aircraft ranges based on the updated Sheet data
+                    loadAircraftRanges();
+                }
+            });
+
+            // Attempt to set focus to the iframe for easier interaction
+            setTimeout(() => {
+                try {
+                    googleSheetFrame.contentWindow.focus();
+                } catch (error) {
+                    console.log('Could not focus on iframe - this is normal due to cross-origin restrictions');
+                }
+            }, 1000);
+        });
+
+        // Handle load errors
+        googleSheetFrame.addEventListener('error', function () {
+            console.error('Failed to load Google Sheet iframe');
+            showToast('Error loading Google Sheet. Please check your connection.', 'danger');
+        });
+    }
+
+    // Update current year in footer
+    document.getElementById('current-year').textContent = new Date().getFullYear();
+}
+
+// Function to communicate with the Google Sheet
+function sendDataToGoogleSheet(data) {
+    const googleSheetFrame = document.getElementById('google-sheet-frame');
+    if (!googleSheetFrame) return;
+
+    try {
+        // Specific cells to update directly
+        const cellUpdates = {
+            'AF2': data.avg_trip_length || '500', // Average Trip Length in cell AF2
+            'AK2': data.range_min || '500'        // Range Min in cell AK2
+        };
+
+        // Using postMessage to send data to the iframe
+        googleSheetFrame.contentWindow.postMessage({
+            type: 'update_inputs',
+            data: data,
+            cellUpdates: cellUpdates
+        }, '*');
+
+        console.log('Sent data to Google Sheet:', data);
+        console.log('Direct cell updates:', cellUpdates);
+    } catch (error) {
+        console.error('Error sending data to Google Sheet:', error);
+        showToast('Failed to update Google Sheet', 'danger');
+    }
+}
+
+// Update the Google Sheet with current input values
+function updateGoogleSheetInputs() {
+    // Initialize default values for all inputs
+    const inputs = {
+        year_min: '',
+        range_min: currentRange || '500', // Use the current range from the slider
+        passengers_min: '4',
+        price_max: '',
+        years_ownership: '5',
+        num_trips: '50',
+        depreciation_rate: '4',
+        jet_a_price: '5.50',
+        avgas_price: '6.50',
+        planned_passengers: '4',
+        passenger_pay: '200',
+        charter_trips: '25'
+    };
+
+    // Get range-min from the range slider
+    const rangeSlider = document.getElementById('range-slider');
+    if (rangeSlider) {
+        inputs.range_min = rangeSlider.value;
+    }
+
+    // Add route information
+    if (routePairs.length > 0) {
+        const totalDistance = routePairs.reduce((sum, route) => sum + route.distance, 0);
+        const avgTripLength = Math.round(totalDistance / routePairs.length);
+        inputs.avg_trip_length = avgTripLength.toString();
+    } else {
+        inputs.avg_trip_length = '500';
+    }
+
+    // Send the data to the Google Sheet
+    sendDataToGoogleSheet(inputs);
+
+    // Show a toast notification
+    showToast('Google Sheet updated with route data', 'success');
+
+    // Reload aircraft ranges after a short delay to allow the sheet to update
+    setTimeout(() => {
+        loadAircraftRanges();
+    }, 1500);
+}
+
+// Update the Google Sheet with the new range value
+function updateSheetWithRange(rangeValue) {
+    // Store the current range for the Google Sheet updates
+    currentRange = rangeValue;
+
+    // If we're not ready to update the sheet yet, just return
+    if (!document.getElementById('google-sheet-frame')) {
+        return;
+    }
+
+    // Update inputs object with the new range
+    const inputs = {
+        range_min: rangeValue.toString()
+    };
+
+    // Send the data to the Google Sheet
+    sendDataToGoogleSheet(inputs);
+
+    console.log(`Updated Google Sheet with range: ${rangeValue} nm`);
+}
+
+// Update the frequency of a route
+function updateRouteFrequency(routeId, newFrequency) {
+    const routeIndex = routePairs.findIndex(route => route.id === routeId);
+    if (routeIndex !== -1) {
+        routePairs[routeIndex].frequency = newFrequency;
+        routePairs[routeIndex].totalDistance = routePairs[routeIndex].distance * newFrequency;
+
+        // Update the average leg distance and filters
+        updateAverageLegDistance();
+
+        // Refresh the routes display
+        updateRoutesDisplay();
+    }
+}
+
+// Debounce function to limit function calls
+function debounce(func, wait) {
+    let timeout;
+    return function (...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
+
+// Handle map move end event with debouncing
+const handleMapMoveEnd = debounce(function () {
+    const zoom = map.getZoom();
+    const bounds = map.getBounds();
+
+    if (!bounds) return;
+
+    // Only update airport markers if we're at a zoom level where it makes sense
+    if (zoom >= 5) {
+        updateVisibleAirports();
+    } else {
+        // Hide all airport markers when zoomed out too far
+        hideAllAirportMarkers();
+    }
+
+    // Save the current view to localStorage
+    const center = map.getCenter();
+    localStorage.setItem('mapCenter', JSON.stringify({
+        lat: center.lat,
+        lng: center.lng,
+        zoom: zoom
+    }));
+}, 300); // 300ms debounce time
+
+// Update visible airports within the current bounds
+function updateVisibleAirports() {
+    const bounds = map.getBounds();
+    if (!bounds) return;
+
+    const currentZoom = map.getZoom();
+    if (currentZoom < MIN_ZOOM_FOR_AIRPORTS) {
+        hideAllAirportMarkers();
+        return;
+    }
+
+    // Check which markers are in the current bounds
+    for (const markerId in airportMarkers) {
+        const marker = airportMarkers[markerId];
+        const pos = marker.getPosition();
+
+        if (!bounds.contains(pos)) {
+            marker.setMap(null);
+        } else {
+            marker.setMap(map);
+        }
+    }
+
+    // Load airports in the current view
+    const visibleBounds = {
+        north: bounds.getNorthEast().lat(),
+        south: bounds.getSouthWest().lat(),
+        east: bounds.getNorthEast().lng(),
+        west: bounds.getSouthWest().lng()
+    };
+
+    loadAirportsInView(visibleBounds);
+}
+
+// Hide all airport markers on the map
+function hideAllAirportMarkers() {
+    for (const markerId in airportMarkers) {
+        airportMarkers[markerId].setMap(null);
+    }
+}
+
+function addAirportMarker(airport) {
+    if (!airport.lat || !airport.lng) return;
+
+    // Create a marker for the airport
+    const marker = new google.maps.Marker({
+        position: { lat: parseFloat(airport.lat), lng: parseFloat(airport.lng) },
+        map: map,
+        title: `${airport.name} (${airport.iata})`,
+        icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 7,
+            fillColor: "#4285F4",
+            fillOpacity: 0.7,
+            strokeWeight: 1,
+            strokeColor: "#ffffff"
+        },
+        zIndex: 1
+    });
+
+    // Store the marker reference
+    airportMarkers[airport.id] = marker;
+
+    // Add click event listener
+    marker.addListener('click', () => {
+        setSelectedAirport(airport);
+        showAirportDetails(airport);
+    });
+
+    // Add hover effects
+    marker.addListener('mouseover', () => {
+        marker.setIcon({
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 9,
+            fillColor: "#4285F4",
+            fillOpacity: 0.9,
+            strokeWeight: 2,
+            strokeColor: "#ffffff"
+        });
+
+        // Show a tooltip
+        const infoWindow = new google.maps.InfoWindow({
+            content: `<div class="airport-tooltip">${airport.name} (${airport.iata})</div>`,
+            disableAutoPan: true
+        });
+
+        infoWindow.open(map, marker);
+        marker.infoWindow = infoWindow;
+    });
+
+    marker.addListener('mouseout', () => {
+        marker.setIcon({
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 7,
+            fillColor: "#4285F4",
+            fillOpacity: 0.7,
+            strokeWeight: 1,
+            strokeColor: "#ffffff"
+        });
+
+        if (marker.infoWindow) {
+            marker.infoWindow.close();
+            marker.infoWindow = null;
+        }
+    });
+
+    return marker;
+}
+
+// Constants for airport display
+const MIN_ZOOM_FOR_AIRPORTS = 5;
+const MAX_AIRPORTS_PER_VIEW = 100;
+
+// Load airports that are within the specified bounds
+function loadAirportsInView(bounds) {
+    // Find airports in the visible area
+    const visibleAirports = airports.filter(airport => {
+        if (!airport.lat || !airport.lng) return false;
+
+        return airport.lat >= bounds.south &&
+            airport.lat <= bounds.north &&
+            airport.lng >= bounds.west &&
+            airport.lng <= bounds.east &&
+            !airportMarkers[airport.id];
+    });
+
+    // Sort by importance
+    visibleAirports.sort((a, b) => {
+        // Prioritize airports with range circles
+        const aHasRange = airportRangeCircles[a.id] !== undefined;
+        const bHasRange = airportRangeCircles[b.id] !== undefined;
+
+        if (aHasRange && !bHasRange) return -1;
+        if (!aHasRange && bHasRange) return 1;
+
+        // Then by size/importance
+        return (b.size || 0) - (a.size || 0);
+    });
+
+    // Limit the number of airports to display
+    const airportsToShow = visibleAirports.slice(0, MAX_AIRPORTS_PER_VIEW);
+
+    // Add markers for airports in view
+    airportsToShow.forEach(airport => {
+        if (!airportMarkers[airport.id]) {
+            addAirportMarker(airport);
+        }
+    });
+}

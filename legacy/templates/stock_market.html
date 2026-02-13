@@ -1,0 +1,935 @@
+{% extends "base.html" %}
+
+{% block title %}Aircraft Market - Jet Finder{% endblock %}
+
+{% block additional_css %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+    /* Aircraft Market Specific Styles - Matching Site Theme */
+    .market-header {
+        background: linear-gradient(135deg, rgba(26, 26, 26, 0.95), rgba(45, 45, 45, 0.95));
+        padding: 2rem 0;
+        border-bottom: 2px solid var(--jet-primary);
+        backdrop-filter: blur(10px);
+        margin-top: 100px;
+    }
+
+    .aircraft-model-card {
+        background: rgba(0, 0, 0, 0.85);
+        border: 1px solid var(--jet-gray-medium);
+        border-radius: 0;
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: all var(--animation-speed);
+        cursor: pointer;
+        backdrop-filter: blur(10px);
+    }
+
+    .aircraft-model-card:hover {
+        border-color: var(--jet-primary);
+        box-shadow: 0 0 20px rgba(240, 85, 69, 0.3);
+        transform: translateY(-2px);
+    }
+
+    .price-positive {
+        color: #28a745;
+    }
+
+    .price-negative {
+        color: var(--jet-primary);
+    }
+
+    .price-neutral {
+        color: #8b949e;
+    }
+
+    .mini-chart {
+        width: 100px;
+        height: 40px;
+    }
+
+    .search-container {
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 0;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--jet-gray-medium);
+    }
+
+    .timeline-tabs {
+        background: rgba(33, 37, 41, 0.9);
+        border-radius: 0;
+        padding: 4px;
+        display: inline-flex;
+        margin-bottom: 2rem;
+        clip-path: polygon(0 0, 100% 0, 100% 85%, 95% 100%, 0 100%);
+    }
+
+    .timeline-tab {
+        background: none;
+        border: none;
+        color: #8b949e;
+        padding: 8px 16px;
+        border-radius: 0;
+        transition: all var(--animation-speed);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .timeline-tab.active {
+        background: var(--jet-primary);
+        color: white;
+        clip-path: polygon(0 0, 100% 0, 100% 85%, 95% 100%, 0 100%);
+    }
+
+    .timeline-tab:hover:not(.active) {
+        background: var(--jet-gray-medium);
+        color: white;
+    }
+
+    .market-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 0;
+        padding: 1.5rem;
+        text-align: center;
+        border: 1px solid var(--jet-gray-medium);
+        clip-path: polygon(0 0, 100% 0, 100% 90%, 90% 100%, 0 100%);
+        backdrop-filter: blur(10px);
+        transition: all var(--animation-speed);
+    }
+
+    .stat-card:hover {
+        border-color: var(--jet-primary);
+        box-shadow: 0 0 15px rgba(240, 85, 69, 0.2);
+    }
+
+    .stat-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        font-family: 'Orbitron', sans-serif;
+    }
+
+    .stat-label {
+        color: #8b949e;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 600;
+    }
+
+    .watchlist-btn {
+        background: none;
+        border: 1px solid var(--jet-gray-medium);
+        color: #8b949e;
+        border-radius: 0;
+        padding: 6px 12px;
+        transition: all var(--animation-speed);
+        clip-path: polygon(0 0, 100% 0, 100% 70%, 95% 100%, 0 100%);
+    }
+
+    .watchlist-btn:hover,
+    .watchlist-btn.active {
+        border-color: var(--jet-primary);
+        color: var(--jet-primary);
+    }
+
+    .chart-container {
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 0;
+        padding: 1.5rem;
+        margin: 2rem 0;
+        clip-path: polygon(0 0, 100% 0, 100% 95%, 95% 100%, 0 100%);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--jet-gray-medium);
+    }
+
+    .model-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .model-name {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: white;
+        font-family: 'Orbitron', sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .model-category {
+        color: var(--jet-primary);
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .price-display {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+        font-family: 'Orbitron', sans-serif;
+    }
+
+    .price-change {
+        font-size: 0.9rem;
+        font-weight: 600;
+    }
+
+    .market-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .metric-item {
+        text-align: center;
+        padding: 1rem;
+        background: rgba(33, 37, 41, 0.6);
+        border-radius: 0;
+        clip-path: polygon(0 0, 100% 0, 100% 80%, 90% 100%, 0 100%);
+    }
+
+    .metric-value {
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 1.1rem;
+    }
+
+    .metric-label {
+        color: #8b949e;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 600;
+    }
+
+    .filters-bar {
+        background: rgba(33, 37, 41, 0.9);
+        border-radius: 0;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+        clip-path: polygon(0 0, 100% 0, 100% 90%, 95% 100%, 0 100%);
+    }
+
+    .modal-content {
+        background: rgba(26, 26, 26, 0.95);
+        border: 2px solid var(--jet-primary);
+        border-radius: 0;
+        backdrop-filter: blur(15px);
+    }
+
+    .modal-header {
+        border-bottom: 1px solid var(--jet-gray-medium);
+        background: linear-gradient(135deg, var(--jet-primary), var(--jet-primary-dark));
+    }
+
+    .modal-title {
+        color: white;
+        font-family: 'Orbitron', sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .btn-close {
+        filter: invert(1);
+    }
+
+    /* Page Content Adjustment */
+    .page-content {
+        margin-top: 100px;
+        padding-top: 2rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+    <div class="container-fluid" x-data="aircraftMarket()">
+        <!-- Market Header -->
+        <div class="market-header">
+            <div class="container">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h1 class="mb-2"
+                            style="font-family: 'Orbitron', sans-serif; text-transform: uppercase; letter-spacing: 2px;">
+                            Aircraft Market</h1>
+                        <p class="text-muted mb-0" style="font-size: 1.1rem;">Real-time aircraft model valuations and
+                            market analytics</p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="market-stats">
+                            <div class="stat-card">
+                                <div class="stat-value price-positive" x-text="marketSummary.modelsTracked"></div>
+                                <div class="stat-label">Models Tracked</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" x-text="marketSummary.totalListings"></div>
+                                <div class="stat-label">Aircraft Listed</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value"
+                                    :class="marketSummary.marketChange > 0 ? 'price-positive' : 'price-negative'"
+                                    x-text="marketSummary.marketChange + '%'"></div>
+                                <div class="stat-label">Market Change</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <!-- Search and Filters -->
+            <div class="search-container">
+                <div class="row">
+                    <div class="col-md-6">
+                        <input type="text" class="form-control" placeholder="Search aircraft models..."
+                            x-model="searchQuery" @input="filterAircraft()">
+                    </div>
+                    <div class="col-md-6">
+                        <div class="filters-bar">
+                            <select class="form-select" x-model="selectedCategory" @change="filterAircraft()">
+                                <option value="">All Categories</option>
+                                <option value="light">Light Jets</option>
+                                <option value="midsize">Midsize Jets</option>
+                                <option value="heavy">Heavy Jets</option>
+                                <option value="turboprop">Turboprops</option>
+                            </select>
+                            <select class="form-select" x-model="sortBy" @change="sortAircraft()">
+                                <option value="change">Biggest Movers</option>
+                                <option value="price">Price</option>
+                                <option value="volume">Volume</option>
+                                <option value="name">Name</option>
+                            </select>
+                            <button class="btn btn-outline-danger" :class="showWatchlistOnly ? 'active' : ''"
+                                @click="toggleWatchlistFilter()">
+                                <i class="bi bi-star-fill"></i> Watchlist
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timeline Selector -->
+            <div class="timeline-tabs">
+                <template x-for="period in timePeriods" :key="period.value">
+                    <button class="timeline-tab" :class="selectedPeriod === period.value ? 'active' : ''"
+                        @click="selectTimePeriod(period.value)" x-text="period.label"></button>
+                </template>
+            </div>
+
+            <!-- Aircraft Models List -->
+            <div class="row">
+                <template x-for="aircraft in filteredAircraftModels" :key="aircraft.model">
+                    <div class="col-lg-6 col-xl-4">
+                        <div class="aircraft-model-card" @click="showModelDetails(aircraft)">
+                            <div class="model-header">
+                                <div class="flex-grow-1">
+                                    <div class="model-name" x-text="aircraft.manufacturer + ' ' + aircraft.model"></div>
+                                    <div class="model-category" x-text="aircraft.category"></div>
+                                </div>
+                                <button class="watchlist-btn" @click.stop="toggleWatchlist(aircraft)"
+                                    :class="isInWatchlist(aircraft) ? 'active' : ''">
+                                    <i class="bi" :class="isInWatchlist(aircraft) ? 'bi-star-fill' : 'bi-star'"></i>
+                                </button>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <div class="price-display" :class="getPriceColorClass(aircraft.priceChange)"
+                                        x-text="formatPrice(aircraft.currentPrice)"></div>
+                                    <div class="price-change" :class="getPriceColorClass(aircraft.priceChange)">
+                                        <i class="bi"
+                                            :class="aircraft.priceChange >= 0 ? 'bi-arrow-up' : 'bi-arrow-down'"></i>
+                                        <span
+                                            x-text="formatPriceChange(aircraft.priceChange, aircraft.priceChangePercent)"></span>
+                                    </div>
+                                </div>
+                                <div class="mini-chart">
+                                    <canvas :id="'chart-' + aircraft.model.replace(/\s+/g, '')" width="100"
+                                        height="40"></canvas>
+                                </div>
+                            </div>
+
+                            <div class="market-metrics">
+                                <div class="metric-item">
+                                    <div class="metric-value" x-text="aircraft.marketData[selectedPeriod].volume"></div>
+                                    <div class="metric-label">Volume</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value price-positive"
+                                        x-text="formatPrice(aircraft.marketData[selectedPeriod].high)"></div>
+                                    <div class="metric-label">High</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value price-negative"
+                                        x-text="formatPrice(aircraft.marketData[selectedPeriod].low)"></div>
+                                    <div class="metric-label">Low</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value" x-text="aircraft.marketData[selectedPeriod].listings">
+                                    </div>
+                                    <div class="metric-label">Listed</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Model Details Modal -->
+<div class="modal fade" id="modelModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" x-text="selectedModel?.manufacturer + ' ' + selectedModel?.model"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-lg-8">
+                        <!-- Large Chart -->
+                        <div class="chart-container">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0" style="color: var(--jet-primary); text-transform: uppercase;">Price
+                                    History</h6>
+                                <div class="timeline-tabs">
+                                    <template x-for="period in timePeriods" :key="period.value">
+                                        <button class="timeline-tab"
+                                            :class="selectedPeriod === period.value ? 'active' : ''"
+                                            @click="selectTimePeriod(period.value)" x-text="period.label"></button>
+                                    </template>
+                                </div>
+                            </div>
+                            <canvas id="detailChart" width="400" height="300"></canvas>
+                        </div>
+
+                        <!-- Market Statistics -->
+                        <div class="chart-container">
+                            <h6 class="mb-3" style="color: var(--jet-primary); text-transform: uppercase;">Market
+                                Statistics</h6>
+                            <div class="row">
+                                <template x-for="period in timePeriods" :key="period.value">
+                                    <div class="col-md-6 col-lg-4 mb-3">
+                                        <div class="stat-card">
+                                            <div class="stat-label" x-text="period.label"></div>
+                                            <div class="d-flex justify-content-between mt-2">
+                                                <div>
+                                                    <div class="price-positive text-sm"
+                                                        x-text="'H: ' + formatPrice(selectedModel?.marketData[period.value]?.high || 0)">
+                                                    </div>
+                                                    <div class="price-negative text-sm"
+                                                        x-text="'L: ' + formatPrice(selectedModel?.marketData[period.value]?.low || 0)">
+                                                    </div>
+                                                </div>
+                                                <div class="text-end">
+                                                    <div class="text-sm"
+                                                        x-text="'Vol: ' + (selectedModel?.marketData[period.value]?.volume || 0)">
+                                                    </div>
+                                                    <div class="text-sm"
+                                                        x-text="'Listed: ' + (selectedModel?.marketData[period.value]?.listings || 0)">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <!-- Current Stats -->
+                        <div class="chart-container">
+                            <h6 class="mb-3" style="color: var(--jet-primary); text-transform: uppercase;">Current
+                                Market</h6>
+                            <div class="text-center mb-4">
+                                <div class="price-display" x-text="formatPrice(selectedModel?.currentPrice || 0)"></div>
+                                <div class="price-change" :class="getPriceColorClass(selectedModel?.priceChange)"
+                                    x-text="formatPriceChange(selectedModel?.priceChange, selectedModel?.priceChangePercent)">
+                                </div>
+                            </div>
+
+                            <div class="market-metrics">
+                                <div class="metric-item">
+                                    <div class="metric-value"
+                                        x-text="selectedModel?.marketData[selectedPeriod]?.volume || 0"></div>
+                                    <div class="metric-label">Trading Volume</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value"
+                                        x-text="selectedModel?.marketData[selectedPeriod]?.listings || 0"></div>
+                                    <div class="metric-label">Active Listings</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value price-positive"
+                                        x-text="formatPrice(selectedModel?.marketData[selectedPeriod]?.high || 0)">
+                                    </div>
+                                    <div class="metric-label">Period High</div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-value price-negative"
+                                        x-text="formatPrice(selectedModel?.marketData[selectedPeriod]?.low || 0)"></div>
+                                    <div class="metric-label">Period Low</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="chart-container">
+                            <h6 class="mb-3" style="color: var(--jet-primary); text-transform: uppercase;">Actions</h6>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-danger" @click="viewListings(selectedModel)">
+                                    <i class="bi bi-search"></i> View Available Aircraft
+                                </button>
+                                <button class="btn btn-outline-danger" @click="createAlert(selectedModel)">
+                                    <i class="bi bi-bell"></i> Set Price Alert
+                                </button>
+                                <button class="btn btn-outline-light" @click="toggleWatchlist(selectedModel)">
+                                    <i class="bi"
+                                        :class="isInWatchlist(selectedModel) ? 'bi-star-fill' : 'bi-star'"></i>
+                                    <span
+                                        x-text="isInWatchlist(selectedModel) ? 'Remove from Watchlist' : 'Add to Watchlist'"></span>
+                                </button>
+                                <button class="btn btn-outline-light" @click="exportData(selectedModel)">
+                                    <i class="bi bi-download"></i> Export Data
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    function aircraftMarket() {
+        return {
+            searchQuery: '',
+            selectedCategory: '',
+            selectedPeriod: '1d',
+            sortBy: 'change',
+            showWatchlistOnly: false,
+            selectedModel: null,
+            detailChart: null,
+            watchlist: [],
+
+            timePeriods: [
+                { label: '1D', value: '1d' },
+                { label: '1W', value: '1w' },
+                { label: '1M', value: '1m' },
+                { label: '3M', value: '3m' },
+                { label: '6M', value: '6m' },
+                { label: '1Y', value: '1y' },
+                { label: 'MAX', value: 'max' }
+            ],
+
+            marketSummary: {
+                modelsTracked: 42,
+                totalListings: 1247,
+                marketChange: 2.3
+            },
+
+            aircraftModels: [
+                {
+                    manufacturer: 'Cessna',
+                    model: 'Citation CJ3+',
+                    category: 'Light Jet',
+                    currentPrice: 8500000,
+                    priceChange: 125000,
+                    priceChangePercent: 1.5,
+                    marketData: {
+                        '1d': { high: 8600000, low: 8400000, volume: 3, listings: 12 },
+                        '1w': { high: 8700000, low: 8300000, volume: 15, listings: 12 },
+                        '1m': { high: 8900000, low: 8200000, volume: 45, listings: 18 },
+                        '3m': { high: 9200000, low: 8000000, volume: 120, listings: 25 },
+                        '6m': { high: 9500000, low: 7800000, volume: 230, listings: 35 },
+                        '1y': { high: 10200000, low: 7500000, volume: 450, listings: 45 },
+                        'max': { high: 12500000, low: 6800000, volume: 850, listings: 65 }
+                    }
+                },
+                {
+                    manufacturer: 'Gulfstream',
+                    model: 'G650',
+                    category: 'Heavy Jet',
+                    currentPrice: 65000000,
+                    priceChange: -850000,
+                    priceChangePercent: -1.3,
+                    marketData: {
+                        '1d': { high: 65800000, low: 64500000, volume: 1, listings: 8 },
+                        '1w': { high: 66500000, low: 64000000, volume: 5, listings: 8 },
+                        '1m': { high: 67200000, low: 63500000, volume: 18, listings: 12 },
+                        '3m': { high: 69000000, low: 62000000, volume: 42, listings: 18 },
+                        '6m': { high: 71000000, low: 60000000, volume: 75, listings: 25 },
+                        '1y': { high: 75000000, low: 58000000, volume: 145, listings: 35 },
+                        'max': { high: 85000000, low: 45000000, volume: 320, listings: 55 }
+                    }
+                },
+                {
+                    manufacturer: 'Bombardier',
+                    model: 'Global 7500',
+                    category: 'Heavy Jet',
+                    currentPrice: 73000000,
+                    priceChange: 1200000,
+                    priceChangePercent: 1.7,
+                    marketData: {
+                        '1d': { high: 73500000, low: 72800000, volume: 2, listings: 6 },
+                        '1w': { high: 74000000, low: 72200000, volume: 8, listings: 6 },
+                        '1m': { high: 75000000, low: 71500000, volume: 22, listings: 9 },
+                        '3m': { high: 76500000, low: 70000000, volume: 55, listings: 15 },
+                        '6m': { high: 78000000, low: 68000000, volume: 95, listings: 22 },
+                        '1y': { high: 80000000, low: 65000000, volume: 180, listings: 30 },
+                        'max': { high: 85000000, low: 62000000, volume: 285, listings: 42 }
+                    }
+                },
+                {
+                    manufacturer: 'Embraer',
+                    model: 'Phenom 300E',
+                    category: 'Light Jet',
+                    currentPrice: 9200000,
+                    priceChange: 180000,
+                    priceChangePercent: 2.0,
+                    marketData: {
+                        '1d': { high: 9250000, low: 9150000, volume: 4, listings: 15 },
+                        '1w': { high: 9300000, low: 9050000, volume: 18, listings: 15 },
+                        '1m': { high: 9500000, low: 8900000, volume: 52, listings: 22 },
+                        '3m': { high: 9800000, low: 8700000, volume: 135, listings: 32 },
+                        '6m': { high: 10200000, low: 8500000, volume: 250, listings: 45 },
+                        '1y': { high: 10800000, low: 8200000, volume: 480, listings: 60 },
+                        'max': { high: 12200000, low: 7500000, volume: 750, listings: 85 }
+                    }
+                },
+                {
+                    manufacturer: 'Pilatus',
+                    model: 'PC-12 NGX',
+                    category: 'Turboprop',
+                    currentPrice: 5200000,
+                    priceChange: 75000,
+                    priceChangePercent: 1.5,
+                    marketData: {
+                        '1d': { high: 5250000, low: 5180000, volume: 2, listings: 8 },
+                        '1w': { high: 5300000, low: 5150000, volume: 12, listings: 8 },
+                        '1m': { high: 5400000, low: 5050000, volume: 35, listings: 12 },
+                        '3m': { high: 5600000, low: 4900000, volume: 85, listings: 18 },
+                        '6m': { high: 5800000, low: 4750000, volume: 165, listings: 25 },
+                        '1y': { high: 6200000, low: 4500000, volume: 320, listings: 35 },
+                        'max': { high: 7500000, low: 3800000, volume: 580, listings: 55 }
+                    }
+                },
+                {
+                    manufacturer: 'Cirrus',
+                    model: 'Vision Jet SF50',
+                    category: 'Light Jet',
+                    currentPrice: 2800000,
+                    priceChange: -45000,
+                    priceChangePercent: -1.6,
+                    marketData: {
+                        '1d': { high: 2850000, low: 2780000, volume: 3, listings: 18 },
+                        '1w': { high: 2900000, low: 2750000, volume: 15, listings: 18 },
+                        '1m': { high: 3000000, low: 2700000, volume: 45, listings: 25 },
+                        '3m': { high: 3150000, low: 2650000, volume: 125, listings: 35 },
+                        '6m': { high: 3300000, low: 2550000, volume: 235, listings: 45 },
+                        '1y': { high: 3500000, low: 2400000, volume: 450, listings: 65 },
+                        'max': { high: 4200000, low: 2100000, volume: 720, listings: 95 }
+                    }
+                }
+            ],
+
+            filteredAircraftModels: [],
+
+            init() {
+                this.filteredAircraftModels = this.aircraftModels;
+                this.loadWatchlist();
+                setTimeout(() => this.createMiniCharts(), 100);
+            },
+
+            filterAircraft() {
+                let filtered = this.aircraftModels;
+
+                if (this.searchQuery) {
+                    const query = this.searchQuery.toLowerCase();
+                    filtered = filtered.filter(aircraft =>
+                        aircraft.manufacturer.toLowerCase().includes(query) ||
+                        aircraft.model.toLowerCase().includes(query)
+                    );
+                }
+
+                if (this.selectedCategory) {
+                    filtered = filtered.filter(aircraft =>
+                        aircraft.category.toLowerCase().includes(this.selectedCategory)
+                    );
+                }
+
+                if (this.showWatchlistOnly) {
+                    filtered = filtered.filter(aircraft => this.isInWatchlist(aircraft));
+                }
+
+                this.filteredAircraftModels = filtered;
+                this.sortAircraft();
+                setTimeout(() => this.createMiniCharts(), 100);
+            },
+
+            sortAircraft() {
+                this.filteredAircraftModels.sort((a, b) => {
+                    switch (this.sortBy) {
+                        case 'change':
+                            return Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent);
+                        case 'price':
+                            return b.currentPrice - a.currentPrice;
+                        case 'volume':
+                            return b.marketData[this.selectedPeriod].volume - a.marketData[this.selectedPeriod].volume;
+                        case 'name':
+                            return a.manufacturer.localeCompare(b.manufacturer);
+                        default:
+                            return 0;
+                    }
+                });
+            },
+
+            selectTimePeriod(period) {
+                this.selectedPeriod = period;
+                setTimeout(() => this.createMiniCharts(), 100);
+                if (this.selectedModel) {
+                    setTimeout(() => this.updateDetailChart(), 100);
+                }
+            },
+
+            createMiniCharts() {
+                this.filteredAircraftModels.forEach(aircraft => {
+                    const canvasId = 'chart-' + aircraft.model.replace(/\s+/g, '');
+                    const canvas = document.getElementById(canvasId);
+                    if (!canvas) return;
+
+                    const ctx = canvas.getContext('2d');
+
+                    // Generate sample price data for the selected period
+                    const data = this.generatePriceData(aircraft, this.selectedPeriod);
+
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                data: data.prices,
+                                borderColor: aircraft.priceChange >= 0 ? '#28a745' : '#F05545',
+                                borderWidth: 2,
+                                fill: false,
+                                tension: 0.4,
+                                pointRadius: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                x: { display: false },
+                                y: { display: false }
+                            },
+                            elements: { point: { radius: 0 } }
+                        }
+                    });
+                });
+            },
+
+            generatePriceData(aircraft, period) {
+                const periodConfig = {
+                    '1d': { points: 24, basePrice: aircraft.currentPrice },
+                    '1w': { points: 7, basePrice: aircraft.currentPrice },
+                    '1m': { points: 30, basePrice: aircraft.currentPrice },
+                    '3m': { points: 90, basePrice: aircraft.currentPrice },
+                    '6m': { points: 180, basePrice: aircraft.currentPrice },
+                    '1y': { points: 365, basePrice: aircraft.currentPrice },
+                    'max': { points: 1095, basePrice: aircraft.currentPrice }
+                };
+
+                const config = periodConfig[period];
+                const prices = [];
+                const labels = [];
+                let currentPrice = config.basePrice - aircraft.priceChange;
+
+                for (let i = 0; i < config.points; i++) {
+                    const variation = (Math.random() - 0.5) * 0.02 * currentPrice;
+                    currentPrice += variation;
+                    prices.push(currentPrice);
+                    labels.push('');
+                }
+
+                // Ensure the last price matches current price
+                prices[prices.length - 1] = aircraft.currentPrice;
+
+                return { prices, labels };
+            },
+
+            showModelDetails(aircraft) {
+                this.selectedModel = aircraft;
+                new bootstrap.Modal(document.getElementById('modelModal')).show();
+                setTimeout(() => this.updateDetailChart(), 100);
+            },
+
+            updateDetailChart() {
+                const canvas = document.getElementById('detailChart');
+                if (!canvas || !this.selectedModel) return;
+
+                if (this.detailChart) {
+                    this.detailChart.destroy();
+                }
+
+                const ctx = canvas.getContext('2d');
+                const data = this.generatePriceData(this.selectedModel, this.selectedPeriod);
+
+                this.detailChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            data: data.prices,
+                            borderColor: this.selectedModel.priceChange >= 0 ? '#28a745' : '#F05545',
+                            backgroundColor: this.selectedModel.priceChange >= 0 ? 'rgba(40, 167, 69, 0.1)' : 'rgba(240, 85, 69, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(26, 26, 26, 0.9)',
+                                titleColor: '#ffffff',
+                                bodyColor: '#ffffff',
+                                borderColor: '#F05545',
+                                borderWidth: 1
+                            }
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                grid: { color: '#343a40' },
+                                ticks: { color: '#8b949e' }
+                            },
+                            y: {
+                                display: true,
+                                grid: { color: '#343a40' },
+                                ticks: {
+                                    color: '#8b949e',
+                                    callback: function (value) {
+                                        return '$' + (value / 1000000).toFixed(1) + 'M';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            },
+
+            toggleWatchlist(aircraft) {
+                const index = this.watchlist.findIndex(item =>
+                    item.manufacturer === aircraft.manufacturer && item.model === aircraft.model
+                );
+
+                if (index >= 0) {
+                    this.watchlist.splice(index, 1);
+                } else {
+                    this.watchlist.push({
+                        manufacturer: aircraft.manufacturer,
+                        model: aircraft.model
+                    });
+                }
+
+                this.saveWatchlist();
+                if (this.showWatchlistOnly) {
+                    this.filterAircraft();
+                }
+            },
+
+            isInWatchlist(aircraft) {
+                return this.watchlist.some(item =>
+                    item.manufacturer === aircraft.manufacturer && item.model === aircraft.model
+                );
+            },
+
+            toggleWatchlistFilter() {
+                this.showWatchlistOnly = !this.showWatchlistOnly;
+                this.filterAircraft();
+            },
+
+            loadWatchlist() {
+                const saved = localStorage.getItem('aircraftWatchlist');
+                if (saved) {
+                    this.watchlist = JSON.parse(saved);
+                }
+            },
+
+            saveWatchlist() {
+                localStorage.setItem('aircraftWatchlist', JSON.stringify(this.watchlist));
+            },
+
+            getPriceColorClass(priceChange) {
+                if (priceChange > 0) return 'price-positive';
+                if (priceChange < 0) return 'price-negative';
+                return 'price-neutral';
+            },
+
+            formatPrice(price) {
+                if (price >= 1000000) {
+                    return '$' + (price / 1000000).toFixed(1) + 'M';
+                } else if (price >= 1000) {
+                    return '$' + (price / 1000).toFixed(0) + 'K';
+                }
+                return '$' + price.toLocaleString();
+            },
+
+            formatPriceChange(change, changePercent) {
+                const formattedChange = Math.abs(change) >= 1000000 ?
+                    '$' + (Math.abs(change) / 1000000).toFixed(1) + 'M' :
+                    '$' + Math.abs(change).toLocaleString();
+
+                return `${formattedChange} (${Math.abs(changePercent).toFixed(1)}%)`;
+            },
+
+            viewListings(aircraft) {
+                window.location.href = `/buy-aircraft?search=${aircraft.manufacturer} ${aircraft.model}`;
+            },
+
+            createAlert(aircraft) {
+                alert(`Price alert set for ${aircraft.manufacturer} ${aircraft.model}`);
+            },
+
+            exportData(aircraft) {
+                alert(`Exporting data for ${aircraft.manufacturer} ${aircraft.model}`);
+            }
+        }
+    }
+</script>
+{% endblock %}

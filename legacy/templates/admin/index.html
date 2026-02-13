@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Jet Finder</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Rajdhani', sans-serif; 
+            background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
+            color: #ffffff;
+            min-height: 100vh;
+        }
+        .nav { 
+            background: linear-gradient(135deg, #000000, #1a1a1a);
+            padding: 15px 40px; 
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            border-bottom: 2px solid #F05545;
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        .nav h1 { 
+            font-size: 28px; 
+            color: #F05545;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            text-shadow: 0 0 20px rgba(240, 85, 69, 0.5);
+        }
+        .nav button { 
+            padding: 10px 24px; 
+            background: linear-gradient(135deg, #343a40, #495057);
+            color: white; 
+            border: 2px solid #F05545;
+            border-radius: 8px; 
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .nav button:hover {
+            background: linear-gradient(135deg, #F05545, #d44437);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(240, 85, 69, 0.4);
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 40px auto; 
+            padding: 0 20px; 
+        }
+        .header { 
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a1a, #212529);
+            border-radius: 12px;
+            border: 1px solid rgba(240, 85, 69, 0.3);
+        }
+        .header h2 {
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            color: #F05545;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .listing-card { 
+            background: linear-gradient(135deg, #1a1a1a, #212529);
+            border-radius: 12px; 
+            padding: 24px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+            border: 2px solid #343a40;
+            transition: all 0.3s ease;
+        }
+        .listing-card:hover {
+            border-color: #F05545;
+            box-shadow: 0 8px 24px rgba(240, 85, 69, 0.2);
+        }
+        .listing-header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-start; 
+            margin-bottom: 20px;
+        }
+        .listing-header h3 { 
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 22px;
+        }
+        .pending-badge {
+            background: linear-gradient(135deg, rgba(255, 152, 0, 0.3), rgba(255, 152, 0, 0.2));
+            color: #ff9800;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            border: 1px solid #ff9800;
+            letter-spacing: 0.5px;
+        }
+        .listing-info { 
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 15px; 
+            margin-bottom: 24px;
+            line-height: 1.8;
+        }
+        .listing-info div { 
+            margin-bottom: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .listing-actions { 
+            display: flex; 
+            gap: 12px; 
+        }
+        .btn { 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: 700;
+            font-family: 'Rajdhani', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-approve { 
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+            box-shadow: 0 4px 12px rgba(0, 255, 136, 0.3);
+        }
+        .btn-reject { 
+            background: linear-gradient(135deg, #ff4757, #c62828);
+            color: white;
+            box-shadow: 0 4px 12px rgba(255, 71, 87, 0.3);
+        }
+        .btn-approve:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 255, 136, 0.4);
+        }
+        .btn-reject:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 71, 87, 0.4);
+        }
+        .error { 
+            background: rgba(255, 71, 87, 0.15);
+            color: #ff4757;
+            padding: 14px 16px; 
+            border-radius: 8px; 
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+        .success { 
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+            padding: 14px 16px; 
+            border-radius: 8px; 
+            margin-bottom: 20px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+        .empty { 
+            text-align: center; 
+            padding: 60px 20px;
+            background: linear-gradient(135deg, #1a1a1a, #212529);
+            border-radius: 12px;
+            border: 2px dashed rgba(255, 255, 255, 0.1);
+        }
+        .empty i {
+            font-size: 48px;
+            color: #00ff88;
+            margin-bottom: 16px;
+            display: block;
+        }
+        .empty-text {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 18px;
+        }
+        .modal { 
+            display: none; 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0; 
+            background: rgba(0, 0, 0, 0.8);
+            align-items: center; 
+            justify-content: center; 
+            z-index: 1000;
+            backdrop-filter: blur(8px);
+        }
+        .modal.active { display: flex; }
+        .modal-content { 
+            background: linear-gradient(135deg, #1a1a1a, #212529);
+            padding: 30px; 
+            border-radius: 16px; 
+            width: 90%; 
+            max-width: 500px;
+            border: 2px solid #F05545;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        .modal-content h2 {
+            font-family: 'Orbitron', sans-serif;
+            color: #F05545;
+            margin-bottom: 20px;
+        }
+        .modal-content p {
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 20px;
+        }
+        .form-group { margin-bottom: 20px; }
+        .form-group textarea { 
+            width: 100%; 
+            padding: 14px; 
+            background: #000000;
+            border: 2px solid #343a40;
+            border-radius: 8px; 
+            font-size: 14px;
+            color: #ffffff;
+            font-family: 'Rajdhani', sans-serif;
+            min-height: 100px;
+            resize: vertical;
+        }
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #F05545;
+            box-shadow: 0 0 0 3px rgba(240, 85, 69, 0.2);
+        }
+        .form-group textarea::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+        .user-badge {
+            background: linear-gradient(135deg, #F05545, #d44437);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <h1><i class="fas fa-shield-alt me-2"></i>Admin Panel</h1>
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <span id="userEmail" class="user-badge"></span>
+            <button onclick="logout()"><i class="fas fa-sign-out-alt me-2"></i>Logout</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h2><i class="fas fa-tasks me-3"></i>Pending Listings</h2>
+            <p><i class="fas fa-info-circle me-2"></i>Review and approve/reject user-submitted listings</p>
+        </div>
+        
+        <div id="message"></div>
+        
+        <div id="listingsContainer">
+            <div class="empty">
+                <i class="fas fa-spinner fa-spin"></i>
+                <div class="empty-text">Loading pending listings...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Reject Modal -->
+    <div id="rejectModal" class="modal">
+        <div class="modal-content">
+            <h2><i class="fas fa-times-circle me-2"></i>Reject Listing</h2>
+            <p>Please provide a reason for rejection:</p>
+            <div class="form-group">
+                <textarea id="rejectReason" placeholder="e.g., Incomplete information, suspicious listing, etc."></textarea>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-reject" style="flex: 1;" onclick="confirmReject()">
+                    <i class="fas fa-ban"></i> Reject Listing
+                </button>
+                <button class="btn" style="background: #343a40; color: white; flex: 1;" onclick="closeRejectModal()">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentUser = null;
+        let rejectingListingId = null;
+        
+        // Check auth on load
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                const data = await response.json();
+                currentUser = data.user;
+                
+                if (!currentUser.is_admin) {
+                    showMessage('Access denied: Admin only', 'error');
+                    setTimeout(() => window.location.href = '/dashboard', 2000);
+                    return;
+                }
+                
+                document.getElementById('userEmail').innerHTML = `<i class="fas fa-crown me-2"></i>${currentUser.email} (Admin)`;
+                
+                loadPendingListings();
+            } catch (err) {
+                window.location.href = '/login';
+            }
+        }
+        
+        async function loadPendingListings() {
+            try {
+                const response = await fetch('/api/listings/admin/pending', {
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                const listings = data.listings || [];
+                
+                const container = document.getElementById('listingsContainer');
+                
+                if (listings.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty">
+                            <i class="fas fa-check-circle"></i>
+                            <div class="empty-text">No pending listings</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                container.innerHTML = listings.map(listing => `
+                    <div class="listing-card">
+                        <div class="listing-header">
+                            <h3><i class="fas fa-plane me-2"></i>${listing.title}</h3>
+                            <span class="pending-badge"><i class="fas fa-clock me-2"></i>PENDING</span>
+                        </div>
+                        <div class="listing-info">
+                            <div><i class="fas fa-user me-2" style="color: #F05545;"></i><strong>Owner:</strong> ${listing.owner?.email || 'N/A'}</div>
+                            <div><i class="fas fa-tag me-2" style="color: #F05545;"></i><strong>Type:</strong> ${listing.aircraft_type || 'N/A'}</div>
+                            <div><i class="fas fa-industry me-2" style="color: #F05545;"></i><strong>Manufacturer:</strong> ${listing.manufacturer || 'N/A'}</div>
+                            <div><i class="fas fa-plane-departure me-2" style="color: #F05545;"></i><strong>Model:</strong> ${listing.model || 'N/A'}</div>
+                            <div><i class="fas fa-calendar me-2" style="color: #F05545;"></i><strong>Year:</strong> ${listing.year || 'N/A'}</div>
+                            <div><i class="fas fa-dollar-sign me-2" style="color: #F05545;"></i><strong>Price:</strong> $${(listing.price || 0).toLocaleString()}</div>
+                            <div><i class="fas fa-map-marker-alt me-2" style="color: #F05545;"></i><strong>Location:</strong> ${listing.location || 'N/A'}</div>
+                            ${listing.description ? `<div style="margin-top: 12px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 3px solid #F05545;"><strong><i class="fas fa-info-circle me-2"></i>Description:</strong><br>${listing.description}</div>` : ''}
+                            <div style="margin-top: 8px;"><i class="fas fa-clock me-2" style="color: #F05545;"></i><strong>Submitted:</strong> ${new Date(listing.created_at).toLocaleString()}</div>
+                        </div>
+                        <div class="listing-actions">
+                            <button class="btn btn-approve" onclick="approveListing(${listing.id})">
+                                <i class="fas fa-check-circle"></i> Approve
+                            </button>
+                            <button class="btn btn-reject" onclick="openRejectModal(${listing.id})">
+                                <i class="fas fa-times-circle"></i> Reject
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+                
+            } catch (err) {
+                showMessage('Error loading listings', 'error');
+            }
+        }
+        
+        async function approveListing(id) {
+            if (!confirm('Approve this listing? It will become visible to the public.')) return;
+            
+            try {
+                const response = await fetch(`/api/listings/admin/${id}/approve`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage('Listing approved successfully!', 'success');
+                    loadPendingListings();
+                } else {
+                    showMessage(data.error || 'Error approving listing', 'error');
+                }
+            } catch (err) {
+                showMessage('Error approving listing', 'error');
+            }
+        }
+        
+        function openRejectModal(id) {
+            rejectingListingId = id;
+            document.getElementById('rejectReason').value = '';
+            document.getElementById('rejectModal').classList.add('active');
+        }
+        
+        function closeRejectModal() {
+            rejectingListingId = null;
+            document.getElementById('rejectModal').classList.remove('active');
+        }
+        
+        async function confirmReject() {
+            const reason = document.getElementById('rejectReason').value.trim();
+            
+            if (!reason) {
+                alert('Please provide a reason for rejection');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/listings/admin/${rejectingListingId}/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ reason })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showMessage('Listing rejected', 'success');
+                    closeRejectModal();
+                    loadPendingListings();
+                } else {
+                    showMessage(data.error || 'Error rejecting listing', 'error');
+                }
+            } catch (err) {
+                showMessage('Error rejecting listing', 'error');
+            }
+        }
+        
+        async function logout() {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            window.location.href = '/login';
+        }
+        
+        function showMessage(text, type) {
+            const div = document.getElementById('message');
+            const icon = type === 'error' ? 'fa-exclamation-circle' : 'fa-check-circle';
+            div.innerHTML = `<div class="${type}"><i class="fas ${icon} me-2"></i>${text}</div>`;
+            setTimeout(() => div.innerHTML = '', 5000);
+        }
+        
+        checkAuth();
+    </script>
+</body>
+</html>

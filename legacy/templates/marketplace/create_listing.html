@@ -1,0 +1,741 @@
+{% extends "base.html" %}
+
+{% block title %}Create Aircraft Listing - JetFinder{% endblock %}
+
+{% block extra_css %}
+<style>
+    .listing-form {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .form-section {
+        margin-bottom: 40px;
+        padding: 25px;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        background: #fafafa;
+    }
+
+    .form-section h3 {
+        color: #2c5282;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e2e8f0;
+        font-size: 1.3em;
+        font-weight: 600;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+        color: #4a5568;
+        font-size: 0.95em;
+    }
+
+    .required {
+        color: #e53e3e;
+    }
+
+    .form-control {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #cbd5e0;
+        border-radius: 6px;
+        font-size: 16px;
+        transition: border-color 0.3s, box-shadow 0.3s;
+        background: #fff;
+    }
+
+    .form-control:focus {
+        border-color: #4299e1;
+        box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        outline: none;
+    }
+
+    .form-control-textarea {
+        min-height: 100px;
+        resize: vertical;
+    }
+
+    .condition-selector {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 8px;
+    }
+
+    .condition-option {
+        padding: 10px;
+        border: 2px solid #e2e8f0;
+        border-radius: 6px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+        background: #fff;
+    }
+
+    .condition-option:hover {
+        border-color: #4299e1;
+        background: #ebf8ff;
+    }
+
+    .condition-option.selected {
+        border-color: #4299e1;
+        background: #4299e1;
+        color: white;
+    }
+
+    .csv-match-section {
+        background: #f7fafc;
+        border: 2px solid #bee3f8;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+
+    .csv-match-found {
+        border-color: #9ae6b4;
+        background: #f0fff4;
+    }
+
+    .csv-match-none {
+        border-color: #fed7d7;
+        background: #fffafa;
+    }
+
+    .match-score {
+        font-size: 1.1em;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .match-score.high {
+        color: #38a169;
+    }
+
+    .match-score.medium {
+        color: #d69e2e;
+    }
+
+    .match-score.low {
+        color: #e53e3e;
+    }
+
+    .submit-section {
+        background: #edf2f7;
+        padding: 30px;
+        border-radius: 8px;
+        text-align: center;
+        margin-top: 40px;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #4299e1, #3182ce);
+        color: white;
+        border: none;
+        padding: 15px 40px;
+        border-radius: 8px;
+        font-size: 1.1em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(66, 153, 225, 0.4);
+    }
+
+    .btn-secondary {
+        background: #edf2f7;
+        color: #4a5568;
+        border: 1px solid #cbd5e0;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.3s;
+        margin-left: 10px;
+    }
+
+    .btn-secondary:hover {
+        background: #e2e8f0;
+        border-color: #a0aec0;
+    }
+
+    .help-text {
+        font-size: 0.9em;
+        color: #718096;
+        margin-top: 5px;
+        font-style: italic;
+    }
+
+    .image-upload-area {
+        border: 2px dashed #cbd5e0;
+        border-radius: 8px;
+        padding: 40px;
+        text-align: center;
+        background: #f7fafc;
+        transition: all 0.3s;
+        cursor: pointer;
+    }
+
+    .image-upload-area:hover {
+        border-color: #4299e1;
+        background: #ebf8ff;
+    }
+
+    .image-preview {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 15px;
+        margin-top: 20px;
+    }
+
+    .image-preview-item {
+        position: relative;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .image-preview-item img {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+    }
+
+    .remove-image {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background: #e53e3e;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 25px;
+        height: 25px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+
+    @media (max-width: 768px) {
+        .form-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .condition-selector {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .listing-form {
+            margin: 10px;
+            padding: 15px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="listing-form">
+        <div class="text-center mb-4">
+            <h1 class="display-4">Create Aircraft Listing</h1>
+            <p class="lead">List your aircraft with all the details buyers need to make informed decisions</p>
+        </div>
+
+        <form id="aircraftListingForm" method="POST" enctype="multipart/form-data">
+            <!-- Basic Information Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-plane"></i> Basic Information</h3>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="manufacturer">Manufacturer <span class="required">*</span></label>
+                        <input type="text" class="form-control" id="manufacturer" name="manufacturer" required
+                            placeholder="e.g., Cessna, Piper, Beechcraft">
+                        <div class="help-text">Enter the aircraft manufacturer exactly as listed</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="model">Model <span class="required">*</span></label>
+                        <input type="text" class="form-control" id="model" name="model" required
+                            placeholder="e.g., Citation CJ3+, King Air 350">
+                        <div class="help-text">Specific model including variants (CJ3+, 350i, etc.)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="year">Year <span class="required">*</span></label>
+                        <input type="number" class="form-control" id="year" name="year" required min="1900" max="2030"
+                            placeholder="2020">
+                        <div class="help-text">Year of manufacture</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="price">Asking Price (USD) <span class="required">*</span></label>
+                        <input type="number" class="form-control" id="price" name="price" required min="1"
+                            placeholder="1500000">
+                        <div class="help-text">Your asking price in US dollars</div>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="serial_number">Serial Number</label>
+                        <input type="text" class="form-control" id="serial_number" name="serial_number"
+                            placeholder="Enter aircraft serial number">
+                        <div class="help-text">Helps verify authenticity and aircraft history</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="registration_number">Registration/Tail Number</label>
+                        <input type="text" class="form-control" id="registration_number" name="registration_number"
+                            placeholder="N123AB" pattern="[A-Z0-9-]+">
+                        <div class="help-text">Current registration (e.g., N123AB)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="location">Location <span class="required">*</span></label>
+                        <input type="text" class="form-control" id="location" name="location" required
+                            placeholder="City, State, Country">
+                        <div class="help-text">Where the aircraft is currently located</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="listing_type">Listing Type</label>
+                        <select class="form-control" id="listing_type" name="listing_type">
+                            <option value="sale">For Sale</option>
+                            <option value="lease">For Lease</option>
+                            <option value="partnership">Partnership/Share</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- CSV Matching Section -->
+                <div id="csvMatchSection" class="csv-match-section" style="display: none;">
+                    <h4>Database Match</h4>
+                    <div id="csvMatchResults"></div>
+                </div>
+            </div>
+
+            <!-- Technical Specifications Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-cogs"></i> Technical Specifications</h3>
+
+                <div class="form-group">
+                    <label for="airframe_total_time">Airframe Total Time (Hours)</label>
+                    <input type="number" class="form-control" id="airframe_total_time" name="airframe_total_time"
+                        min="0" placeholder="2500">
+                    <div class="help-text">Total time since new for the airframe</div>
+                </div>
+
+                <!-- Engine 1 -->
+                <h4 class="mt-4 mb-3">Engine 1</h4>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="engine_1_manufacturer">Engine 1 Manufacturer</label>
+                        <input type="text" class="form-control" id="engine_1_manufacturer" name="engine_1_manufacturer"
+                            placeholder="Pratt & Whitney, Rolls-Royce, etc.">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_1_model">Engine 1 Model</label>
+                        <input type="text" class="form-control" id="engine_1_model" name="engine_1_model"
+                            placeholder="PT6A-42A, FJ44-4A, etc.">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_1_time_since_new">Engine 1 Time Since New (Hours)</label>
+                        <input type="number" class="form-control" id="engine_1_time_since_new"
+                            name="engine_1_time_since_new" min="0" placeholder="1200">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_1_time_since_overhaul">Engine 1 Time Since Overhaul (Hours)</label>
+                        <input type="number" class="form-control" id="engine_1_time_since_overhaul"
+                            name="engine_1_time_since_overhaul" min="0" placeholder="800">
+                    </div>
+                </div>
+
+                <!-- Engine 2 (if twin) -->
+                <h4 class="mt-4 mb-3">Engine 2 (Twin Engine Aircraft)</h4>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="engine_2_manufacturer">Engine 2 Manufacturer</label>
+                        <input type="text" class="form-control" id="engine_2_manufacturer" name="engine_2_manufacturer"
+                            placeholder="Leave blank for single engine">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_2_model">Engine 2 Model</label>
+                        <input type="text" class="form-control" id="engine_2_model" name="engine_2_model">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_2_time_since_new">Engine 2 Time Since New (Hours)</label>
+                        <input type="number" class="form-control" id="engine_2_time_since_new"
+                            name="engine_2_time_since_new" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="engine_2_time_since_overhaul">Engine 2 Time Since Overhaul (Hours)</label>
+                        <input type="number" class="form-control" id="engine_2_time_since_overhaul"
+                            name="engine_2_time_since_overhaul" min="0">
+                    </div>
+                </div>
+
+                <!-- Propellers -->
+                <h4 class="mt-4 mb-3">Propellers</h4>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="propeller_1_manufacturer">Propeller 1 Manufacturer</label>
+                        <input type="text" class="form-control" id="propeller_1_manufacturer"
+                            name="propeller_1_manufacturer" placeholder="Hartzell, McCauley, etc.">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="propeller_1_model">Propeller 1 Model</label>
+                        <input type="text" class="form-control" id="propeller_1_model" name="propeller_1_model">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="propeller_1_time">Propeller 1 Time (Hours)</label>
+                        <input type="number" class="form-control" id="propeller_1_time" name="propeller_1_time" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="propeller_2_manufacturer">Propeller 2 Manufacturer</label>
+                        <input type="text" class="form-control" id="propeller_2_manufacturer"
+                            name="propeller_2_manufacturer" placeholder="Leave blank if single prop">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Avionics & Equipment Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-tv"></i> Avionics & Equipment</h3>
+
+                <div class="form-group">
+                    <label for="avionics_description">Avionics Description</label>
+                    <textarea class="form-control form-control-textarea" id="avionics_description"
+                        name="avionics_description"
+                        placeholder="Describe installed avionics: Garmin G1000, GTN 750, autopilot, weather radar, etc."></textarea>
+                    <div class="help-text">List all installed avionics and navigation equipment</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="equipment_list">Additional Equipment</label>
+                    <textarea class="form-control form-control-textarea" id="equipment_list" name="equipment_list"
+                        placeholder="Air conditioning, oxygen system, entertainment system, Wi-Fi, etc."></textarea>
+                    <div class="help-text">List any additional equipment not covered in avionics</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="interior_description">Interior Description</label>
+                    <textarea class="form-control form-control-textarea" id="interior_description"
+                        name="interior_description"
+                        placeholder="Describe seating configuration, materials, recent updates, etc."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="exterior_description">Exterior Description</label>
+                    <textarea class="form-control form-control-textarea" id="exterior_description"
+                        name="exterior_description"
+                        placeholder="Paint scheme, recent paint work, overall appearance, etc."></textarea>
+                </div>
+            </div>
+
+            <!-- Condition & Maintenance Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-wrench"></i> Condition & Maintenance</h3>
+
+                <div class="form-group">
+                    <label>Interior Condition</label>
+                    <div class="condition-selector">
+                        <div class="condition-option" data-condition="Excellent" data-field="interior_condition">
+                            <strong>Excellent</strong><br>
+                            <small>Like new</small>
+                        </div>
+                        <div class="condition-option" data-condition="Good" data-field="interior_condition">
+                            <strong>Good</strong><br>
+                            <small>Well maintained</small>
+                        </div>
+                        <div class="condition-option" data-condition="Fair" data-field="interior_condition">
+                            <strong>Fair</strong><br>
+                            <small>Some wear</small>
+                        </div>
+                        <div class="condition-option" data-condition="Poor" data-field="interior_condition">
+                            <strong>Poor</strong><br>
+                            <small>Needs work</small>
+                        </div>
+                    </div>
+                    <input type="hidden" id="interior_condition" name="interior_condition">
+                </div>
+
+                <div class="form-group">
+                    <label>Exterior Condition</label>
+                    <div class="condition-selector">
+                        <div class="condition-option" data-condition="Excellent" data-field="exterior_condition">
+                            <strong>Excellent</strong><br>
+                            <small>Like new</small>
+                        </div>
+                        <div class="condition-option" data-condition="Good" data-field="exterior_condition">
+                            <strong>Good</strong><br>
+                            <small>Well maintained</small>
+                        </div>
+                        <div class="condition-option" data-condition="Fair" data-field="exterior_condition">
+                            <strong>Fair</strong><br>
+                            <small>Some wear</small>
+                        </div>
+                        <div class="condition-option" data-condition="Poor" data-field="exterior_condition">
+                            <strong>Poor</strong><br>
+                            <small>Needs work</small>
+                        </div>
+                    </div>
+                    <input type="hidden" id="exterior_condition" name="exterior_condition">
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="maintenance_program">Maintenance Program</label>
+                        <select class="form-control" id="maintenance_program" name="maintenance_program">
+                            <option value="">Select Program</option>
+                            <option value="Part 91">Part 91</option>
+                            <option value="Part 135">Part 135</option>
+                            <option value="Manufacturer MSP">Manufacturer MSP</option>
+                            <option value="Third Party MSP">Third Party MSP</option>
+                            <option value="Custom Program">Custom Program</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="last_annual_date">Last Annual Inspection</label>
+                        <input type="date" class="form-control" id="last_annual_date" name="last_annual_date">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="next_inspection_due">Next Inspection Due</label>
+                        <input type="date" class="form-control" id="next_inspection_due" name="next_inspection_due">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="damage_history">Damage History</label>
+                    <textarea class="form-control form-control-textarea" id="damage_history" name="damage_history"
+                        placeholder="Describe any damage history or enter 'None' if no damage history"></textarea>
+                    <div class="help-text">Full disclosure builds trust with potential buyers</div>
+                </div>
+            </div>
+
+            <!-- Images Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-camera"></i> Photos</h3>
+
+                <div class="image-upload-area" onclick="document.getElementById('imageInput').click()">
+                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                    <h4>Click to upload photos</h4>
+                    <p class="text-muted">Upload high-quality photos of your aircraft (exterior, interior, panel, engine
+                        bay)</p>
+                    <input type="file" id="imageInput" name="images" multiple accept="image/*" style="display: none;">
+                </div>
+
+                <div id="imagePreview" class="image-preview"></div>
+            </div>
+
+            <!-- Description Section -->
+            <div class="form-section">
+                <h3><i class="fas fa-edit"></i> Description & Contact</h3>
+
+                <div class="form-group">
+                    <label for="description">Aircraft Description <span class="required">*</span></label>
+                    <textarea class="form-control form-control-textarea" id="description" name="description" required
+                        rows="6"
+                        placeholder="Provide a detailed description of your aircraft, its history, unique features, recent upgrades, and why it's a great choice for buyers..."></textarea>
+                    <div class="help-text">A compelling description increases buyer interest</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="contact_info">Contact Information</label>
+                    <textarea class="form-control form-control-textarea" id="contact_info" name="contact_info"
+                        placeholder="Preferred contact method: phone, email, best times to reach you, location for viewing, etc."></textarea>
+                    <div class="help-text">How buyers should contact you (leave blank to use your profile info)</div>
+                </div>
+            </div>
+
+            <!-- Submit Section -->
+            <div class="submit-section">
+                <h4>Ready to List Your Aircraft?</h4>
+                <p class="text-muted mb-4">Your listing will be reviewed before going live to ensure quality and
+                    accuracy.</p>
+
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-paper-plane mr-2"></i>
+                    Create Aircraft Listing
+                </button>
+
+                <button type="button" class="btn-secondary" onclick="window.history.back()">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Form Enhancement JavaScript
+    document.addEventListener('DOMContentLoaded', function () {
+        // Condition selector functionality
+        document.querySelectorAll('.condition-option').forEach(option => {
+            option.addEventListener('click', function () {
+                const field = this.dataset.field;
+                const condition = this.dataset.condition;
+
+                // Remove selected class from siblings
+                this.parentNode.querySelectorAll('.condition-option').forEach(sibling => {
+                    sibling.classList.remove('selected');
+                });
+
+                // Add selected class to clicked option
+                this.classList.add('selected');
+
+                // Update hidden input
+                document.getElementById(field).value = condition;
+            });
+        });
+
+        // CSV Matching on manufacturer/model/year change
+        let csvMatchTimeout;
+        function checkCSVMatch() {
+            clearTimeout(csvMatchTimeout);
+            csvMatchTimeout = setTimeout(() => {
+                const manufacturer = document.getElementById('manufacturer').value;
+                const model = document.getElementById('model').value;
+                const year = document.getElementById('year').value;
+
+                if (manufacturer && model) {
+                    fetch('/api/aircraft-csv-match', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            manufacturer: manufacturer,
+                            model: model,
+                            year: year ? parseInt(year) : null
+                        })
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            displayCSVMatch(data);
+                        })
+                        .catch(error => {
+                            console.error('CSV match error:', error);
+                        });
+                }
+            }, 500);
+        }
+
+        function displayCSVMatch(data) {
+            const section = document.getElementById('csvMatchSection');
+            const results = document.getElementById('csvMatchResults');
+
+            if (data.csv_match_score > 0) {
+                section.style.display = 'block';
+                section.className = data.csv_match_score >= 80 ? 'csv-match-section csv-match-found' : 'csv-match-section';
+
+                const scoreClass = data.csv_match_score >= 80 ? 'high' : data.csv_match_score >= 60 ? 'medium' : 'low';
+
+                results.innerHTML = `
+                <div class="match-score ${scoreClass}">
+                    Match Score: ${data.csv_match_score.toFixed(1)}%
+                </div>
+                <p>${data.match_details}</p>
+                ${data.csv_aircraft ? `
+                    <div class="mt-3">
+                        <strong>Matched Aircraft:</strong> ${data.csv_aircraft.manufacturer} ${data.csv_aircraft.type}<br>
+                        <small class="text-muted">This means your listing can be compared with our database for scoring and market analysis.</small>
+                    </div>
+                ` : ''}
+            `;
+            } else {
+                section.style.display = 'block';
+                section.className = 'csv-match-section csv-match-none';
+                results.innerHTML = `
+                <div class="match-score low">No Match Found</div>
+                <p>We couldn't find a matching aircraft in our database. Your listing will still be published, but won't have access to our comparison scoring system.</p>
+                <small class="text-muted">Try adjusting the manufacturer or model name to match standard naming conventions.</small>
+            `;
+            }
+        }
+
+        // Add event listeners for CSV matching
+        ['manufacturer', 'model', 'year'].forEach(field => {
+            document.getElementById(field).addEventListener('input', checkCSVMatch);
+        });
+
+        // Image upload handling
+        document.getElementById('imageInput').addEventListener('change', function (e) {
+            const files = e.target.files;
+            const preview = document.getElementById('imagePreview');
+
+            Array.from(files).forEach((file, index) => {
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        const div = document.createElement('div');
+                        div.className = 'image-preview-item';
+                        div.innerHTML = `
+                        <img src="${e.target.result}" alt="Aircraft Photo ${index + 1}">
+                        <button type="button" class="remove-image" onclick="this.parentNode.remove()">×</button>
+                    `;
+                        preview.appendChild(div);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        });
+
+        // Form validation enhancement
+        document.getElementById('aircraftListingForm').addEventListener('submit', function (e) {
+            let isValid = true;
+            const requiredFields = ['manufacturer', 'model', 'year', 'price', 'location', 'description'];
+
+            requiredFields.forEach(field => {
+                const input = document.getElementById(field);
+                if (!input.value.trim()) {
+                    input.style.borderColor = '#e53e3e';
+                    isValid = false;
+                } else {
+                    input.style.borderColor = '#cbd5e0';
+                }
+            });
+
+            if (!isValid) {
+                e.preventDefault();
+                alert('Please fill in all required fields marked with *');
+                document.querySelector('.form-control[style*="border-color: rgb(229, 62, 62)"]').scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+            }
+        });
+    });
+</script>
+{% endblock %}

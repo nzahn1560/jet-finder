@@ -1,0 +1,9 @@
+# Cloudflare Pages configuration
+# This file helps Cloudflare Pages understand your project structure
+
+[build]
+command = "cd frontend && npm ci && npm run build"
+output_directory = "frontend/dist"
+
+[env.production]
+NODE_VERSION = "18"

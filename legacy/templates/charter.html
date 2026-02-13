@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charter Flights - Jet Finder</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        /* Aircraft Grid Layout - Square Cards */
+        .aircraft-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .aircraft-card {
+            background: linear-gradient(145deg, #212529, #343a40);
+            border: 1px solid #495057;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            position: relative;
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            height: 350px;
+            width: 100%;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .aircraft-card {
+            background: linear-gradient(145deg, #212529, #343a40);
+            border: 1px solid #495057;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            position: relative;
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            height: 350px;
+            width: 350px;
+            margin: 0 auto;
+            cursor: pointer;
+        }
+
+        .aircraft-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(240, 85, 69, 0.3);
+            border-color: #F05545;
+        }
+
+        .aircraft-image {
+            position: relative;
+            height: 180px;
+            overflow: hidden;
+        }
+
+        .aircraft-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .score-overlay {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            z-index: 10;
+        }
+
+        .score-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.8rem;
+            color: white;
+            border: 3px solid #212529;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .score-circle.excellent {
+            background: linear-gradient(135deg, #F05545, #d44437);
+        }
+
+        .aircraft-details {
+            padding: 1.25rem;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .aircraft-header {
+            margin-bottom: 0.75rem;
+        }
+
+        .aircraft-name {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #F05545;
+            margin: 0;
+            line-height: 1.3;
+        }
+
+        .aircraft-category {
+            font-size: 0.75rem;
+            color: #6c757d;
+        }
+
+        .aircraft-price-hours {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background: rgba(240, 85, 69, 0.1);
+            border-radius: 8px;
+        }
+
+        .price-section .price-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #F05545;
+        }
+
+        .hours-section {
+            text-align: right;
+        }
+
+        .hours-value {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #17a2b8;
+        }
+
+        .hours-label {
+            font-size: 0.7rem;
+            color: #6c757d;
+        }
+
+        .enhanced-specs-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .spec-item {
+            text-align: center;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .spec-item:hover {
+            background: rgba(240, 85, 69, 0.1);
+            border-color: rgba(240, 85, 69, 0.3);
+        }
+
+        .spec-value {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #F05545;
+            margin-bottom: 0.25rem;
+        }
+
+        .spec-label {
+            font-size: 0.7rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-actions {
+            margin-top: auto;
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+
+        .card-actions .btn {
+            flex: 1;
+            max-width: 120px;
+        }
+
+        /* Pagination Styling */
+        .pagination .page-link {
+            background: linear-gradient(145deg, #212529, #343a40);
+            border: 1px solid #495057;
+            color: #F05545;
+            padding: 0.75rem 1rem;
+            margin: 0 2px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .pagination .page-link:hover {
+            background: linear-gradient(145deg, #F05545, #d44437);
+            border-color: #F05545;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .pagination .page-item.active .page-link {
+            background: linear-gradient(135deg, #F05545, #d44437);
+            border-color: #F05545;
+            color: white;
+            box-shadow: 0 4px 12px rgba(240, 85, 69, 0.3);
+        }
+
+        .pagination .page-item.disabled .page-link {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.5);
+            cursor: not-allowed;
+        }
+
+        .route-visual {
+            background: linear-gradient(90deg, #0d6efd, #6610f2);
+            height: 3px;
+            position: relative;
+            margin: 10px 0;
+        }
+
+        .route-visual::before,
+        .route-visual::after {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: white;
+            border: 2px solid #0d6efd;
+            border-radius: 50%;
+            top: -4px;
+        }
+
+        .route-visual::before {
+            left: -4px;
+        }
+
+        .route-visual::after {
+            right: -4px;
+        }
+
+        .discount-badge {
+            background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-airplane"></i> Jet Finder
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/buy-aircraft">Buy Aircraft</a>
+                <a class="nav-link" href="/services-parts">Services & Parts</a>
+                <a class="nav-link active" href="/charter">Charter</a>
+                <a class="nav-link" href="/stock-market">Stock Market</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4" x-data="charterFlights()">
+        <!-- Charter Type Selection -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-center">
+                    <div class="btn-group btn-group-lg" role="group">
+                        <button type="button" class="btn"
+                            :class="charterType === 'search' ? 'btn-primary' : 'btn-outline-primary'"
+                            @click="setCharterType('search')">
+                            <i class="bi bi-search"></i> Charter Search
+                        </button>
+                        <button type="button" class="btn"
+                            :class="charterType === 'empty' ? 'btn-primary' : 'btn-outline-primary'"
+                            @click="setCharterType('empty')">
+                            <i class="bi bi-lightning"></i> Empty Legs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charter Search Tab -->
+        <div x-show="charterType === 'search'" x-transition>
+            <div class="row">
+                <div class="col-lg-4">
+                    <div class="card sticky-top">
+                        <div class="card-body">
+                            <h4><i class="bi bi-search"></i> Find Charter Flights</h4>
+
+                            <form @submit.prevent="searchCharters()">
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label">From</label>
+                                        <input type="text" class="form-control" placeholder="Departure airport"
+                                            x-model="searchForm.departure" required>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label">To</label>
+                                        <input type="text" class="form-control" placeholder="Arrival airport"
+                                            x-model="searchForm.arrival" required>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label">Departure Date</label>
+                                        <input type="date" class="form-control" x-model="searchForm.departureDate"
+                                            required>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label">Return Date</label>
+                                        <input type="date" class="form-control" x-model="searchForm.returnDate">
+                                    </div>
+                                </div>
+
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label">Passengers</label>
+                                        <select class="form-select" x-model="searchForm.passengers">
+                                            <option value="1">1 passenger</option>
+                                            <option value="2">2 passengers</option>
+                                            <option value="4">4 passengers</option>
+                                            <option value="6">6 passengers</option>
+                                            <option value="8">8 passengers</option>
+                                            <option value="12">12+ passengers</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label">Aircraft Category</label>
+                                        <select class="form-select" x-model="searchForm.category">
+                                            <option value="">Any Category</option>
+                                            <option value="light">Light Jet</option>
+                                            <option value="midsize">Midsize Jet</option>
+                                            <option value="heavy">Heavy Jet</option>
+                                            <option value="turboprop">Turboprop</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Budget Range</label>
+                                    <select class="form-select" x-model="searchForm.budget">
+                                        <option value="">Any Budget</option>
+                                        <option value="10000">Up to $10,000</option>
+                                        <option value="25000">Up to $25,000</option>
+                                        <option value="50000">Up to $50,000</option>
+                                        <option value="100000">$50,000+</option>
+                                    </select>
+                                </div>
+
+                                <!-- Charter Priority Selection -->
+                                <div class="mb-4">
+                                    <h6 class="text-primary mb-3">
+                                        <i class="bi bi-sliders"></i> Set Your Priorities
+                                    </h6>
+                                    <div class="row">
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Price Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.pricePriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium" selected>Medium Priority</option>
+                                                <option value="high">High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Comfort Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.comfortPriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium">Medium Priority</option>
+                                                <option value="high" selected>High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Speed Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.speedPriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium" selected>Medium Priority</option>
+                                                <option value="high">High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Safety Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.safetyPriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium">Medium Priority</option>
+                                                <option value="high" selected>High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Flexibility Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.flexibilityPriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium" selected>Medium Priority</option>
+                                                <option value="high">High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6 mb-2">
+                                            <label class="form-label small">Service Priority</label>
+                                            <select class="form-select form-select-sm"
+                                                x-model="searchForm.servicePriority">
+                                                <option value="low">Low Priority</option>
+                                                <option value="medium">Medium Priority</option>
+                                                <option value="high" selected>High Priority</option>
+                                                <option value="critical">Critical Priority</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary btn-lg" :disabled="searching">
+                                        <span x-show="!searching"><i class="bi bi-search"></i> Search Charters</span>
+                                        <span x-show="searching">
+                                            <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                            Searching...
+                                        </span>
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Recent Searches -->
+                            <div class="mt-4" x-show="recentSearches.length > 0">
+                                <h6>Recent Searches</h6>
+                                <div class="list-group list-group-flush">
+                                    <template x-for="search in recentSearches">
+                                        <a href="#" class="list-group-item list-group-item-action py-2"
+                                            @click="loadRecentSearch(search)">
+                                            <small x-text="search.route + ' • ' + search.date"></small>
+                                        </a>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-8">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3>Available Charter Flights</h3>
+                        <span class="badge bg-primary" x-text="charterResults.length + ' flights found'"></span>
+                    </div>
+
+                    <!-- Recommendation Summary -->
+                    <div x-show="!searching && charterResults.length > 0" class="mb-4 p-3"
+                        style="background: rgba(240, 85, 69, 0.1); border-radius: 8px; border: 1px solid rgba(240, 85, 69, 0.2);">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h6 class="text-white mb-1">
+                                    <i class="bi bi-star-fill text-warning me-2"></i>
+                                    AI Recommendation Summary
+                                </h6>
+                                <small class="text-muted">
+                                    Flights ranked by your priority preferences:
+                                    <span class="text-primary" x-text="searchForm.pricePriority"></span> Price,
+                                    <span class="text-primary" x-text="searchForm.comfortPriority"></span> Comfort,
+                                    <span class="text-primary" x-text="searchForm.speedPriority"></span> Speed,
+                                    <span class="text-primary" x-text="searchForm.safetyPriority"></span> Safety,
+                                    <span class="text-primary" x-text="searchForm.flexibilityPriority"></span>
+                                    Flexibility,
+                                    <span class="text-primary" x-text="searchForm.servicePriority"></span> Service
+                                </small>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <span class="badge bg-success">
+                                    <span x-text="charterResults.length"></span> flights analyzed
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="!searching" class="aircraft-grid">
+                        <template x-for="(flight, index) in paginatedResults" :key="flight.id">
+                            <div class="aircraft-card" @click="showFlightDetails(flight)">
+                                <!-- Best Match Badge -->
+                                <div x-show="index === 0" class="position-absolute"
+                                    style="top: 10px; left: 10px; z-index: 15;">
+                                    <span class="badge bg-warning text-dark px-3 py-2" style="font-size: 0.8rem;">
+                                        <i class="bi bi-star-fill me-1"></i>Best Match
+                                    </span>
+                                </div>
+
+                                <!-- Aircraft Image -->
+                                <div class="aircraft-image">
+                                    <img src="/static/images/aircraft_placeholder.jpg" alt="Aircraft" class="img-fluid">
+                                    <!-- Recommendation Score overlay -->
+                                    <div class="score-overlay">
+                                        <div class="score-circle"
+                                            :class="getRecommendationLevel(calculateRecommendationScore(flight).totalScore).level">
+                                            <span x-text="calculateRecommendationScore(flight).totalScore"></span>%
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="aircraft-details">
+                                    <!-- Aircraft Name -->
+                                    <div class="aircraft-header">
+                                        <h3 class="aircraft-name" x-text="flight.aircraftType"></h3>
+                                        <div class="aircraft-category">Charter Flight</div>
+                                    </div>
+
+                                    <!-- Price and Route -->
+                                    <div class="aircraft-price-hours">
+                                        <div class="price-section">
+                                            <div class="price-value" x-text="formatPrice(flight.price)"></div>
+                                        </div>
+                                        <div class="hours-section">
+                                            <div class="hours-value" x-text="flight.duration"></div>
+                                            <div class="hours-label">Duration</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Route Display -->
+                                    <div class="enhanced-specs-grid">
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.departure"></div>
+                                            <div class="spec-label">From</div>
+                                        </div>
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.arrival"></div>
+                                            <div class="spec-label">To</div>
+                                        </div>
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.passengers"></div>
+                                            <div class="spec-label">Passengers</div>
+                                        </div>
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.speed + ' kts'"></div>
+                                            <div class="spec-label">Speed</div>
+                                        </div>
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.range + ' nm'"></div>
+                                            <div class="spec-label">Range</div>
+                                        </div>
+                                        <div class="spec-item">
+                                            <div class="spec-value" x-text="flight.operator"></div>
+                                            <div class="spec-label">Operator</div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Recommendation Score Breakdown -->
+                                    <div class="mt-2 p-2"
+                                        style="background: rgba(240, 85, 69, 0.1); border-radius: 6px; border: 1px solid rgba(240, 85, 69, 0.2);">
+                                        <div class="row mb-2">
+                                            <div class="col-12">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <strong class="text-white"
+                                                        x-text="getRecommendationLevel(calculateRecommendationScore(flight).totalScore).label"></strong>
+                                                    <span class="badge"
+                                                        :style="'background-color: ' + getRecommendationLevel(calculateRecommendationScore(flight).totalScore).color">
+                                                        <span
+                                                            x-text="calculateRecommendationScore(flight).totalScore"></span>%
+                                                        Match
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-6">
+                                                <small class="text-muted">Price: <span class="text-success"
+                                                        x-text="calculateRecommendationScore(flight).price.toFixed(1)"></span></small><br>
+                                                <small class="text-muted">Comfort: <span class="text-warning"
+                                                        x-text="calculateRecommendationScore(flight).comfort.toFixed(1)"></span></small><br>
+                                                <small class="text-muted">Speed: <span class="text-info"
+                                                        x-text="calculateRecommendationScore(flight).speed.toFixed(1)"></span></small>
+                                            </div>
+                                            <div class="col-6">
+                                                <small class="text-muted">Safety: <span class="text-danger"
+                                                        x-text="calculateRecommendationScore(flight).safety.toFixed(1)"></span></small><br>
+                                                <small class="text-muted">Flexibility: <span class="text-primary"
+                                                        x-text="calculateRecommendationScore(flight).flexibility.toFixed(1)"></span></small><br>
+                                                <small class="text-muted">Service: <span class="text-secondary"
+                                                        x-text="calculateRecommendationScore(flight).service.toFixed(1)"></span></small>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Action Buttons -->
+                                    <div class="card-actions">
+                                        <button class="btn btn-outline-info btn-sm me-2"
+                                            @click.stop="showRecommendationAnalysis(flight)">
+                                            <i class="fas fa-chart-bar me-1"></i>Analysis
+                                        </button>
+                                        <button class="btn btn-outline-primary btn-sm me-2"
+                                            @click.stop="showFlightDetails(flight)">
+                                            <i class="fas fa-info-circle me-1"></i>Details
+                                        </button>
+                                        <button class="btn btn-outline-success btn-sm" @click.stop="bookFlight(flight)">
+                                            <i class="fas fa-plane me-1"></i>Book
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Pagination Controls -->
+                    <div x-show="!searching && totalPages > 1"
+                        class="d-flex justify-content-center align-items-center mt-4">
+                        <nav aria-label="Charter flights pagination">
+                            <ul class="pagination pagination-lg">
+                                <!-- Previous Page -->
+                                <li class="page-item" :class="{ 'disabled': currentPage === 1 }">
+                                    <button class="page-link" @click="previousPage()" :disabled="currentPage === 1">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                </li>
+
+                                <!-- Page Numbers -->
+                                <template x-for="page in totalPages" :key="page">
+                                    <li class="page-item" :class="{ 'active': page === currentPage }">
+                                        <button class="page-link" @click="goToPage(page)" x-text="page"></button>
+                                    </li>
+                                </template>
+
+                                <!-- Next Page -->
+                                <li class="page-item" :class="{ 'disabled': currentPage === totalPages }">
+                                    <button class="page-link" @click="nextPage()"
+                                        :disabled="currentPage === totalPages">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </li>
+                            </ul>
+                        </nav>
+                    </div>
+
+                    <!-- Page Info -->
+                    <div x-show="!searching && charterResults.length > 0" class="text-center mt-3">
+                        <small class="text-muted">
+                            Showing <span x-text="((currentPage - 1) * itemsPerPage) + 1"></span> to
+                            <span x-text="Math.min(currentPage * itemsPerPage, charterResults.length)"></span> of
+                            <span x-text="charterResults.length"></span> flights
+                        </small>
+                    </div>
+
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="text-center">
+                            <div class="fw-bold" x-text="flight.departure"></div>
+                            <small class="text-muted" x-text="flight.departureTime"></small>
+                        </div>
+                        <div class="flex-grow-1 mx-3">
+                            <div class="route-visual"></div>
+                            <div class="text-center">
+                                <small class="text-muted" x-text="flight.duration"></small>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <div class="fw-bold" x-text="flight.arrival"></div>
+                            <small class="text-muted" x-text="flight.arrivalTime"></small>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-3 text-muted">
+                        <small><i class="bi bi-people"></i> <span x-text="flight.passengers"></span> passengers</small>
+                        <small><i class="bi bi-speedometer2"></i> <span x-text="flight.speed"></span> kts</small>
+                        <small><i class="bi bi-arrow-up-right"></i> <span x-text="flight.range"></span> nm range</small>
+                    </div>
+                </div>
+
+                <div class="col-md-4 text-end">
+                    <div class="mb-3">
+                        <div x-text="flight.operator"></div>
+                        <div class="d-flex align-items-center justify-content-end">
+                            <span class="badge bg-success me-2" x-text="flight.rating + ' ★'"></span>
+                            <span x-show="flight.verified" class="badge bg-primary">
+                                <i class="bi bi-check-circle"></i> Verified
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-primary" @click.stop="contactOperator(flight)">
+                            <i class="bi bi-envelope"></i> Get Quote
+                        </button>
+                        <button class="btn btn-outline-primary btn-sm" @click.stop="saveFlight(flight)">
+                            <i class="bi bi-bookmark"></i> Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </template>
+    </div>
+    </div>
+    </div>
+    </div>
+
+    <!-- Empty Legs Tab -->
+    <div x-show="charterType === 'empty'" x-transition>
+        <div class="row">
+            <div class="col-lg-4">
+                <div class="card sticky-top">
+                    <div class="card-body">
+                        <h4><i class="bi bi-lightning"></i> Find Empty Legs</h4>
+                        <p class="text-muted">Save up to 75% on last-minute flights</p>
+
+                        <form @submit.prevent="searchEmptyLegs()">
+                            <div class="mb-3">
+                                <label class="form-label">Departure Region</label>
+                                <select class="form-select" x-model="emptyLegForm.departureRegion">
+                                    <option value="">Any Region</option>
+                                    <option value="northeast">Northeast US</option>
+                                    <option value="southeast">Southeast US</option>
+                                    <option value="west">West Coast</option>
+                                    <option value="europe">Europe</option>
+                                    <option value="caribbean">Caribbean</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Arrival Region</label>
+                                <select class="form-select" x-model="emptyLegForm.arrivalRegion">
+                                    <option value="">Any Region</option>
+                                    <option value="northeast">Northeast US</option>
+                                    <option value="southeast">Southeast US</option>
+                                    <option value="west">West Coast</option>
+                                    <option value="europe">Europe</option>
+                                    <option value="caribbean">Caribbean</option>
+                                </select>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-6">
+                                    <label class="form-label">From Date</label>
+                                    <input type="date" class="form-control" x-model="emptyLegForm.dateFrom">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">To Date</label>
+                                    <input type="date" class="form-control" x-model="emptyLegForm.dateTo">
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-6">
+                                    <label class="form-label">Passengers</label>
+                                    <select class="form-select" x-model="emptyLegForm.passengers">
+                                        <option value="">Any</option>
+                                        <option value="2">2+</option>
+                                        <option value="4">4+</option>
+                                        <option value="6">6+</option>
+                                        <option value="8">8+</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Min Discount</label>
+                                    <select class="form-select" x-model="emptyLegForm.minDiscount">
+                                        <option value="30">30%+</option>
+                                        <option value="50">50%+</option>
+                                        <option value="70">70%+</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-warning btn-lg" :disabled="searchingEmpty">
+                                    <span x-show="!searchingEmpty"><i class="bi bi-lightning"></i> Find Empty
+                                        Legs</span>
+                                    <span x-show="searchingEmpty">
+                                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                                        Searching...
+                                    </span>
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Alert for Empty Legs -->
+                        <div class="mt-4">
+                            <h6>Get Alerts</h6>
+                            <p class="small text-muted">Be notified of empty legs matching your preferences</p>
+                            <button class="btn btn-outline-warning btn-sm">
+                                <i class="bi bi-bell"></i> Setup Alerts
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-8">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3>Available Empty Legs</h3>
+                    <span class="badge bg-warning" x-text="emptyLegResults.length + ' flights found'"></span>
+                </div>
+
+                <div x-show="!searchingEmpty" class="aircraft-grid">
+                    <template x-for="flight in emptyLegResults" :key="flight.id">
+                        <div class="aircraft-card" @click="showEmptyLegDetails(flight)">
+                            <!-- Aircraft Image -->
+                            <div class="aircraft-image">
+                                <img src="/static/images/aircraft_placeholder.jpg" alt="Aircraft" class="img-fluid">
+                                <!-- Discount overlay -->
+                                <div class="score-overlay">
+                                    <div class="score-circle excellent">
+                                        <span x-text="flight.discountPercentage"></span>% OFF
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="aircraft-details">
+                                <!-- Aircraft Name -->
+                                <div class="aircraft-header">
+                                    <h3 class="aircraft-name" x-text="flight.aircraftName"></h3>
+                                    <div class="aircraft-category">Empty Leg</div>
+                                </div>
+
+                                <!-- Price and Route -->
+                                <div class="aircraft-price-hours">
+                                    <div class="price-section">
+                                        <div class="price-value" x-text="formatPrice(flight.discountedPrice)"></div>
+                                    </div>
+                                    <div class="hours-section">
+                                        <div class="hours-value" x-text="flight.estimatedDuration"></div>
+                                        <div class="hours-label">Duration</div>
+                                    </div>
+                                </div>
+
+                                <!-- Route Display -->
+                                <div class="enhanced-specs-grid">
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.departureAirport"></div>
+                                        <div class="spec-label">From</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.arrivalAirport"></div>
+                                        <div class="spec-label">To</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.passengers"></div>
+                                        <div class="spec-label">Passengers</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.departureDate"></div>
+                                        <div class="spec-label">Date</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.departureTime"></div>
+                                        <div class="spec-label">Time</div>
+                                    </div>
+                                    <div class="spec-item">
+                                        <div class="spec-value" x-text="flight.operatorName"></div>
+                                        <div class="spec-label">Operator</div>
+                                    </div>
+                                </div>
+
+                                <!-- Action Buttons -->
+                                <div class="card-actions">
+                                    <button class="btn btn-outline-primary btn-sm me-2"
+                                        @click.stop="showEmptyLegDetails(flight)">
+                                        <i class="fas fa-info-circle me-1"></i>Details
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm" @click.stop="bookEmptyLeg(flight)">
+                                        <i class="fas fa-plane me-1"></i>Book
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="d-flex align-items-center mb-3">
+                    <div class="text-center">
+                        <div class="fw-bold" x-text="flight.departureAirport"></div>
+                        <small class="text-muted" x-text="flight.departureTime"></small>
+                    </div>
+                    <div class="flex-grow-1 mx-3">
+                        <div class="route-visual"></div>
+                        <div class="text-center">
+                            <small class="text-muted" x-text="flight.estimatedDuration"></small>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <div class="fw-bold" x-text="flight.arrivalAirport"></div>
+                        <small class="text-muted">Flexible</small>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex gap-3 text-muted">
+                        <small><i class="bi bi-people"></i> <span x-text="flight.passengers"></span> seats</small>
+                        <small><i class="bi bi-calendar"></i> <span x-text="flight.departureDate"></span></small>
+                        <small><i class="bi bi-clock"></i> <span x-text="flight.timeLeft"></span></small>
+                    </div>
+                    <div class="text-end">
+                        <div class="text-decoration-line-through text-muted" x-text="formatPrice(flight.originalPrice)">
+                        </div>
+                        <div class="h5 text-success mb-0" x-text="formatPrice(flight.discountedPrice)"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4 text-end">
+                <div class="mb-3">
+                    <div x-text="flight.operatorName"></div>
+                    <div class="d-flex align-items-center justify-content-end">
+                        <span class="badge bg-success me-2" x-text="flight.operatorRating + ' ★'"></span>
+                        <span x-show="flight.operatorVerified" class="badge bg-primary">
+                            <i class="bi bi-check-circle"></i> Verified
+                        </span>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success" @click.stop="bookEmptyLeg(flight)">
+                        <i class="bi bi-check-circle"></i> Book Now
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" @click.stop="saveEmptyLeg(flight)">
+                        <i class="bi bi-bookmark"></i> Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    </template>
+    </div>
+    </div>
+    </div>
+    </div>
+    </div>
+
+    <!-- Contact Operator Modal -->
+    <div class="modal fade" id="contactModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Request Charter Quote</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Flight Details</h6>
+                            <div class="bg-light p-3 rounded mb-3">
+                                <div><strong>Aircraft:</strong> <span x-text="selectedFlight?.aircraftType"></span>
+                                </div>
+                                <div><strong>Route:</strong> <span x-text="selectedFlight?.route"></span></div>
+                                <div><strong>Date:</strong> <span x-text="selectedFlight?.departureDate"></span></div>
+                                <div><strong>Passengers:</strong> <span x-text="selectedFlight?.passengers"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <form @submit.prevent="sendQuoteRequest()">
+                                <div class="mb-3">
+                                    <label class="form-label">Your Name</label>
+                                    <input type="text" class="form-control" x-model="quoteForm.name" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" x-model="quoteForm.email" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Phone</label>
+                                    <input type="tel" class="form-control" x-model="quoteForm.phone">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Special Requirements</label>
+                                    <textarea class="form-control" rows="3" x-model="quoteForm.requirements"></textarea>
+                                </div>
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary">Request Quote</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function charterFlights() {
+            return {
+                charterType: 'search',
+                searching: false,
+                searchingEmpty: false,
+                currentPage: 1,
+                itemsPerPage: 12,
+                currentPage: 1,
+                itemsPerPage: 12,
+
+                searchForm: {
+                    departure: '',
+                    arrival: '',
+                    departureDate: '',
+                    returnDate: '',
+                    passengers: '4',
+                    category: '',
+                    budget: '',
+                    pricePriority: 'medium',
+                    comfortPriority: 'high',
+                    speedPriority: 'medium',
+                    safetyPriority: 'high',
+                    flexibilityPriority: 'medium',
+                    servicePriority: 'high'
+                },
+
+                emptyLegForm: {
+                    departureRegion: '',
+                    arrivalRegion: '',
+                    dateFrom: '',
+                    dateTo: '',
+                    passengers: '',
+                    minDiscount: '50'
+                },
+
+                charterResults: [
+                    {
+                        id: 1,
+                        aircraftType: 'Citation CJ3+',
+                        departure: 'TEB',
+                        arrival: 'MIA',
+                        departureTime: '08:00',
+                        arrivalTime: '11:45',
+                        duration: '3h 45m',
+                        passengers: 7,
+                        speed: 450,
+                        range: 2040,
+                        price: 18500,
+                        operator: 'Jet Aviation',
+                        rating: 4.8,
+                        verified: true,
+                        route: 'TEB → MIA'
+                    }
+                ],
+
+                emptyLegResults: [
+                    {
+                        id: 1,
+                        aircraftName: 'Gulfstream G450',
+                        departureAirport: 'LAS',
+                        arrivalAirport: 'TEB',
+                        departureDate: '2024-01-15',
+                        departureTime: '14:00',
+                        estimatedDuration: '4h 30m',
+                        passengers: 12,
+                        originalPrice: 45000,
+                        discountedPrice: 15750,
+                        discountPercentage: 65,
+                        operatorName: 'Elite Charter',
+                        operatorRating: 4.9,
+                        operatorVerified: true,
+                        timeLeft: '2 days'
+                    }
+                ],
+
+                recentSearches: [
+                    { route: 'TEB → MIA', date: '2024-01-15' },
+                    { route: 'LAX → JFK', date: '2024-01-12' }
+                ],
+
+                selectedFlight: null,
+                quoteForm: {
+                    name: '',
+                    email: '',
+                    phone: '',
+                    requirements: ''
+                },
+
+                init() {
+                    // Set default dates
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    this.searchForm.departureDate = tomorrow.toISOString().split('T')[0];
+                    this.emptyLegForm.dateFrom = tomorrow.toISOString().split('T')[0];
+
+                    const nextWeek = new Date();
+                    nextWeek.setDate(nextWeek.getDate() + 7);
+                    this.emptyLegForm.dateTo = nextWeek.toISOString().split('T')[0];
+                },
+
+                setCharterType(type) {
+                    this.charterType = type;
+                    if (type === 'empty') {
+                        this.searchEmptyLegs();
+                    }
+                },
+
+                async searchCharters() {
+                    this.searching = true;
+                    // Simulate API call
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+
+                    // Sort results by recommendation score
+                    this.charterResults.sort((a, b) => {
+                        const aScore = this.calculateRecommendationScore(a).totalScore;
+                        const bScore = this.calculateRecommendationScore(b).totalScore;
+                        return bScore - aScore; // Highest score first
+                    });
+
+                    // Reset to first page when new search is performed
+                    this.currentPage = 1;
+
+                    this.searching = false;
+                },
+
+                calculatePriorityScore(flight, priorityType) {
+                    const priorities = this.searchForm;
+                    const weight = this.getPriorityWeight(priorities[priorityType + 'Priority']);
+
+                    switch (priorityType) {
+                        case 'price':
+                            return this.calculatePriceScore(flight.price, priorities.budget) * weight;
+                        case 'comfort':
+                            return this.calculateComfortScore(flight) * weight;
+                        case 'speed':
+                            return this.calculateSpeedScore(flight.speed) * weight;
+                        case 'safety':
+                            return this.calculateSafetyScore(flight) * weight;
+                        case 'flexibility':
+                            return this.calculateFlexibilityScore(flight) * weight;
+                        case 'service':
+                            return this.calculateServiceScore(flight) * weight;
+                        default:
+                            return 0;
+                    }
+                },
+
+                calculateRecommendationScore(flight) {
+                    const priorities = this.searchForm;
+                    const breakdown = {
+                        price: 0,
+                        comfort: 0,
+                        speed: 0,
+                        safety: 0,
+                        flexibility: 0,
+                        service: 0,
+                        totalScore: 0
+                    };
+
+                    // Calculate weighted scores for each priority
+                    breakdown.price = this.calculatePriceScore(flight.price, priorities.budget) * this.getPriorityWeight(priorities.pricePriority);
+                    breakdown.comfort = this.calculateComfortScore(flight) * this.getPriorityWeight(priorities.comfortPriority);
+                    breakdown.speed = this.calculateSpeedScore(flight.speed) * this.getPriorityWeight(priorities.speedPriority);
+                    breakdown.safety = this.calculateSafetyScore(flight) * this.getPriorityWeight(priorities.safetyPriority);
+                    breakdown.flexibility = this.calculateFlexibilityScore(flight) * this.getPriorityWeight(priorities.flexibilityPriority);
+                    breakdown.service = this.calculateServiceScore(flight) * this.getPriorityWeight(priorities.servicePriority);
+
+                    // Calculate total recommendation score
+                    breakdown.totalScore = Math.max(0, Math.min(100, Math.round(
+                        breakdown.price + breakdown.comfort + breakdown.speed +
+                        breakdown.safety + breakdown.flexibility + breakdown.service
+                    )));
+
+                    return breakdown;
+                },
+
+                getRecommendationLevel(score) {
+                    if (score >= 90) return { level: 'excellent', label: 'Excellent Match', color: '#10b981' };
+                    if (score >= 80) return { level: 'very-good', label: 'Very Good Match', color: '#3b82f6' };
+                    if (score >= 70) return { level: 'good', label: 'Good Match', color: '#f59e0b' };
+                    if (score >= 60) return { level: 'fair', label: 'Fair Match', color: '#f97316' };
+                    return { level: 'poor', label: 'Poor Match', color: '#ef4444' };
+                },
+
+                getPriorityWeight(priority) {
+                    switch (priority) {
+                        case 'critical': return 1.0;
+                        case 'high': return 0.8;
+                        case 'medium': return 0.5;
+                        case 'low': return 0.2;
+                        default: return 0.5;
+                    }
+                },
+
+                calculatePriceScore(price, budget) {
+                    if (!budget) return 15;
+                    const budgetNum = parseInt(budget);
+                    if (price <= budgetNum * 0.5) return 20;
+                    if (price <= budgetNum * 0.8) return 15;
+                    if (price <= budgetNum) return 10;
+                    return 5;
+                },
+
+                calculateComfortScore(flight) {
+                    let score = 10;
+                    // Aircraft type comfort ratings
+                    const comfortRatings = {
+                        'Gulfstream G650': 20,
+                        'Challenger 350': 18,
+                        'Citation Latitude': 16,
+                        'Citation CJ3+': 14,
+                        'King Air 350i': 12
+                    };
+                    score += comfortRatings[flight.aircraftType] || 10;
+                    return Math.min(20, score);
+                },
+
+                calculateSpeedScore(speed) {
+                    if (speed >= 500) return 20;
+                    if (speed >= 450) return 16;
+                    if (speed >= 400) return 12;
+                    if (speed >= 350) return 8;
+                    return 5;
+                },
+
+                calculateSafetyScore(flight) {
+                    let score = 15;
+                    if (flight.verified) score += 3;
+                    if (flight.rating >= 4.5) score += 2;
+                    return Math.min(20, score);
+                },
+
+                calculateFlexibilityScore(flight) {
+                    let score = 10;
+                    // Simulate flexibility based on operator and aircraft availability
+                    if (flight.operator.includes('Jet')) score += 5;
+                    if (flight.operator.includes('Elite')) score += 3;
+                    return Math.min(15, score);
+                },
+
+                calculateServiceScore(flight) {
+                    let score = 10;
+                    if (flight.rating >= 4.8) score += 5;
+                    if (flight.rating >= 4.5) score += 3;
+                    if (flight.verified) score += 2;
+                    return Math.min(20, score);
+                },
+
+                generateRecommendationReason(flight, recommendation) {
+                    const reasons = [];
+
+                    if (recommendation.price > 15) reasons.push("Excellent price value for your budget");
+                    if (recommendation.comfort > 15) reasons.push("High comfort aircraft matching your preferences");
+                    if (recommendation.speed > 15) reasons.push("Fast aircraft meeting your speed requirements");
+                    if (recommendation.safety > 15) reasons.push("Verified operator with excellent safety record");
+                    if (recommendation.flexibility > 10) reasons.push("Flexible booking options available");
+                    if (recommendation.service > 15) reasons.push("Outstanding customer service ratings");
+
+                    return reasons.length > 0 ? reasons.join('\n• ') : "Good overall balance of your priorities";
+                },
+
+                get paginatedResults() {
+                    const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+                    const endIndex = startIndex + this.itemsPerPage;
+                    return this.charterResults.slice(startIndex, endIndex);
+                },
+
+                get totalPages() {
+                    return Math.ceil(this.charterResults.length / this.itemsPerPage);
+                },
+
+                goToPage(page) {
+                    if (page >= 1 && page <= this.totalPages) {
+                        this.currentPage = page;
+                    }
+                },
+
+                nextPage() {
+                    if (this.currentPage < this.totalPages) {
+                        this.currentPage++;
+                    }
+                },
+
+                previousPage() {
+                    if (this.currentPage > 1) {
+                        this.currentPage--;
+                    }
+                },
+
+                showRecommendationAnalysis(flight) {
+                    const recommendation = this.calculateRecommendationScore(flight);
+                    const level = this.getRecommendationLevel(recommendation.totalScore);
+
+                    const analysis = `
+AI Recommendation Analysis for ${flight.aircraftType}
+
+Overall Score: ${recommendation.totalScore}% (${level.label})
+
+Priority Breakdown:
+• Price: ${recommendation.price.toFixed(1)} points (${this.searchForm.pricePriority} priority)
+• Comfort: ${recommendation.comfort.toFixed(1)} points (${this.searchForm.comfortPriority} priority)
+• Speed: ${recommendation.speed.toFixed(1)} points (${this.searchForm.speedPriority} priority)
+• Safety: ${recommendation.safety.toFixed(1)} points (${this.searchForm.safetyPriority} priority)
+• Flexibility: ${recommendation.flexibility.toFixed(1)} points (${this.searchForm.flexibilityPriority} priority)
+• Service: ${recommendation.service.toFixed(1)} points (${this.searchForm.servicePriority} priority)
+
+Flight Details:
+• Route: ${flight.departure} → ${flight.arrival}
+• Duration: ${flight.duration}
+• Price: $${flight.price.toLocaleString()}
+• Operator: ${flight.operator} (${flight.rating}/5.0)
+• Aircraft: ${flight.aircraftType}
+
+Why this flight matches your priorities:
+${this.generateRecommendationReason(flight, recommendation)}
+                    `;
+
+                    alert(analysis);
+                },
+
+                // Add to recent searches
+                const newSearch = {
+                    route: `${this.searchForm.departure} → ${this.searchForm.arrival}`,
+                    date: this.searchForm.departureDate
+                };
+                this.recentSearches.unshift(newSearch);
+                if(this.recentSearches.length > 5) {
+                this.recentSearches.pop();
+            }
+        },
+
+                async searchEmptyLegs() {
+            this.searchingEmpty = true;
+            // Simulate API call
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            this.searchingEmpty = false;
+        },
+
+        contactOperator(flight) {
+            this.selectedFlight = flight;
+            this.quoteForm.requirements = `Please provide a quote for this charter flight. I am flexible with timing and would appreciate your best rate.`;
+            new bootstrap.Modal(document.getElementById('contactModal')).show();
+        },
+
+        bookEmptyLeg(flight) {
+            this.selectedFlight = flight;
+            this.quoteForm.requirements = `I would like to book this empty leg flight. Please confirm availability and provide booking details.`;
+            new bootstrap.Modal(document.getElementById('contactModal')).show();
+        },
+
+                async sendQuoteRequest() {
+            // Simulate API call
+            alert('Quote request sent successfully! The operator will contact you within 2 hours.');
+            bootstrap.Modal.getInstance(document.getElementById('contactModal')).hide();
+            this.quoteForm = { name: '', email: '', phone: '', requirements: '' };
+        },
+
+        saveFlight(flight) {
+            alert('Flight saved to your favorites!');
+        },
+
+        saveEmptyLeg(flight) {
+            alert('Empty leg saved to your watch list!');
+        },
+
+        loadRecentSearch(search) {
+            const [departure, arrival] = search.route.split(' → ');
+            this.searchForm.departure = departure;
+            this.searchForm.arrival = arrival;
+            this.searchForm.departureDate = search.date;
+            this.searchCharters();
+        },
+
+        formatPrice(price) {
+            if (!price) return 'Contact for price';
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 0
+            }).format(price);
+        }
+            }
+        }
+    </script>
+</body>
+
+</html>

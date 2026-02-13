@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Pending Listings{% endblock %}
+
+{% block additional_css %}
+<style>
+    .admin-container {
+        background: rgba(18, 19, 24, 0.92);
+        border-radius: 0;
+        padding: 2rem;
+        margin: 2rem auto;
+        max-width: 1400px;
+    }
+
+    .pending-listing-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 0;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        transition: all 0.3s ease;
+    }
+
+    .pending-listing-card:hover {
+        border-color: #F05545;
+        background: rgba(240, 85, 69, 0.05);
+    }
+
+    .listing-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding-bottom: 1rem;
+    }
+
+    .listing-status-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 0;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .status-pending {
+        background: rgba(255, 193, 7, 0.2);
+        border: 1px solid #ffc107;
+        color: #ffc107;
+    }
+
+    .status-paid {
+        background: rgba(40, 167, 69, 0.2);
+        border: 1px solid #28a745;
+        color: #28a745;
+    }
+
+    .status-rejected {
+        background: rgba(220, 53, 69, 0.2);
+        border: 1px solid #dc3545;
+        color: #dc3545;
+    }
+
+    .listing-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .detail-label {
+        font-size: 0.75rem;
+        color: #adb5bd;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+
+    .detail-value {
+        font-size: 1rem;
+        color: #f4f4f4;
+        font-weight: 500;
+    }
+
+    .listing-images {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+
+    .image-preview {
+        width: 100px;
+        height: 100px;
+        object-fit: cover;
+        border-radius: 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        cursor: pointer;
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .reject-modal .modal-content {
+        background: rgba(18, 19, 24, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 0;
+    }
+
+    .reject-modal textarea {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: white;
+        min-height: 120px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="admin-container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="mb-1">Pending Listings</h1>
+                <p class="text-muted mb-0">Review and approve/reject aircraft listings</p>
+            </div>
+            <a href="{{ url_for('home') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Home
+            </a>
+        </div>
+
+        {% if pending_listings %}
+        <div id="pendingListingsContainer">
+            {% for listing in pending_listings %}
+            <div class="pending-listing-card" id="listing-{{ listing.id }}">
+                <div class="listing-header">
+                    <div>
+                        <h4 class="mb-1">{{ listing.listing_title or listing.title }}</h4>
+                        <p class="text-muted mb-0">{{ listing.manufacturer }} {{ listing.name }} • Engine:
+                            {{ listing.engine_type }}</p>
+                    </div>
+                    <div>
+                        <span class="listing-status-badge status-{{ listing.status }}">
+                            {{ listing.status }}
+                        </span>
+                        {% if listing.payment_status %}
+                        <span class="listing-status-badge status-{{ listing.payment_status }} ms-2">
+                            Payment: {{ listing.payment_status }}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="listing-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Price</span>
+                        <span class="detail-value">${{ "{:,.0f}".format(listing.price) }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Engine Type</span>
+                        <span class="detail-value">{{ listing.engine_type }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Location</span>
+                        <span class="detail-value">{{ listing.location }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Contact Email</span>
+                        <span class="detail-value">{{ listing.email }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Pricing Plan</span>
+                        <span class="detail-value">
+                            {% if listing.pricing_plan == 'six_month' %}
+                            $150 / 6 months
+                            {% else %}
+                            $50 / month
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Submitted</span>
+                        <span class="detail-value">{{ listing.created_at }}</span>
+                    </div>
+                </div>
+
+                {% if listing.description %}
+                <div class="mb-3">
+                    <span class="detail-label">Description</span>
+                    <p class="text-light mt-1">{{ listing.description }}</p>
+                </div>
+                {% endif %}
+
+                {% if listing.images %}
+                <div class="mb-3">
+                    <span class="detail-label">Images ({{ listing.images|length }})</span>
+                    <div class="listing-images mt-2">
+                        {% for image in listing.images %}
+                        <img src="{{ image }}" alt="Listing image" class="image-preview"
+                            onclick="window.open('{{ image }}', '_blank')">
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if listing.documents %}
+                <div class="mb-3">
+                    <span class="detail-label">Documents ({{ listing.documents|length }})</span>
+                    <div class="mt-2">
+                        {% for doc in listing.documents %}
+                        <a href="{{ doc }}" target="_blank" class="btn btn-sm btn-outline-secondary me-2 mb-2">
+                            <i class="fas fa-file me-1"></i>Document {{ loop.index }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="action-buttons">
+                    <button class="btn btn-success" onclick="approveListing({{ listing.id }})">
+                        <i class="fas fa-check me-2"></i>Approve
+                    </button>
+                    <button class="btn btn-danger" onclick="showRejectModal({{ listing.id }})">
+                        <i class="fas fa-times me-2"></i>Reject
+                    </button>
+                    <a href="mailto:{{ listing.email }}" class="btn btn-outline-primary">
+                        <i class="fas fa-envelope me-2"></i>Contact Seller
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+            <h3>No Pending Listings</h3>
+            <p class="text-muted">All listings have been reviewed.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal fade reject-modal" id="rejectModal" tabindex="-1" aria-labelledby="rejectModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title" id="rejectModalLabel">Reject Listing</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Please provide a reason for rejecting this listing:</p>
+                <textarea class="form-control" id="rejectionReason" placeholder="Reason for rejection..."></textarea>
+                <input type="hidden" id="rejectListingId">
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="rejectListing()">Reject Listing</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function approveListing(listingId) {
+        if (!confirm('Are you sure you want to approve this listing?')) {
+            return;
+        }
+
+        fetch(`/api/admin/listings/${listingId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    // Remove listing from page
+                    document.getElementById(`listing-${listingId}`).remove();
+
+                    // Check if no more listings
+                    const container = document.getElementById('pendingListingsContainer');
+                    if (container && container.children.length === 0) {
+                        location.reload();
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to approve listing');
+            });
+    }
+
+    function showRejectModal(listingId) {
+        document.getElementById('rejectListingId').value = listingId;
+        const modal = new bootstrap.Modal(document.getElementById('rejectModal'));
+        modal.show();
+    }
+
+    function rejectListing() {
+        const listingId = document.getElementById('rejectListingId').value;
+        const reason = document.getElementById('rejectionReason').value;
+
+        if (!reason.trim()) {
+            alert('Please provide a rejection reason');
+            return;
+        }
+
+        fetch(`/api/admin/listings/${listingId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ reason: reason })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('rejectModal'));
+                    modal.hide();
+
+                    // Remove listing from page
+                    document.getElementById(`listing-${listingId}`).remove();
+
+                    // Check if no more listings
+                    const container = document.getElementById('pendingListingsContainer');
+                    if (container && container.children.length === 0) {
+                        location.reload();
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to reject listing');
+            });
+    }
+</script>
+{% endblock %}

@@ -16,7 +16,7 @@ credentials.json
 **/*.pem
 **/*.key
 
-# Python (not used in Cloudflare - ignore all Python files)
+# Python virtual environments
 venv/
 .venv/
 __pycache__/
@@ -28,25 +28,19 @@ __pycache__/
 *.egg
 *.egg-info/
 .pytest_cache/
-*.py
-!regenerate_token.py  # Keep token regeneration script if needed
 
-# Legacy Python backend (not used)
+# Legacy Python backend (old app.py in root - not used)
 backend/
-app.py
-requirements.txt
+app.py  # Root app.py is old, use legacy/app_production.py
+requirements.txt  # Root requirements.txt is old
 runtime.txt
-Procfile
 railway.toml
 setup.py
 *.sh
 
-# Legacy folders (old Python Flask app)
-static/
-templates/
-instance/
-uploads/
-workers/  # Keep worker-api/, remove old workers/
+# Legacy production app (KEEP THIS - it's the production app!)
+# legacy/ folder contains the Railway production Flask app
+# DO NOT ignore legacy/ - it's the main app now
 
 # Database files (use D1 in production)
 *.db

@@ -1,0 +1,1695 @@
+{% extends "base.html" %}
+
+{% block title %}Create Listing - Jet Finder{% endblock %}
+
+{% block additional_css %}
+<style>
+    .listing-form-container {
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.7));
+        border-radius: 16px;
+        padding: 40px;
+        margin-bottom: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .form-section {
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 12px;
+        padding: 25px;
+        margin-bottom: 25px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .section-title {
+        color: #F05545;
+        font-size: 1.3rem;
+        font-weight: 700;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .form-control,
+    .form-select {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        color: white;
+        padding: 12px 16px;
+        transition: all 0.3s ease;
+    }
+
+    .form-control:focus,
+    .form-select:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: #F05545;
+        box-shadow: 0 0 0 3px rgba(240, 85, 69, 0.1);
+        color: white;
+    }
+
+    .form-control::placeholder {
+        color: rgba(255, 255, 255, 0.5);
+    }
+
+    .form-label {
+        color: white;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
+    .listing-type-tabs {
+        display: flex;
+        background: rgba(0, 0, 0, 0.5);
+        border-radius: 12px;
+        padding: 8px;
+        margin-bottom: 30px;
+        gap: 8px;
+    }
+
+    .listing-type-tab {
+        flex: 1;
+        padding: 15px 20px;
+        text-align: center;
+        border-radius: 8px;
+        background: transparent;
+        border: none;
+        color: rgba(255, 255, 255, 0.7);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .listing-type-tab.active {
+        background: linear-gradient(135deg, #F05545, #d44437);
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(240, 85, 69, 0.3);
+    }
+
+    .listing-type-tab:hover:not(.active) {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #F05545, #d44437);
+        border: none;
+        padding: 15px 40px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 1.1rem;
+        transition: all 0.3s ease;
+    }
+
+    .btn-primary:hover {
+        background: linear-gradient(135deg, #d44437, #F05545);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(240, 85, 69, 0.4);
+    }
+
+    .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: white;
+        padding: 15px 40px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 1.1rem;
+        transition: all 0.3s ease;
+    }
+
+    .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: #F05545;
+        color: white;
+        transform: translateY(-2px);
+    }
+
+    .file-upload-area {
+        border: 2px dashed rgba(255, 255, 255, 0.3);
+        border-radius: 12px;
+        padding: 40px;
+        text-align: center;
+        background: rgba(255, 255, 255, 0.02);
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .file-upload-area:hover {
+        border-color: #F05545;
+        background: rgba(240, 85, 69, 0.05);
+    }
+
+    .file-upload-area.dragover {
+        border-color: #F05545;
+        background: rgba(240, 85, 69, 0.1);
+    }
+
+    .pricing-calculator {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 20px;
+    }
+
+    .calculated-price {
+        color: #10b981;
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    /* Performance Profile Styles */
+    .performance-profiles-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 15px;
+    }
+
+    .performance-profile-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .performance-profile-card:hover {
+        border-color: #F05545;
+        background: rgba(240, 85, 69, 0.05);
+        transform: translateY(-2px);
+    }
+
+    .performance-profile-card.selected {
+        border-color: #F05545;
+        background: rgba(240, 85, 69, 0.1);
+        box-shadow: 0 0 20px rgba(240, 85, 69, 0.2);
+    }
+
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+    }
+
+    .profile-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #f4f4f4;
+        margin: 0;
+        flex: 1;
+    }
+
+    .profile-category {
+        font-size: 0.7rem;
+        color: #F05545;
+        background: rgba(240, 85, 69, 0.1);
+        padding: 4px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-left: 10px;
+    }
+
+    .profile-specs {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        font-size: 0.75rem;
+    }
+
+    .profile-spec {
+        display: flex;
+        justify-content: space-between;
+        color: #adb5bd;
+    }
+
+    .profile-spec-value {
+        color: #f4f4f4;
+        font-weight: 500;
+    }
+
+    .checkbox-group {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+    }
+
+    .checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .checkbox-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .checkbox-item input[type="checkbox"] {
+        accent-color: #F05545;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-5">
+    <div class="row">
+        <div class="col-12 text-center mb-5">
+            <h1 class="display-4 text-white mb-3">Create Listing</h1>
+            <p class="lead text-muted">List your aircraft, charter services, parts, or services on Jet Finder</p>
+        </div>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="listing-form-container">
+
+                <!-- Listing Type Tabs -->
+                <div class="listing-type-tabs">
+                    <button class="listing-type-tab active" onclick="setListingType('aircraft')">
+                        <i class="fas fa-plane mb-2"></i><br>Aircraft Sale
+                    </button>
+                    <button class="listing-type-tab" onclick="setListingType('charter')">
+                        <i class="fas fa-route mb-2"></i><br>Charter Service
+                    </button>
+                    <button class="listing-type-tab" onclick="setListingType('parts')">
+                        <i class="fas fa-cog mb-2"></i><br>Parts & Components
+                    </button>
+                    <button class="listing-type-tab" onclick="setListingType('services')">
+                        <i class="fas fa-tools mb-2"></i><br>Maintenance Services
+                    </button>
+                </div>
+
+                <form id="listing-form" enctype="multipart/form-data">
+                    <input type="hidden" id="listing-type" name="listing_type" value="aircraft">
+                    <input type="hidden" id="selectedProfileId" name="profile_id" required>
+
+                    <!-- Performance Profile Selection - REQUIRED FIRST -->
+                    <div id="aircraft-fields" class="form-section">
+                        <div class="form-section mb-4">
+                            <div class="section-title">
+                                <i class="fas fa-search text-danger"></i>Performance Profile * (Required)
+                            </div>
+                            <p class="text-muted mb-3">
+                                <strong class="text-danger">Required:</strong> Select an aircraft performance profile
+                                that matches your listing.
+                                This ensures accurate specifications and calculations.
+                            </p>
+
+                            <!-- Profile Search and Filters -->
+                            <div class="row mb-3">
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label">Search Profiles *</label>
+                                    <input type="text" class="form-control" id="profileSearchInput"
+                                        placeholder="Search by manufacturer or model..." required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Manufacturer</label>
+                                    <select class="form-select" id="profileManufacturerFilter">
+                                        <option value="">All Manufacturers</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Performance Profiles Grid -->
+                            <div class="performance-profiles-container mb-3">
+                                <div class="performance-profiles-grid" id="performanceProfilesGrid"
+                                    style="max-height: 300px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; background: rgba(0,0,0,0.2);">
+                                    <div class="text-center text-muted py-4">
+                                        <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                                        <p>Loading performance profiles...</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Selected Profile Preview -->
+                            <div class="selected-profile-preview d-none" id="selectedProfilePreview">
+                                <div class="alert alert-success">
+                                    <h6 class="mb-2"><i class="fas fa-check-circle me-2"></i>Selected Profile</h6>
+                                    <div id="selectedProfileDetails"></div>
+                                    <button type="button" class="btn btn-sm btn-outline-success mt-2"
+                                        onclick="applyProfileToForm()">
+                                        <i class="fas fa-magic me-1"></i>Auto-Fill Form
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary mt-2 ms-2"
+                                        onclick="clearSelectedProfile()">
+                                        <i class="fas fa-times me-1"></i>Clear Selection
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Listing Details -->
+                        <div class="form-section mb-4">
+                            <div class="section-title">
+                                <i class="fas fa-info-circle"></i>Listing Details
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Listing Name *</label>
+                                    <input type="text" class="form-control" id="listingName" name="listing_name"
+                                        required placeholder="Auto-filled from selected profile">
+                                    <small class="text-muted">Automatically copied from the selected performance
+                                        profile.</small>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Serial Number *</label>
+                                    <input type="text" class="form-control" id="serialNumber" name="serial_number"
+                                        required placeholder="e.g., 5501">
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Price ($) *</label>
+                                    <input type="number" class="form-control" id="price" name="price" required
+                                        placeholder="e.g., 5500000" min="0" step="1000">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Engine Type *</label>
+                                    <select class="form-select" id="engineType" name="engine_type" required>
+                                        <option value="">Select engine type</option>
+                                        <option value="Piston">Piston</option>
+                                        <option value="Turboprop">Turboprop</option>
+                                        <option value="Turbine">Turbine / Jet</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Total Time (Hours) *</label>
+                                    <input type="number" class="form-control" id="totalTime" name="total_time" required
+                                        placeholder="e.g., 1200" min="0" step="1">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Manufacturer *</label>
+                                    <input type="text" class="form-control" id="manufacturerInput" name="manufacturer"
+                                        required placeholder="e.g., Cessna, Bombardier">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Location (Airport Code) *</label>
+                                    <input type="text" class="form-control" id="location" name="location"
+                                        placeholder="KVNY" required>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Model Year *</label>
+                                    <input type="number" class="form-control" id="yearModel" name="year_model" required
+                                        placeholder="e.g., 2018" min="1950" max="2099">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Contact Email *</label>
+                                    <input type="email" class="form-control" id="email" name="email"
+                                        placeholder="you@example.com" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Description *</label>
+                                <textarea class="form-control" id="description" name="description" rows="4" required
+                                    placeholder="Describe aircraft history, upgrades, maintenance, etc."></textarea>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Charter-Specific Fields -->
+                    <div id="charter-fields" class="form-section hidden">
+                        <div class="section-title">
+                            <i class="fas fa-route"></i>Charter Service Details
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Aircraft Type *</label>
+                                <input type="text" class="form-control" name="charter_aircraft_type"
+                                    placeholder="e.g., Citation CJ3+">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Hourly Rate *</label>
+                                <input type="number" class="form-control" name="hourly_rate" placeholder="3200" min="0">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Base Location *</label>
+                                <input type="text" class="form-control" name="base_location"
+                                    placeholder="KVNY - Van Nuys">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Service Radius (miles)</label>
+                                <input type="number" class="form-control" name="service_radius" placeholder="500"
+                                    min="0">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Max Passengers</label>
+                                <input type="number" class="form-control" name="max_passengers" placeholder="6" min="1">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Crew Requirements</label>
+                                <select class="form-select" name="crew_requirements">
+                                    <option value="single_pilot">Single Pilot</option>
+                                    <option value="dual_pilot">Dual Pilot</option>
+                                    <option value="flight_attendant">Flight Attendant Available</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Minimum Flight Time</label>
+                                <input type="number" class="form-control" name="minimum_flight_time" placeholder="1.5"
+                                    step="0.5" min="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parts-Specific Fields -->
+                    <div id="parts-fields" class="form-section hidden">
+                        <div class="section-title">
+                            <i class="fas fa-cog"></i>Parts & Components Details
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Part Number *</label>
+                                <input type="text" class="form-control" name="part_number"
+                                    placeholder="e.g., ENG001, AVI002">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Part Category *</label>
+                                <select class="form-select" name="part_category">
+                                    <option value="">Select category</option>
+                                    <option value="Engine">Engine Components</option>
+                                    <option value="Avionics">Avionics & Electronics</option>
+                                    <option value="Landing Gear">Landing Gear</option>
+                                    <option value="Interior">Interior Components</option>
+                                    <option value="Structure">Structural Parts</option>
+                                    <option value="Hydraulics">Hydraulics</option>
+                                    <option value="Electrical">Electrical</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Manufacturer</label>
+                                <input type="text" class="form-control" name="parts_manufacturer"
+                                    placeholder="e.g., Honeywell, Garmin, Pratt & Whitney">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Condition *</label>
+                                <select class="form-select" name="condition">
+                                    <option value="">Select condition</option>
+                                    <option value="new">New (0 hours)</option>
+                                    <option value="overhauled">Overhauled</option>
+                                    <option value="serviceable">Serviceable</option>
+                                    <option value="repair">As-Is/For Repair</option>
+                                </select>
+                            </div>
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Compatible Aircraft Models</label>
+                                <input type="text" class="form-control" name="compatible_aircraft"
+                                    placeholder="e.g., Citation CJ3+, Citation Sovereign+, King Air 350i">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Weight (lbs)</label>
+                                <input type="number" class="form-control" name="weight" placeholder="25.5" step="0.1"
+                                    min="0">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Time Since Overhaul (hours)</label>
+                                <input type="number" class="form-control" name="tso_hours" placeholder="150" min="0">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Certification</label>
+                                <select class="form-select" name="certification">
+                                    <option value="">Select certification</option>
+                                    <option value="faa_pma">FAA PMA</option>
+                                    <option value="faa_tso">FAA TSO</option>
+                                    <option value="oem">OEM Certified</option>
+                                    <option value="daa">DER Approved Alternative</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Services-Specific Fields -->
+                    <div id="services-fields" class="form-section hidden">
+                        <div class="section-title">
+                            <i class="fas fa-tools"></i>Maintenance Services Details
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Service Type *</label>
+                                <select class="form-select" name="service_type">
+                                    <option value="">Select service type</option>
+                                    <option value="annual_inspection">Annual Inspection</option>
+                                    <option value="100_hour">100 Hour Inspection</option>
+                                    <option value="engine_overhaul">Engine Overhaul</option>
+                                    <option value="avionics_installation">Avionics Installation</option>
+                                    <option value="paint_refurbishment">Paint & Refurbishment</option>
+                                    <option value="interior_work">Interior Work</option>
+                                    <option value="pre_purchase">Pre-Purchase Inspection</option>
+                                    <option value="aog_repair">AOG Repair</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Hourly Rate *</label>
+                                <input type="number" class="form-control" name="service_hourly_rate" placeholder="185"
+                                    min="0">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Service Location *</label>
+                                <input type="text" class="form-control" name="service_location"
+                                    placeholder="Van Nuys, CA">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Service Radius (miles)</label>
+                                <input type="number" class="form-control" name="service_area_radius" placeholder="100"
+                                    min="0">
+                            </div>
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label">Aircraft Specialties</label>
+                                <input type="text" class="form-control" name="aircraft_specialties"
+                                    placeholder="e.g., Citation Series, King Air, Gulfstream">
+                            </div>
+                        </div>
+
+                        <!-- Service Certifications -->
+                        <div class="mb-3">
+                            <label class="form-label">Certifications & Authorizations</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="faa_part_145">
+                                    <span>FAA Part 145</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="easa_145">
+                                    <span>EASA 145</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="textron_authorized">
+                                    <span>Textron Authorized</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="gulfstream_authorized">
+                                    <span>Gulfstream Authorized</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="bombardier_authorized">
+                                    <span>Bombardier Authorized</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="certifications" value="is_bao">
+                                    <span>IS-BAO</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contact Information Section -->
+                    <div class="form-section">
+                        <div class="section-title">
+                            <i class="fas fa-phone"></i>Contact Information
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Contact Name *</label>
+                                <input type="text" class="form-control" name="contact_name" required
+                                    placeholder="Your name or company representative">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Phone Number *</label>
+                                <input type="tel" class="form-control" name="contact_phone" required
+                                    placeholder="(555) 123-4567">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Email Address *</label>
+                                <input type="email" class="form-control" name="contact_email" required
+                                    placeholder="your@email.com">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Company (Optional)</label>
+                                <input type="text" class="form-control" name="company" placeholder="Your company name">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Photos & Documents Section -->
+                    <div class="form-section">
+                        <div class="section-title">
+                            <i class="fas fa-camera"></i>Photos & Documents
+                        </div>
+                        <div class="file-upload-area" onclick="document.getElementById('photos').click()">
+                            <i class="fas fa-cloud-upload-alt fa-3x mb-3" style="color: #F05545;"></i>
+                            <h5 class="text-white">Upload Photos</h5>
+                            <p class="text-muted">Click to select photos or drag and drop<br>Maximum 10 photos, 5MB each
+                            </p>
+                            <input type="file" id="photos" name="photos" multiple accept="image/*"
+                                style="display: none;">
+                        </div>
+
+                        <div id="photosStatus" class="mt-2"></div>
+                        <div id="photosList" class="mt-2"></div>
+
+                        <div class="file-upload-area mt-3" onclick="document.getElementById('documents').click()">
+                            <i class="fas fa-file-alt fa-2x mb-3" style="color: #F05545;"></i>
+                            <h6 class="text-white">Upload Documents</h6>
+                            <p class="text-muted">Logbooks, inspections, certifications (PDF only)</p>
+                            <input type="file" id="documents" name="documents" multiple accept=".pdf"
+                                style="display: none;">
+                        </div>
+                        <div id="documentsStatus" class="mt-2"></div>
+                        <div id="documentsList" class="mt-2"></div>
+                    </div>
+
+                    <!-- Pricing Calculator -->
+                    <div class="pricing-calculator">
+                        <div class="section-title">
+                            <i class="fas fa-calculator"></i>Listing Fee Calculator
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p class="text-white mb-2">
+                                    <strong>Base Listing Fee:</strong> $49.99 (30 days)<br>
+                                    <strong>Featured Listing:</strong> +$29.99 (appears first)<br>
+                                    <strong>Premium Photos:</strong> +$19.99 (professional editing)
+                                </p>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <div class="calculated-price" id="calculated-price">$49.99</div>
+                                <small class="text-muted">Total listing cost</small>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Payment Section -->
+                    <div class="form-section">
+                        <div class="section-title">
+                            <i class="fas fa-credit-card"></i>Listing Plan
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="plan-option w-100 p-3 border border-light-subtle rounded-0"
+                                    style="cursor:pointer;">
+                                    <input type="radio" name="pricing_plan" value="monthly"
+                                        class="form-check-input me-2" checked onchange="updatePrice()">
+                                    <strong>$50 / month</strong>
+                                    <div class="small text-muted">Billed monthly · Auto-renews</div>
+                                </label>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="plan-option w-100 p-3 border border-light-subtle rounded-0"
+                                    style="cursor:pointer;">
+                                    <input type="radio" name="pricing_plan" value="six_month"
+                                        class="form-check-input me-2" onchange="updatePrice()">
+                                    <strong>$150 / 6 months</strong>
+                                    <div class="small text-muted">Billed every 6 months · Auto-renews</div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="alert alert-dark d-flex justify-content-between align-items-center mt-3">
+                            <span><i class="fas fa-receipt me-2"></i>Total Due Today</span>
+                            <strong id="calculated-price">$50.00</strong>
+                        </div>
+                        <p class="text-muted mb-0">
+                            <small>
+                                <i class="fas fa-shield-alt me-1"></i>
+                                Secure payment processing by Stripe (integration in progress). Your listing remains
+                                pending review until payment is confirmed.
+                            </small>
+                        </p>
+                    </div>
+
+                    <!-- Form Actions -->
+                    <div class="text-center mt-5">
+                        <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
+                            <i class="fas fa-save me-2"></i>Save Draft
+                        </button>
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-credit-card me-2"></i>Pay & Submit for Approval
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentListingType = 'aircraft';
+
+    function setListingType(type) {
+        // Update tabs
+        document.querySelectorAll('.listing-type-tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        if (event && event.target) {
+            event.target.classList.add('active');
+        } else {
+            // Fallback: find the button for this type
+            const tabButton = Array.from(document.querySelectorAll('.listing-type-tab')).find(btn =>
+                btn.textContent.toLowerCase().includes(type.toLowerCase())
+            );
+            if (tabButton) tabButton.classList.add('active');
+        }
+
+        // Hide all type-specific sections
+        document.querySelectorAll('[id$="-fields"]').forEach(section => {
+            section.classList.add('hidden');
+        });
+
+        // Show selected type section
+        const selectedSection = document.getElementById(type + '-fields');
+        if (selectedSection) {
+            selectedSection.classList.remove('hidden');
+
+            // If switching to aircraft type and profiles haven't loaded, load them
+            if (type === 'aircraft' && performanceProfiles.length === 0) {
+                setTimeout(() => ensurePerformanceProfilesLoad(), 100);
+            }
+        }
+
+        // Update hidden input
+        const listingTypeInput = document.getElementById('listing-type');
+        if (listingTypeInput) {
+            listingTypeInput.value = type;
+        }
+        currentListingType = type;
+
+    }
+
+    function updatePrice() {
+        const plan = document.querySelector('[name="pricing_plan"]:checked')?.value || 'monthly';
+        const total = plan === 'six_month' ? 150 : 50;
+        document.getElementById('calculated-price').textContent = '$' + total.toFixed(2);
+    }
+
+    function saveDraft() {
+        const formData = new FormData(document.getElementById('listing-form'));
+
+        // Convert to JSON for storage
+        const draftData = {};
+        for (let [key, value] of formData.entries()) {
+            draftData[key] = value;
+        }
+
+        localStorage.setItem('listing_draft', JSON.stringify(draftData));
+        alert('Draft saved successfully! You can continue editing later.');
+    }
+
+    function loadDraft() {
+        const draft = localStorage.getItem('listing_draft');
+        if (draft) {
+            const draftData = JSON.parse(draft);
+
+            // Populate form fields
+            for (let [key, value] of Object.entries(draftData)) {
+                const field = document.querySelector(`[name="${key}"]`);
+                if (field) {
+                    if (field.type === 'checkbox') {
+                        field.checked = value === 'on';
+                    } else {
+                        field.value = value;
+                    }
+                }
+            }
+
+            // Set listing type if saved
+            if (draftData.listing_type) {
+                setListingType(draftData.listing_type);
+            }
+
+            updatePrice();
+        }
+    }
+
+    // Form submission
+    document.getElementById('listing-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+
+        // Show loading state
+        const submitBtn = this.querySelector('[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating Listing...';
+        submitBtn.disabled = true;
+
+        // Simulate form submission
+        setTimeout(() => {
+            alert(`${currentListingType.charAt(0).toUpperCase() + currentListingType.slice(1)} listing created successfully!\\n\\nYour listing will be reviewed and published within 24 hours.\\nYou'll receive a confirmation email with your listing details.`);
+
+            // Clear draft
+            localStorage.removeItem('listing_draft');
+
+            // Reset form
+            this.reset();
+            setListingType('aircraft');
+            updatePrice();
+
+            // Restore button
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+
+        }, 2000);
+    });
+
+    // Drag and drop functionality
+    function setupFileUpload() {
+        const uploadAreas = document.querySelectorAll('.file-upload-area');
+
+        uploadAreas.forEach(area => {
+            area.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                this.classList.add('dragover');
+            });
+
+            area.addEventListener('dragleave', function (e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+            });
+
+            area.addEventListener('drop', function (e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+
+                const files = e.dataTransfer.files;
+                const input = this.querySelector('input[type="file"]');
+                input.files = files;
+
+                // Update file status
+                if (input.id === 'photos') {
+                    updateFileStatus('photos', files);
+                } else if (input.id === 'documents') {
+                    updateFileStatus('documents', files);
+                }
+            });
+        });
+
+        // Handle file input changes
+        document.getElementById('photos').addEventListener('change', function (e) {
+            updateFileStatus('photos', e.target.files);
+        });
+
+        document.getElementById('documents').addEventListener('change', function (e) {
+            updateFileStatus('documents', e.target.files);
+        });
+    }
+
+    function updateFileStatus(type, files) {
+        const statusDiv = document.getElementById(type + 'Status');
+        const listDiv = document.getElementById(type + 'List');
+
+        if (!files || files.length === 0) {
+            statusDiv.innerHTML = '';
+            listDiv.innerHTML = '';
+            return;
+        }
+
+        // Show status
+        statusDiv.innerHTML = `
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle me-2"></i>
+                <strong>${files.length} file(s) loaded</strong> - Ready to upload
+            </div>
+        `;
+
+        // Show file list
+        let fileListHTML = '<div class="row">';
+        Array.from(files).forEach((file, index) => {
+            const sizeKB = (file.size / 1024).toFixed(1);
+            fileListHTML += `
+                <div class="col-md-4 mb-2">
+                    <div class="file-item-status bg-success text-white p-2" style="border-radius: 0;">
+                        <i class="fas fa-check me-2"></i>
+                        <strong>${file.name}</strong> (${sizeKB} KB)
+                        <span class="float-end">
+                            <i class="fas fa-check-circle"></i> Saved
+                        </span>
+                    </div>
+                </div>
+            `;
+        });
+        fileListHTML += '</div>';
+        listDiv.innerHTML = fileListHTML;
+    }
+
+    // Robust initialization function - ensures profiles load reliably
+    function ensurePerformanceProfilesLoad() {
+        const grid = document.getElementById('performanceProfilesGrid');
+
+        if (!grid) {
+            console.log('⏳ Performance profiles grid not ready yet, retrying...');
+            // Retry with exponential backoff
+            if (window.profileLoadRetries === undefined) {
+                window.profileLoadRetries = 0;
+            }
+
+            window.profileLoadRetries++;
+            if (window.profileLoadRetries < 5) {
+                setTimeout(() => ensurePerformanceProfilesLoad(), 200 * window.profileLoadRetries);
+            } else {
+                console.error('❌ Failed to find performance profiles grid after multiple retries');
+            }
+            return;
+        }
+
+        // Check if already loaded
+        if (performanceProfiles.length > 0 && grid.children.length > 0 && !grid.querySelector('.fa-spinner')) {
+            console.log('✅ Performance profiles already loaded');
+            return;
+        }
+
+        // Reset retry counter on success
+        window.profileLoadRetries = 0;
+
+        // Load profiles
+        console.log('📡 Loading performance profiles...');
+        loadPerformanceProfiles();
+    }
+
+    // Make functions globally accessible for manual retries
+    window.ensurePerformanceProfilesLoad = ensurePerformanceProfilesLoad;
+    window.loadPerformanceProfiles = loadPerformanceProfiles;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function () {
+        // Ensure aircraft fields are visible on page load
+        const aircraftFields = document.getElementById('aircraft-fields');
+        if (aircraftFields) {
+            aircraftFields.classList.remove('hidden');
+        }
+
+        // Initialize all components
+        loadDraft();
+        setupFileUpload();
+        updatePrice();
+
+        // Set up event handlers first (will retry if elements not found)
+        setupProfileEventHandlers();
+
+        // Load performance profiles with robust retry mechanism
+        // Delay slightly to ensure DOM is fully ready
+        setTimeout(() => {
+            ensurePerformanceProfilesLoad();
+        }, 200);
+    });
+
+    // Also try to load when page becomes visible (handles tab switching)
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && performanceProfiles.length === 0) {
+            ensurePerformanceProfilesLoad();
+        }
+    });
+
+    // Retry loading if element becomes available later
+    const observer = new MutationObserver(function (mutations) {
+        const grid = document.getElementById('performanceProfilesGrid');
+        if (grid && performanceProfiles.length === 0 && grid.querySelector('.fa-spinner')) {
+            console.log('📡 Performance profiles grid now available, loading...');
+            ensurePerformanceProfilesLoad();
+        }
+    });
+
+    // Start observing when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+    } else {
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // Performance Profile Integration
+    let performanceProfiles = [];
+    let selectedProfile = null;
+
+    async function loadPerformanceProfiles() {
+        const grid = document.getElementById('performanceProfilesGrid');
+
+        if (!grid) {
+            console.error('❌ Performance profiles grid element not found in DOM');
+            // Try to find it again after a delay
+            setTimeout(() => ensurePerformanceProfilesLoad(), 300);
+            return;
+        }
+
+        // Prevent multiple simultaneous loads
+        if (window.isLoadingProfiles) {
+            console.log('⏳ Profiles already loading, skipping...');
+            return;
+        }
+
+        window.isLoadingProfiles = true;
+
+        try {
+            console.log('📡 Fetching performance profiles from API...');
+
+            // Add timeout to prevent hanging
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+            const response = await fetch('/api/performance-profiles', {
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            console.log('📥 Response received:', response.status);
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'No error details');
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const profiles = await response.json();
+            console.log(`✅ Parsed ${profiles.length} profiles from API`);
+
+            if (!Array.isArray(profiles)) {
+                throw new Error('Invalid response: expected array');
+            }
+
+            if (profiles.length === 0) {
+                console.warn('⚠️ No profiles in response');
+                grid.innerHTML = '<div class="text-center text-warning py-4"><p>No performance profiles available</p></div>';
+                window.isLoadingProfiles = false;
+                return;
+            }
+
+            performanceProfiles = profiles.map(enhanceProfile);
+            console.log(`✅ Enhanced ${performanceProfiles.length} profiles with search metadata`);
+
+            // Populate manufacturer filter
+            populateManufacturerFilter(performanceProfiles);
+
+            // Re-attach event handlers (in case they weren't attached or were lost)
+            setupProfileEventHandlers();
+
+            console.log(`📊 Displaying ${profiles.length} performance profiles...`);
+
+            // Trigger initial filter to display all profiles
+            setTimeout(() => {
+                filterProfiles();
+                console.log('✅ Performance profiles loaded and displayed successfully!');
+            }, 100);
+
+        } catch (error) {
+            console.error('❌ Error loading performance profiles:', error);
+
+            if (error.name === 'AbortError') {
+                console.error('⏱️ Request timed out after 10 seconds');
+                error.message = 'Request timed out. Please check your connection and try again.';
+            }
+
+            if (grid) {
+                grid.innerHTML = `
+                    <div class="text-center text-danger py-4">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                        <p><strong>Error loading performance profiles</strong></p>
+                        <p class="text-muted small">${error.message || 'Unknown error'}</p>
+                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="window.isLoadingProfiles=false; loadPerformanceProfiles()">
+                            <i class="fas fa-redo me-1"></i>Retry Loading
+                        </button>
+                    </div>
+                `;
+            }
+        } finally {
+            window.isLoadingProfiles = false;
+        }
+    }
+
+    function displayPerformanceProfiles(profiles) {
+        const grid = document.getElementById('performanceProfilesGrid');
+
+        if (!grid) {
+            console.error('❌ Performance profiles grid element not found for display');
+            // Retry to find the element
+            setTimeout(() => {
+                const retryGrid = document.getElementById('performanceProfilesGrid');
+                if (retryGrid && profiles && profiles.length > 0) {
+                    displayPerformanceProfiles(profiles);
+                }
+            }, 300);
+            return;
+        }
+
+        if (!profiles || profiles.length === 0) {
+            grid.innerHTML = '<div class="text-center text-muted py-4"><p>No profiles found</p></div>';
+            return;
+        }
+
+        try {
+            // Clear loading spinner first
+            grid.innerHTML = '';
+            let cardsCreated = 0;
+            const fragment = document.createDocumentFragment(); // Use fragment for better performance
+
+            profiles.forEach((profile, index) => {
+                try {
+                    if (!profile || !profile.id) {
+                        console.warn(`⚠️ Skipping invalid profile at index ${index}`);
+                        return;
+                    }
+
+                    const card = createPerformanceProfileCard(profile);
+                    if (card) {
+                        fragment.appendChild(card);
+                        cardsCreated++;
+                    }
+                } catch (error) {
+                    console.error(`❌ Error creating card for profile at index ${index}:`, error);
+                }
+            });
+
+            // Append all cards at once for better performance
+            if (cardsCreated > 0) {
+                grid.appendChild(fragment);
+                console.log(`✅ Successfully displayed ${cardsCreated} performance profiles`);
+            } else {
+                grid.innerHTML = '<div class="text-center text-muted py-4"><p>No valid profiles could be loaded</p></div>';
+            }
+        } catch (error) {
+            console.error('❌ Error displaying performance profiles:', error);
+            grid.innerHTML = `
+                <div class="text-center text-danger py-4">
+                    <p><strong>Error displaying profiles:</strong> ${error.message}</p>
+                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadPerformanceProfiles()">
+                        <i class="fas fa-redo me-1"></i>Retry
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    function createPerformanceProfileCard(profile) {
+        if (!profile || !profile.id) {
+            console.warn('Invalid profile data:', profile);
+            return null;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'performance-profile-card';
+        card.dataset.profileId = profile.id || '';
+
+        // Escape HTML to prevent XSS issues
+        const escapeHtml = (text) => {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        const engineDisplay = escapeHtml(profile.engine_type || profile.category || 'Unknown');
+        const manufacturerDisplay = escapeHtml(getProfileManufacturer(profile));
+        const nameDisplay = escapeHtml(getProfileName(profile) || 'Unknown Aircraft');
+
+        card.innerHTML = `
+            <div class="profile-header">
+                <h6 class="profile-title">${nameDisplay}</h6>
+                <span class="profile-category">${engineDisplay}</span>
+            </div>
+            <div class="profile-specs">
+                <div class="profile-spec">
+                    <span>Manufacturer:</span>
+                    <span class="profile-spec-value">${manufacturerDisplay || 'Unknown'}</span>
+                </div>
+                <div class="profile-spec">
+                    <span>Engine:</span>
+                    <span class="profile-spec-value">${engineDisplay}</span>
+                </div>
+                <div class="profile-spec">
+                    <span>Range:</span>
+                    <span class="profile-spec-value">${profile.range || 0} nm</span>
+                </div>
+                <div class="profile-spec">
+                    <span>Speed:</span>
+                    <span class="profile-spec-value">${profile.speed || 0} kts</span>
+                </div>
+                <div class="profile-spec">
+                    <span>Altitude:</span>
+                    <span class="profile-spec-value">${profile.max_altitude || 0} ft</span>
+                </div>
+            </div>
+        `;
+
+        card.addEventListener('click', () => selectProfile(profile, card));
+        return card;
+    }
+
+    function selectProfile(profile, cardElement) {
+        // Remove previous selection
+        document.querySelectorAll('.performance-profile-card').forEach(c => c.classList.remove('selected'));
+
+        // Select this card
+        cardElement.classList.add('selected');
+        selectedProfile = profile;
+
+        // Set hidden field value
+        document.getElementById('selectedProfileId').value = profile.id;
+
+        prefillListingFields(profile);
+        // Show preview
+        showSelectedProfilePreview(profile);
+    }
+
+    function showSelectedProfilePreview(profile) {
+        const preview = document.getElementById('selectedProfilePreview');
+        const details = document.getElementById('selectedProfileDetails');
+
+        details.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <strong>${getProfileManufacturer(profile)} ${getProfileName(profile)}</strong><br>
+                    <small class="text-muted">Engine: ${profile.engine_type || profile.category || 'Unknown'}</small>
+                </div>
+                <div class="col-md-6">
+                    <small>
+                        Range: ${profile.range || 0} nm | Speed: ${profile.speed || 0} kts |
+                        Altitude: ${profile.max_altitude || 0} ft
+                    </small>
+                </div>
+            </div>
+        `;
+
+        preview.classList.remove('d-none');
+    }
+
+    function prefillListingFields(profile) {
+        const listingNameField = document.getElementById('listingName');
+        if (listingNameField) {
+            listingNameField.value = `${getProfileManufacturer(profile)} ${getProfileName(profile)}`.trim();
+        }
+
+        const manufacturerField = document.getElementById('manufacturerInput');
+        if (manufacturerField) {
+            manufacturerField.value = getProfileManufacturer(profile) || manufacturerField.value || '';
+        }
+
+        const yearField = document.getElementById('yearModel');
+        if (yearField && (profile.year || profile.model_year)) {
+            yearField.value = profile.year || profile.model_year;
+        }
+    }
+
+    function applyProfileToForm() {
+        if (!selectedProfile) {
+            alert('Please select a performance profile first!');
+            return;
+        }
+
+        const manufacturerField = document.getElementById('manufacturerInput');
+        if (manufacturerField) {
+            manufacturerField.value = getProfileManufacturer(selectedProfile) || manufacturerField.value || '';
+        }
+
+        const engineField = document.getElementById('engineType');
+        if (engineField) {
+            const engineValue = (selectedProfile.engine_type || selectedProfile.category || '').toLowerCase();
+            if (engineValue) {
+                const optionMatch = Array.from(engineField.options).find(option =>
+                    option.value.toLowerCase() === engineValue || option.text.toLowerCase() === engineValue
+                );
+                engineField.value = optionMatch ? optionMatch.value : engineField.value || '';
+            }
+        }
+
+        prefillListingFields(selectedProfile);
+        alert('Performance profile details applied to your listing.');
+    }
+
+    function clearSelectedProfile() {
+        selectedProfile = null;
+        document.getElementById('selectedProfileId').value = '';
+        document.querySelectorAll('.performance-profile-card').forEach(c => c.classList.remove('selected'));
+        document.getElementById('selectedProfilePreview').classList.add('d-none');
+    }
+
+    function normalizeText(value) {
+        return (value ?? '').toString().trim();
+    }
+
+    function extractProfileManufacturer(profile) {
+        if (!profile) {
+            return '';
+        }
+        return normalizeText(
+            profile.manufacturer ||
+            profile.manufacturer_name ||
+            profile.make ||
+            profile.oem ||
+            profile.builder ||
+            profile.airframer ||
+            ''
+        );
+    }
+
+    function extractProfileName(profile) {
+        if (!profile) {
+            return '';
+        }
+        return normalizeText(
+            profile.name ||
+            profile.aircraft_name ||
+            profile.model ||
+            profile.aircraft ||
+            profile.display_name ||
+            ''
+        );
+    }
+
+    function enhanceProfile(profile) {
+        const normalizedManufacturer = extractProfileManufacturer(profile) || 'Unknown';
+        const normalizedName = extractProfileName(profile) || 'Aircraft';
+        return {
+            ...profile,
+            _manufacturer: normalizedManufacturer,
+            _name: normalizedName,
+            _searchText: `${normalizedManufacturer} ${normalizedName}`.trim().toLowerCase()
+        };
+    }
+
+    function getProfileManufacturer(profile) {
+        if (!profile) {
+            return '';
+        }
+        if (profile._manufacturer) {
+            return profile._manufacturer;
+        }
+        const derived = extractProfileManufacturer(profile);
+        profile._manufacturer = derived;
+        return derived;
+    }
+
+    function getProfileName(profile) {
+        if (!profile) {
+            return '';
+        }
+        if (profile._name) {
+            return profile._name;
+        }
+        const derived = extractProfileName(profile);
+        profile._name = derived;
+        return derived;
+    }
+
+    function populateManufacturerFilter(profiles) {
+        const manufacturerFilter = document.getElementById('profileManufacturerFilter');
+        if (!manufacturerFilter) {
+            return;
+        }
+
+        const existingSelection = manufacturerFilter.value;
+        const manufacturers = Array.from(
+            new Set(
+                (profiles || [])
+                    .map(profile => getProfileManufacturer(profile))
+                    .filter(Boolean)
+            )
+        ).sort((a, b) => a.localeCompare(b));
+
+        manufacturerFilter.innerHTML = '<option value="">All Manufacturers</option>';
+        manufacturers.forEach((manufacturer) => {
+            const option = document.createElement('option');
+            option.value = manufacturer;
+            option.textContent = manufacturer;
+            manufacturerFilter.appendChild(option);
+        });
+
+        manufacturerFilter.value = manufacturers.includes(existingSelection) ? existingSelection : '';
+    }
+
+    function setupProfileEventHandlers() {
+        console.log('🔧 Setting up profile event handlers...');
+
+        // Search input - add event listeners
+        const searchInput = document.getElementById('profileSearchInput');
+        if (searchInput) {
+            // Create a named function that we can reference
+            const handleSearch = function (e) {
+                console.log('🔍 Search event triggered:', e.type, 'value:', e.target.value);
+                filterProfiles();
+            };
+
+            // Store reference globally for fallback
+            window.searchProfileInput = searchInput;
+            window.handleSearchProfile = handleSearch;
+
+            // Remove all existing listeners by cloning the element
+            const newSearchInput = searchInput.cloneNode(true);
+            searchInput.parentNode.replaceChild(newSearchInput, searchInput);
+
+            // Add fresh event listeners with multiple event types
+            newSearchInput.addEventListener('input', handleSearch, { capture: false, passive: true });
+            newSearchInput.addEventListener('keyup', handleSearch, { capture: false, passive: true });
+            newSearchInput.addEventListener('keydown', handleSearch, { capture: false, passive: true });
+            newSearchInput.addEventListener('paste', function () {
+                setTimeout(handleSearch, 100);
+            }, { capture: false, passive: true });
+
+            // Also set as direct property for immediate access
+            newSearchInput.oninput = handleSearch;
+            newSearchInput.onkeyup = handleSearch;
+
+            // Update global reference
+            window.searchProfileInput = newSearchInput;
+
+            console.log('✅ Search input event handlers attached to:', newSearchInput.id);
+        } else {
+            console.warn('⚠️ Search input element not found, will retry...');
+            // Retry after a short delay
+            setTimeout(setupProfileEventHandlers, 300);
+            return;
+        }
+
+        // Manufacturer filter
+        const manufacturerFilter = document.getElementById('profileManufacturerFilter');
+        if (manufacturerFilter) {
+            // Create a named function
+            const handleManufacturerChange = function (e) {
+                console.log('🏭 Manufacturer filter event triggered:', e.type, 'value:', e.target.value);
+                filterProfiles();
+            };
+
+            // Store reference globally
+            window.manufacturerFilterSelect = manufacturerFilter;
+            window.handleManufacturerFilter = handleManufacturerChange;
+
+            // Remove all existing listeners by cloning
+            const newManufacturerFilter = manufacturerFilter.cloneNode(true);
+            manufacturerFilter.parentNode.replaceChild(newManufacturerFilter, manufacturerFilter);
+
+            // Add fresh event listeners
+            newManufacturerFilter.addEventListener('change', handleManufacturerChange, { capture: false, passive: true });
+            newManufacturerFilter.addEventListener('input', handleManufacturerChange, { capture: false, passive: true });
+
+            // Also set as direct property
+            newManufacturerFilter.onchange = handleManufacturerChange;
+
+            // Update global reference
+            window.manufacturerFilterSelect = newManufacturerFilter;
+
+            console.log('✅ Manufacturer filter event handlers attached to:', newManufacturerFilter.id);
+        } else {
+            console.warn('⚠️ Manufacturer filter element not found, will retry...');
+            // Retry after a short delay
+            setTimeout(setupProfileEventHandlers, 300);
+            return;
+        }
+
+        // Test that filterProfiles can be called manually
+        console.log('✅ All event handlers set up. Testing filterProfiles...');
+        setTimeout(() => {
+            console.log('🧪 Testing filterProfiles manually...');
+            filterProfiles();
+        }, 100);
+    }
+
+    function filterProfiles() {
+        console.log('🔍 filterProfiles() called');
+
+        // Get input values - try multiple ways to ensure we get them
+        let searchInput = document.getElementById('profileSearchInput');
+        let manufacturerSelect = document.getElementById('profileManufacturerFilter');
+
+        // Fallback to window properties if elements aren't found
+        if (!searchInput && window.searchProfileInput) {
+            searchInput = window.searchProfileInput;
+        }
+        if (!manufacturerSelect && window.manufacturerFilterSelect) {
+            manufacturerSelect = window.manufacturerFilterSelect;
+        }
+
+        const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
+        const manufacturer = manufacturerSelect ? manufacturerSelect.value.trim().toLowerCase() : '';
+
+        console.log(`🔍 Filter criteria - search: "${search}", manufacturer: "${manufacturer}"`);
+        console.log(`📊 Total profiles: ${performanceProfiles.length}`);
+
+        // Ensure performanceProfiles is an array
+        if (!Array.isArray(performanceProfiles) || performanceProfiles.length === 0) {
+            console.warn('⚠️ No profiles available to filter');
+            return;
+        }
+
+        // Start with all profiles
+        let filtered = [...performanceProfiles]; // Create a copy
+
+        // Apply search filter
+        if (search) {
+            const beforeSearch = filtered.length;
+            filtered = filtered.filter(profile => {
+                // Ensure profile has been enhanced
+                if (!profile._searchText) {
+                    // Re-enhance if needed
+                    const enhanced = enhanceProfile(profile);
+                    profile._searchText = enhanced._searchText;
+                    profile._manufacturer = enhanced._manufacturer;
+                    profile._name = enhanced._name;
+                }
+
+                // Search in the combined search text
+                const searchText = profile._searchText || '';
+                const matchesSearch = searchText.includes(search);
+
+                // Also check individual fields as fallback
+                if (!matchesSearch) {
+                    const profileManufacturer = (profile._manufacturer || getProfileManufacturer(profile) || '').toLowerCase();
+                    const profileName = (profile._name || getProfileName(profile) || '').toLowerCase();
+                    return profileManufacturer.includes(search) || profileName.includes(search);
+                }
+
+                return matchesSearch;
+            });
+            console.log(`🔍 After search filter: ${filtered.length} of ${beforeSearch} profiles`);
+        }
+
+        // Apply manufacturer filter
+        if (manufacturer) {
+            const beforeManufacturer = filtered.length;
+            filtered = filtered.filter(profile => {
+                const profileManufacturer = (profile._manufacturer || getProfileManufacturer(profile) || '').toLowerCase();
+                const matches = profileManufacturer === manufacturer;
+                return matches;
+            });
+            console.log(`🏭 After manufacturer filter: ${filtered.length} of ${beforeManufacturer} profiles`);
+        }
+
+        // Sort by manufacturer, then by name
+        filtered = filtered.sort((a, b) => {
+            const manufacturerA = (a._manufacturer || getProfileManufacturer(a) || '').toLowerCase();
+            const manufacturerB = (b._manufacturer || getProfileManufacturer(b) || '').toLowerCase();
+            const manufacturerCompare = manufacturerA.localeCompare(manufacturerB);
+            if (manufacturerCompare !== 0) {
+                return manufacturerCompare;
+            }
+            const nameA = (a._name || getProfileName(a) || '').toLowerCase();
+            const nameB = (b._name || getProfileName(b) || '').toLowerCase();
+            return nameA.localeCompare(nameB);
+        });
+
+        // Display filtered results
+        console.log(`✅ Displaying ${filtered.length} filtered profiles`);
+        displayPerformanceProfiles(filtered);
+    }
+
+    // Make functions globally accessible for manual retries and debugging
+    // This must be after all function definitions
+    window.ensurePerformanceProfilesLoad = ensurePerformanceProfilesLoad;
+    window.loadPerformanceProfiles = loadPerformanceProfiles;
+    window.displayPerformanceProfiles = displayPerformanceProfiles;
+    window.filterProfiles = filterProfiles;
+    window.setupProfileEventHandlers = setupProfileEventHandlers;
+
+    // Expose a getter for performanceProfiles for debugging
+    Object.defineProperty(window, 'performanceProfiles', {
+        get: function () { return performanceProfiles; },
+        configurable: true
+    });
+
+    // Expose filterProfiles to be callable from anywhere
+    console.log('🌐 Global functions exposed: filterProfiles, setupProfileEventHandlers');
+
+    // Form submission handler
+    document.getElementById('listing-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+
+        // Validate performance profile is selected
+        if (!selectedProfile || !document.getElementById('selectedProfileId').value) {
+            alert('Please select a performance profile before submitting.');
+            document.getElementById('profileSearchInput').focus();
+            return;
+        }
+
+        const priceField = document.getElementById('price');
+        const engineTypeField = document.getElementById('engineType');
+        const manufacturerField = document.getElementById('manufacturerInput');
+        const locationField = document.getElementById('location');
+        const emailField = document.getElementById('email');
+        const descriptionField = document.getElementById('description');
+        const listingNameField = document.getElementById('listingName');
+        const serialNumberField = document.getElementById('serialNumber');
+        const totalTimeField = document.getElementById('totalTime');
+        const yearModelField = document.getElementById('yearModel');
+        const planSelection = document.querySelector('input[name="pricing_plan"]:checked');
+
+        const fallbackTitle = `${getProfileManufacturer(selectedProfile)} ${getProfileName(selectedProfile)}`.trim();
+        const listingData = {
+            profile_id: parseInt(document.getElementById('selectedProfileId').value),
+            price: parseFloat(priceField.value),
+            location: locationField.value,
+            email: emailField.value,
+            description: descriptionField.value,
+            engine_type: engineTypeField.value || selectedProfile.category || 'Unknown',
+            manufacturer: manufacturerField.value || getProfileManufacturer(selectedProfile) || '',
+            pricing_plan: planSelection ? planSelection.value : 'monthly',
+            title: (listingNameField?.value || fallbackTitle || 'Aircraft Listing').trim(),
+            serial_number: serialNumberField ? serialNumberField.value.trim() : '',
+            hours: totalTimeField ? parseFloat(totalTimeField.value) || 0 : 0,
+            year: yearModelField ? parseInt(yearModelField.value, 10) || new Date().getFullYear() : new Date().getFullYear(),
+            images: [], // TODO: Upload images to server and get URLs
+            documents: [] // TODO: Upload documents to server and get URLs
+        };
+
+        // Show loading state
+        const submitBtn = document.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Submitting...';
+        submitBtn.disabled = true;
+
+        try {
+            // Submit listing
+            const response = await fetch('/api/user-listings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(listingData)
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                // Success - show message and redirect
+                alert('Listing submitted successfully! Payment required for approval. Admin will review after payment.');
+                // TODO: Redirect to payment page or admin review
+                window.location.href = '/';
+            } else {
+                throw new Error(result.error || 'Failed to create listing');
+            }
+
+        } catch (error) {
+            console.error('Error submitting listing:', error);
+            alert('Error creating listing: ' + error.message);
+        } finally {
+            // Restore button
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    });
+</script>
+{% endblock %}

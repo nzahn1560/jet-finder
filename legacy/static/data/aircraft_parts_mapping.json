@@ -1,0 +1,70 @@
+{
+  "Citation CJ3+": [
+    "ENG001",
+    "ENG003",
+    "AVI001",
+    "LG002",
+    "LG005",
+    "INT001",
+    "STR001",
+    "STR005"
+  ],
+  "Citation Sovereign+": [
+    "ENG001",
+    "AVI003",
+    "LG004",
+    "INT004",
+    "STR001"
+  ],
+  "Gulfstream G650": [
+    "ENG002",
+    "AVI002",
+    "LG001",
+    "INT002",
+    "INT005",
+    "STR005"
+  ],
+  "Falcon 2000LXS": [
+    "ENG002",
+    "AVI005",
+    "LG001",
+    "INT003",
+    "STR003"
+  ],
+  "Legacy 450": [
+    "ENG003",
+    "AVI003",
+    "LG003",
+    "INT003",
+    "STR002"
+  ],
+  "King Air 350i": [
+    "ENG004",
+    "AVI001",
+    "AVI005",
+    "LG004",
+    "INT004",
+    "STR004"
+  ],
+  "PC-12 NGX": [
+    "ENG004",
+    "AVI004",
+    "LG005",
+    "INT005",
+    "STR004"
+  ],
+  "Challenger 350": [
+    "ENG005",
+    "AVI002",
+    "LG003",
+    "INT002",
+    "STR002"
+  ],
+  "Citation Latitude": [
+    "ENG005",
+    "AVI004",
+    "LG002",
+    "INT001",
+    "STR003"
+  ]
+}

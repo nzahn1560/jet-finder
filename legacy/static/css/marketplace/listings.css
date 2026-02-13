@@ -1,0 +1,153 @@
+/* Marketplace Listings CSS */
+
+/* Listing Cards */
+.listing-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-color: rgba(108, 117, 125, 0.3);
+}
+
+.listing-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    border-color: rgba(240, 85, 69, 0.7);
+}
+
+.listing-image {
+    height: 200px;
+    object-fit: cover;
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(108, 117, 125, 0.3);
+}
+
+.specs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+}
+
+.specs span {
+    background: rgba(33, 37, 41, 0.8);
+    padding: 4px 10px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.favorite-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.6);
+    transition: all 0.2s ease;
+}
+
+.favorite-btn:hover {
+    background-color: rgba(240, 85, 69, 0.2);
+    border-color: #F05545;
+}
+
+/* Filter Pills */
+.filter-pills .badge {
+    font-size: 0.85rem;
+    padding: 8px 15px;
+    transition: all 0.2s ease;
+}
+
+.filter-pills .badge:hover {
+    box-shadow: 0 0 10px rgba(240, 85, 69, 0.5);
+}
+
+.filter-pills .badge a:hover {
+    text-decoration: none;
+}
+
+/* Pagination */
+.pagination .page-link {
+    transition: all 0.2s ease;
+}
+
+.pagination .page-link:hover:not(.active) {
+    background-color: rgba(240, 85, 69, 0.2);
+    border-color: rgba(240, 85, 69, 0.5);
+}
+
+/* Search Section */
+.form-control, .form-select {
+    border-width: 1px;
+    transition: all 0.2s ease;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #F05545;
+    box-shadow: 0 0 0 0.2rem rgba(240, 85, 69, 0.25);
+}
+
+/* Form Controls */
+.form-check-input:checked {
+    background-color: #F05545;
+    border-color: #F05545;
+}
+
+/* Modal Customizations */
+.modal-content {
+    border: 1px solid rgba(108, 117, 125, 0.3);
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.7);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 767.98px) {
+    .listing-image {
+        height: 180px;
+    }
+    
+    .specs {
+        font-size: 0.8rem;
+        gap: 8px;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .filter-pills .badge {
+        font-size: 0.75rem;
+        padding: 6px 12px;
+    }
+}
+
+/* Aircraft Detail Page Styles */
+.carousel-item img {
+    height: 400px;
+    object-fit: cover;
+}
+
+.table-dark {
+    --bs-table-bg: transparent;
+}
+
+.table-dark.table-borderless tr:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Animations */
+@keyframes pulse-border {
+    0% {
+        box-shadow: 0 0 0 0 rgba(240, 85, 69, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(240, 85, 69, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(240, 85, 69, 0);
+    }
+}
+
+.pulse-border {
+    animation: pulse-border 2s infinite;
+} 
