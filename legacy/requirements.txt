@@ -1,9 +1,1 @@
-Flask==2.3.0
-gunicorn==21.2.0
-pandas==2.0.3
-numpy==1.24.3
-python-dotenv==1.0.0
-Werkzeug==2.3.0
-stripe==5.4.0
-Flask-CORS==4.0.0
-psycopg2-binary==2.9.9
+-r legacy/requirements_production.txt

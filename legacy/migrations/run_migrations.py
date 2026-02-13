@@ -76,22 +76,49 @@ def run_postgres_migrations():
     
     print("🔧 Running PostgreSQL migrations...")
     
-    schema_file = Path(__file__).parent / '001_listings_schema.sql'
-    with open(schema_file, 'r') as f:
-        sql = f.read()
+    # Run migrations in order
+    migration_files = [
+        '001_listings_schema.sql',
+        '003_uuid_schema.sql'  # UUID schema (optional, creates simplified schema)
+    ]
     
-    try:
-        cursor.execute(sql)
-        conn.commit()
-        print("✅ PostgreSQL migrations complete")
-        return True
-    except psycopg2.Error as e:
-        print(f"❌ Migration error: {e}")
-        conn.rollback()
-        return False
-    finally:
-        cursor.close()
-        conn.close()
+    for migration_file in migration_files:
+        schema_file = Path(__file__).parent / migration_file
+        if not schema_file.exists():
+            print(f"⏭️  Skipping {migration_file} (not found)")
+            continue
+            
+        print(f"📄 Running {migration_file}...")
+        with open(schema_file, 'r') as f:
+            sql = f.read()
+        
+        try:
+            # Execute each statement separately (some migrations have multiple statements)
+            statements = [s.strip() for s in sql.split(';') if s.strip() and not s.strip().startswith('--')]
+            
+            for i, statement in enumerate(statements):
+                if not statement or statement.startswith('--'):
+                    continue
+                try:
+                    cursor.execute(statement)
+                    print(f"  ✅ Executed statement {i+1}/{len(statements)}")
+                except psycopg2.Error as e:
+                    if 'already exists' in str(e) or 'duplicate' in str(e).lower():
+                        print(f"  ⏭️  Skipped (already exists): {statement[:50]}...")
+                    else:
+                        print(f"  ❌ Error: {e}")
+                        print(f"  Statement: {statement[:100]}...")
+                        raise
+            
+            conn.commit()
+            print(f"✅ {migration_file} complete")
+        except psycopg2.Error as e:
+            print(f"❌ Migration error in {migration_file}: {e}")
+            conn.rollback()
+            return False
+    
+    print("✅ All PostgreSQL migrations complete")
+    return True
 
 def seed_admin_user():
     """Create admin user from environment variables"""

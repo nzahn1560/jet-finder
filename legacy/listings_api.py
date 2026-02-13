@@ -245,6 +245,43 @@ def get_my_listings():
     finally:
         db.close()
 
+@listings_bp.route('/<int:listing_id>', methods=['DELETE'])
+@require_auth
+def delete_listing(listing_id):
+    """Delete listing (only if owner and status allows deletion)"""
+    user = request.current_user
+    
+    db = SessionLocal()
+    try:
+        listing = db.query(Listing).filter(Listing.id == listing_id).first()
+        
+        if not listing:
+            return jsonify({'error': 'Listing not found'}), 404
+        
+        # Check ownership
+        if listing.owner_user_id != user.id:
+            return jsonify({'error': 'You do not own this listing'}), 403
+        
+        # Check if status allows deletion (only draft or unpaid)
+        deletable_statuses = [ListingStatus.DRAFT, ListingStatus.UNPAID]
+        if listing.status not in deletable_statuses:
+            return jsonify({'error': f'Cannot delete listing with status: {listing.status.value}'}), 400
+        
+        # Delete listing (cascade will delete media and payments)
+        db.delete(listing)
+        db.commit()
+        
+        return jsonify({
+            'message': 'Listing deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Delete listing error: {e}")
+        return jsonify({'error': 'An error occurred deleting the listing'}), 500
+    finally:
+        db.close()
+
 # Admin routes
 @listings_bp.route('/admin/pending', methods=['GET'])
 @require_admin

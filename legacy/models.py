@@ -259,18 +259,35 @@ def init_db():
     Safe to call multiple times (won't recreate existing tables)
     """
     import logging
+    import sys
+    
+    # Ensure logging goes to stdout (Railway captures this)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
     logger = logging.getLogger(__name__)
+    
+    # Also print to stdout for Railway visibility
+    print("=" * 60, file=sys.stdout)
+    print("🔧 DATABASE INITIALIZATION STARTING", file=sys.stdout)
+    print("=" * 60, file=sys.stdout)
     
     try:
         # Test database connection first
+        print("🔧 Testing database connection...", file=sys.stdout)
         with engine.connect() as conn:
             # Use text() for SQLAlchemy 2.0+ compatibility
             from sqlalchemy import text
             conn.execute(text("SELECT 1"))
+        print("✅ Database connection successful", file=sys.stdout)
         logger.info("✅ Database connection successful")
         
         # Create all tables
+        print("🔧 Creating database tables...", file=sys.stdout)
         Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created/verified successfully!", file=sys.stdout)
         logger.info("✅ Database tables created/verified successfully!")
         
         # Verify critical tables exist
@@ -282,17 +299,37 @@ def init_db():
         missing_tables = [t for t in required_tables if t not in existing_tables]
         
         if missing_tables:
-            logger.error(f"❌ CRITICAL: Required tables missing: {missing_tables}")
+            error_msg = f"❌ CRITICAL: Required tables missing: {missing_tables}"
+            print(error_msg, file=sys.stdout)
+            logger.error(error_msg)
             raise Exception(f"Database initialization incomplete. Missing tables: {missing_tables}")
         
-        logger.info(f"✅ Verified tables exist: {', '.join(required_tables)}")
+        success_msg = f"✅ Verified tables exist: {', '.join(required_tables)}"
+        print(success_msg, file=sys.stdout)
+        logger.info(success_msg)
+        
+        print("=" * 60, file=sys.stdout)
+        print("✅ DATABASE INITIALIZATION COMPLETE", file=sys.stdout)
+        print("=" * 60, file=sys.stdout)
         return True
         
     except Exception as e:
-        logger.error(f"❌ Database initialization failed: {e}")
+        error_msg = f"❌ Database initialization failed: {e}"
+        print("=" * 60, file=sys.stdout)
+        print(error_msg, file=sys.stdout)
+        print(f"❌ Error type: {type(e).__name__}", file=sys.stdout)
+        print(f"❌ DATABASE_URL: {DATABASE_URL[:50]}..." if DATABASE_URL else "❌ DATABASE_URL: NOT SET", file=sys.stdout)
+        import traceback
+        print(f"❌ Traceback:\n{traceback.format_exc()}", file=sys.stdout)
+        print("=" * 60, file=sys.stdout)
+        
+        logger.error(error_msg)
         logger.error(f"❌ Error type: {type(e).__name__}")
         logger.error(f"❌ DATABASE_URL: {DATABASE_URL[:50]}..." if DATABASE_URL else "❌ DATABASE_URL: NOT SET")
-        raise  # Re-raise to ensure app startup fails if DB is broken
+        logger.error(f"❌ Traceback:\n{traceback.format_exc()}")
+        
+        # Re-raise to ensure app startup fails if DB is broken
+        raise
 
 def drop_all():
     """Drop all tables (use with caution!)"""

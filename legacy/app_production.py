@@ -101,7 +101,16 @@ def login_page():
 @app.route('/dashboard')
 def dashboard():
     """User dashboard (requires auth)"""
-    return render_template('dashboard/index.html')
+    from auth import get_current_user
+    from flask import redirect, url_for
+    
+    # Check if user is logged in
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login_page'))
+    
+    # Pass user to template
+    return render_template('dashboard/index.html', user=user)
 
 @app.route('/admin')
 def admin_panel():
