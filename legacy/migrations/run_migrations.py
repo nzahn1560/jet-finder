@@ -79,7 +79,8 @@ def run_postgres_migrations():
     # Run migrations in order
     migration_files = [
         '001_listings_schema.sql',
-        '003_uuid_schema.sql'  # UUID schema (optional, creates simplified schema)
+        '003_uuid_schema.sql',  # UUID schema (optional, creates simplified schema)
+        '004_login_tables.sql'  # Login tables (users, sessions) with password encryption
     ]
     
     for migration_file in migration_files:
