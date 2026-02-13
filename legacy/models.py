@@ -257,7 +257,9 @@ def init_db():
     try:
         # Test database connection first
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            # Use text() for SQLAlchemy 2.0+ compatibility
+            from sqlalchemy import text
+            conn.execute(text("SELECT 1"))
         logger.info("✅ Database connection successful")
         
         # Create all tables

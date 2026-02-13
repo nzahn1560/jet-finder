@@ -42,6 +42,7 @@ else:
 from models import init_db, engine
 try:
     logger.info("🔧 Initializing database...")
+    logger.info(f"🔧 DATABASE_URL: {os.environ.get('DATABASE_URL', 'NOT SET')[:50]}..." if os.environ.get('DATABASE_URL') else "🔧 DATABASE_URL: NOT SET")
     init_db()
     logger.info("✅ Database initialized successfully - all tables ready")
 except Exception as e:
@@ -49,10 +50,12 @@ except Exception as e:
     logger.error("❌ CRITICAL: Database initialization FAILED")
     logger.error(f"❌ Error: {e}")
     logger.error(f"❌ Error type: {type(e).__name__}")
+    import traceback
+    logger.error(f"❌ Traceback:\n{traceback.format_exc()}")
     logger.error("=" * 60)
-    # Don't raise here - let app start but log the error
-    # This allows Railway to show the error in logs
-    # App will fail on first database query if tables don't exist
+    # Re-raise to prevent app from starting without database
+    # This ensures Railway shows the error and deployment fails
+    raise
 
 # Register blueprints
 from auth import auth_bp
