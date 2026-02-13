@@ -18,7 +18,14 @@ DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///instance/jet_finder.db'
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
-engine = create_engine(DATABASE_URL, echo=False)
+# Create engine with connection pooling and error handling
+engine = create_engine(
+    DATABASE_URL, 
+    echo=False,
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=300,     # Recycle connections after 5 minutes
+    connect_args={"connect_timeout": 10} if DATABASE_URL.startswith('postgresql') else {}
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
