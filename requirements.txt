@@ -1,0 +1,34 @@
+# Jet Finder - Main App Requirements (app.py)
+# For Railway deployment
+
+# Flask
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Data Processing
+pandas==2.1.0
+numpy==1.25.2
+
+# File Handling
+openpyxl==3.1.2
+Pillow==10.0.0
+
+# Charts/Visualization
+matplotlib==3.7.2
+
+# Payments
+stripe==7.8.0
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Google API (if using)
+google-api-python-client==2.104.0
+google-auth-httplib2==0.1.0
+google-auth-oauthlib==1.1.0
+
+# Production Server
+gunicorn==21.2.0
