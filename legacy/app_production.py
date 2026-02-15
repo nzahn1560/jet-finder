@@ -61,10 +61,20 @@ except Exception as e:
 from auth import auth_bp
 from listings_api import listings_bp
 from billing_api import billing_bp
+from firebase_auth_routes import firebase_auth_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(listings_bp)
 app.register_blueprint(billing_bp)
+app.register_blueprint(firebase_auth_bp)
+
+# Initialize Firebase
+from firebase_auth import init_firebase
+firebase_app = init_firebase()
+if firebase_app:
+    logger.info("✅ Firebase Authentication initialized")
+else:
+    logger.warning("⚠️ Firebase Authentication not available (set FIREBASE_CREDENTIALS)")
 
 logger.info("✅ API blueprints registered")
 

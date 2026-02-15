@@ -16,6 +16,9 @@ stripe==7.8.0
 Flask-Limiter==3.5.0
 redis==5.0.1
 
+# Firebase Authentication
+firebase-admin==6.4.0
+
 # Utilities
 python-dotenv==1.0.0
 gunicorn==21.2.0
