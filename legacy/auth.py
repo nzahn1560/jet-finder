@@ -53,7 +53,17 @@ def clear_session_cookie(response):
     return response
 
 def get_current_user():
-    """Get current user from cookie session"""
+    """Get current user from cookie session OR Firebase token"""
+    # Try Firebase auth first
+    try:
+        from firebase_auth import get_current_firebase_user
+        firebase_user = get_current_firebase_user()
+        if firebase_user:
+            return firebase_user
+    except Exception:
+        pass  # Firebase not available or not authenticated
+    
+    # Fall back to cookie-based auth
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
