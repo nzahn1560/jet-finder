@@ -1746,15 +1746,20 @@ def api_airports():
         if not query or len(query) < 2:
             return jsonify([])
         
-        # Load airports data
-        import json
-        try:
-            with open('static/data/airports.json', 'r') as f:
-                airports = json.load(f)
-        except FileNotFoundError:
-            # Fallback to root directory
-            with open('airports.json', 'r') as f:
-                airports = json.load(f)
+        # Load airports data (paths relative to app root so Railway/CWD-independent)
+        _root = os.path.dirname(os.path.abspath(__file__))
+        _paths = [
+            os.path.join(_root, 'static', 'data', 'airports.json'),
+            os.path.join(_root, 'airports.json'),
+        ]
+        airports = None
+        for _path in _paths:
+            if os.path.isfile(_path):
+                with open(_path, 'r') as f:
+                    airports = json.load(f)
+                break
+        if airports is None:
+            return jsonify({'error': 'Airport data not found'}), 500
         
         # Search airports by IATA code, ICAO code, name, or city
         matching_airports = []
