@@ -79,6 +79,8 @@ lerna-debug.log*
 
 # Data files (CSV, JSON - keep in data/ if needed)
 *.csv
+# Allow aircraft data CSV so production can load it (Railway)
+!Aircraft Data - Aircraft Data (1).csv
 !database/migrations/*.sql  # Keep SQL migrations
 !worker-api/migrations/*.sql
 

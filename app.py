@@ -1098,8 +1098,23 @@ def get_service_categories():
     ]
 
 def load_aircraft_data():
+    """Load aircraft from CSV. Paths are relative to app root so Railway finds the file."""
+    _root = os.path.dirname(os.path.abspath(__file__))
+    _candidates = [
+        os.path.join(_root, 'Aircraft Data - Aircraft Data (1).csv'),
+        os.path.join(_root, 'static', 'data', 'Aircraft Data - Aircraft Data (1).csv'),
+        'Aircraft Data - Aircraft Data (1).csv',
+    ]
+    csv_path = None
+    for p in _candidates:
+        if os.path.isfile(p):
+            csv_path = p
+            break
+    if not csv_path:
+        print("WARNING: Aircraft CSV not found; tried: " + ", ".join(_candidates))
+        return []
     try:
-        df = pd.read_csv('Aircraft Data - Aircraft Data (1).csv')
+        df = pd.read_csv(csv_path)
         aircraft_data = []
         
         def safe_int_convert(value, default=0):
@@ -1774,6 +1789,27 @@ def api_debug():
         'routes': ['/api/airports', '/api/user-listings'],
         'airports_route_exists': True
     }), 200
+
+@app.route('/api/health')
+def api_health():
+    """Health check: confirm data files loaded (counts for Railway debugging)."""
+    try:
+        airports_data = _load_airports_data()
+        airports_count = len(airports_data) if isinstance(airports_data, list) else 0
+        aircraft_count = len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0
+        profiles_count = aircraft_count  # one profile per aircraft
+        return jsonify({
+            'status': 'ok',
+            'data_loaded': {
+                'airports': airports_count,
+                'aircraft': aircraft_count,
+                'performance_profiles': profiles_count,
+            },
+            'app': 'app.py',
+        }), 200
+    except Exception as e:
+        logger.exception("Error in /api/health")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/airports')
 def api_airports():

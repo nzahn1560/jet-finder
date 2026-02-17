@@ -39,7 +39,10 @@ gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
 - **App:** Root `app.py` (same app as localhost:5015).
 - **Routes:** Includes `/api/airports`, `/api/user-listings`, and all other root app routes.
 - **Database:** SQLite at `instance/jet_finder.db` (ephemeral on Railway unless you add a volume).
-- **Static/data:** `static/data/airports.json` and other root paths.
+- **Data files (must be committed):**
+  - `static/data/airports.json` — airports (or fallback list if missing).
+  - `Aircraft Data - Aircraft Data (1).csv` — aircraft + performance profiles (allowed via `.gitignore` exception).
+- **Entry point:** `gunicorn app:app` loads root `app.py`, which registers `/api/airports`, `/api/aircraft-data`, `/api/performance-profiles`, `/api/user-listings`, `/api/health`.
 
 ---
 
@@ -73,15 +76,21 @@ After deploy, use these URLs to verify:
 
 | Test | URL | Expected |
 |------|-----|----------|
-| **Debug (which app)** | https://jetschoolusa.com/api/debug | 200, JSON: `{"app": "app.py", "routes": ["/api/airports", "/api/user-listings"], "airports_route_exists": true}` |
+| **Health (data loaded)** | https://jetschoolusa.com/api/health | 200, JSON: `{"status":"ok","data_loaded":{"airports":N,"aircraft":N,"performance_profiles":N},"app":"app.py"}` |
+| **Debug (which app)** | https://jetschoolusa.com/api/debug | 200, JSON: `{"app": "app.py", ...}` |
 | **Airports** | https://jetschoolusa.com/api/airports?q=dfw | 200, JSON array of airport(s) |
+| **Aircraft data** | https://jetschoolusa.com/api/aircraft-data | 200, JSON array of aircraft |
+| **Performance profiles** | https://jetschoolusa.com/api/performance-profiles | 200, JSON array of profiles |
 | **User listings** | https://jetschoolusa.com/api/user-listings | 200 with session cookie, or 401 without |
 
 **Copy-paste:**
 
 ```text
+https://jetschoolusa.com/api/health
 https://jetschoolusa.com/api/debug
 https://jetschoolusa.com/api/airports?q=dfw
+https://jetschoolusa.com/api/aircraft-data
+https://jetschoolusa.com/api/performance-profiles
 https://jetschoolusa.com/api/user-listings
 ```
 
@@ -89,4 +98,8 @@ https://jetschoolusa.com/api/user-listings
 
 - **Root Directory** = *(leave blank)*
 - **Start command** = `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120`
-- **Ensure `app.py` and `requirements.txt` are committed** — they are no longer in `.gitignore`. Run `git add app.py requirements.txt` and commit/push so Railway can build and run the root app.
+- **Ensure these files are committed** (not ignored):
+  - `app.py`, `requirements.txt`
+  - `Aircraft Data - Aircraft Data (1).csv` (aircraft + profiles; allowed via `.gitignore` exception)
+  - `static/data/airports.json` (already tracked)
+  - First time adding the CSV: `git add -f "Aircraft Data - Aircraft Data (1).csv"`
