@@ -111,7 +111,8 @@ class AirportSearch {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
-            const airports = await response.json();
+            const data = await response.json();
+            const airports = Array.isArray(data) ? data : [];
             console.log(`📍 Found ${airports.length} airports`);
 
             // Clear the active request

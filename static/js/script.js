@@ -204,11 +204,9 @@ function searchHomeAirport(query, resultsList, resultsContainer) {
     console.log('Showing results container, removed d-none class');
 
     fetch(`/api/airports?q=${encodeURIComponent(query)}`)
-        .then(response => {
-            console.log('API response status:', response.status);
-            return response.json();
-        })
-        .then(airports => {
+        .then(response => response.json())
+        .then(data => {
+            const airports = Array.isArray(data) ? data : [];
             console.log('Received airports:', airports.length);
             resultsList.innerHTML = '';
 
@@ -1793,11 +1791,9 @@ function searchAirports(query, resultsList, resultsContainer, type = 'from') {
 
     // Fetch airports from API
     fetch(`/api/airports?q=${encodeURIComponent(query)}`)
-        .then(response => {
-            console.log('API response status for type', type, ':', response.status);
-            return response.json();
-        })
-        .then(airports => {
+        .then(response => response.json())
+        .then(data => {
+            const airports = Array.isArray(data) ? data : [];
             console.log('Received airports for type', type, ':', airports.length);
             resultsList.innerHTML = '';
 

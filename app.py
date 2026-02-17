@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app
 import os
 import json
+from pathlib import Path
 import pandas as pd
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
@@ -59,695 +60,65 @@ app.jinja_env.globals.update(stripe_publishable_key=STRIPE_PUBLISHABLE_KEY)
 # Register blueprints
 app.register_blueprint(marketplace)
 
-# Database initialization
+# Database: PostgreSQL (Railway) or SQLite (local) via db module
+import db as db_module
+
 def init_db():
-    """Initialize the database with user and subscription tables"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    # Users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            first_name TEXT,
-            last_name TEXT,
-            company TEXT,
-            phone TEXT,
-            user_type TEXT DEFAULT 'free_user',
-
-            is_verified_seller BOOLEAN DEFAULT FALSE,
-            verification_status TEXT DEFAULT 'unverified',
-            verification_documents TEXT,
-            seller_score REAL DEFAULT 0.0,
-            total_listings INTEGER DEFAULT 0,
-            successful_transactions INTEGER DEFAULT 0,
-            user_reports INTEGER DEFAULT 0,
-            is_suspended BOOLEAN DEFAULT FALSE,
-            suspension_reason TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # User listings table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_listings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            profile_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            year INTEGER NOT NULL,
-            price REAL NOT NULL,
-            hours INTEGER DEFAULT 0,
-            location TEXT NOT NULL,
-            email TEXT NOT NULL,
-            description TEXT,
-            images TEXT,
-            documents TEXT,
-            status TEXT DEFAULT 'pending',
-            payment_status TEXT DEFAULT 'pending',
-            payment_session_id TEXT,
-            stripe_payment_intent_id TEXT,
-            approved_by INTEGER,
-            approved_at TIMESTAMP,
-            rejection_reason TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (approved_by) REFERENCES users (id)
-        )
-    ''')
-
-    # Ensure new columns exist for enhanced listing metadata
-    def add_column_if_missing(column_definition: str):
-        try:
-            cursor.execute(f"ALTER TABLE user_listings ADD COLUMN {column_definition}")
-        except sqlite3.OperationalError:
-            # Column already exists
-            pass
-
-    add_column_if_missing("engine_type TEXT")
-    add_column_if_missing("manufacturer TEXT")
-    add_column_if_missing("pricing_plan TEXT DEFAULT 'monthly'")
-
-    # Performance profiles cache table (optional - for faster lookups)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS performance_profiles (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            manufacturer TEXT,
-            category TEXT,
-            range_nm INTEGER,
-            speed_kts INTEGER,
-            passengers INTEGER,
-            max_altitude INTEGER,
-            cabin_volume REAL,
-            baggage_volume REAL,
-            runway_length INTEGER,
-            fuel_capacity REAL,
-            empty_weight REAL,
-            max_weight REAL,
-            image_url TEXT,
-            performance_metrics TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Individual subscriptions table (replaces old subscriptions table)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_subscriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            subscription_type TEXT NOT NULL,
-            stripe_customer_id TEXT,
-            stripe_subscription_id TEXT,
-            subscription_status TEXT DEFAULT 'inactive',
-            activated_at TIMESTAMP,
-            expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            UNIQUE(user_id, subscription_type)
-        )
-    ''')
-    
-    # Per-use purchases table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS per_use_purchases (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            service_type TEXT NOT NULL,
-            amount REAL NOT NULL,
-            stripe_payment_intent_id TEXT,
-            status TEXT DEFAULT 'pending',
-            used_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # User preferences table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_preferences (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            saved_searches TEXT,
-            alerts TEXT,
-            preferences TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Enhanced Aircraft listings table with Controller/Trade-A-Plane compatibility
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS aircraft_listings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            seller_id INTEGER,
-            
-            -- Basic Information
-            title TEXT NOT NULL,
-            manufacturer TEXT NOT NULL,
-            model TEXT NOT NULL,
-            year INTEGER,
-            price INTEGER,
-            location TEXT,
-            description TEXT,
-            listing_type TEXT DEFAULT 'sale',
-            
-            -- Aircraft Identification (CSV Matching)
-            serial_number TEXT,
-            registration_number TEXT,
-            csv_aircraft_id INTEGER,  -- References CSV row for scoring
-            
-            -- Technical Specifications (Controller/Trade-A-Plane Standard)
-            airframe_total_time INTEGER,  -- Total airframe hours
-            engine_1_manufacturer TEXT,
-            engine_1_model TEXT,
-            engine_1_time_since_new INTEGER,
-            engine_1_time_since_overhaul INTEGER,
-            engine_2_manufacturer TEXT,
-            engine_2_model TEXT,
-            engine_2_time_since_new INTEGER,
-            engine_2_time_since_overhaul INTEGER,
-            propeller_1_manufacturer TEXT,
-            propeller_1_model TEXT,
-            propeller_1_time INTEGER,
-            propeller_2_manufacturer TEXT,
-            propeller_2_model TEXT,
-            propeller_2_time INTEGER,
-            
-            -- Avionics & Equipment
-            avionics_description TEXT,
-            equipment_list TEXT,
-            interior_description TEXT,
-            exterior_description TEXT,
-            
-            -- Condition & Maintenance
-            interior_condition TEXT,  -- Excellent, Good, Fair, Poor
-            exterior_condition TEXT,  -- Excellent, Good, Fair, Poor
-            maintenance_program TEXT,  -- Type of maintenance program
-            last_annual_date DATE,
-            next_inspection_due DATE,
-            damage_history TEXT,
-            
-            -- Performance Data (from CSV for scoring)
-            max_speed INTEGER,
-            cruise_speed INTEGER,
-            range_nm INTEGER,
-            service_ceiling INTEGER,
-            passenger_capacity INTEGER,
-            
-            -- Additional Details
-            specifications TEXT,
-            images TEXT,
-            contact_info TEXT,
-            
-            -- System Fields
-            status TEXT DEFAULT 'active',
-            quality_score REAL DEFAULT 0.0,
-            completeness_score REAL DEFAULT 0.0,
-            csv_match_score REAL DEFAULT 0.0,  -- Match score from our CSV tool
-            views INTEGER DEFAULT 0,
-            inquiries INTEGER DEFAULT 0,
-            is_featured BOOLEAN DEFAULT FALSE,
-            verification_status TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (seller_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Charter listings table  
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS charter_listings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operator_id INTEGER,
-            aircraft_type TEXT NOT NULL,
-            manufacturer TEXT NOT NULL,
-            model TEXT NOT NULL,
-            home_base TEXT,
-            service_areas TEXT,
-            hourly_rate INTEGER,
-            minimum_hours INTEGER,
-            passenger_capacity INTEGER,
-            amenities TEXT,
-            certifications TEXT,
-            insurance_info TEXT,
-            contact_info TEXT,
-            availability TEXT,
-            images TEXT,
-            status TEXT DEFAULT 'active',
-            quality_score REAL DEFAULT 0.0,
-            operator_rating REAL DEFAULT 0.0,
-            total_flights INTEGER DEFAULT 0,
-            safety_rating REAL DEFAULT 0.0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (operator_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # User reports table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            reporter_id INTEGER,
-            reported_user_id INTEGER,
-            listing_id INTEGER,
-            listing_type TEXT,
-            report_type TEXT,
-            reason TEXT,
-            description TEXT,
-            status TEXT DEFAULT 'pending',
-            admin_notes TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            resolved_at TIMESTAMP,
-            FOREIGN KEY (reporter_id) REFERENCES users (id),
-            FOREIGN KEY (reported_user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Identity verification table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS identity_verifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            verification_type TEXT,
-            document_type TEXT,
-            document_url TEXT,
-            verification_status TEXT DEFAULT 'pending',
-            verified_by INTEGER,
-            verification_notes TEXT,
-            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            verified_at TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (verified_by) REFERENCES users (id)
-        )
-    ''')
-    
-    # Seller behavior tracking table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS seller_behavior (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            action_type TEXT,
-            listing_id INTEGER,
-            details TEXT,
-            score_impact REAL DEFAULT 0.0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Parts listings table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS parts_listings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            seller_id INTEGER,
-            part_name TEXT NOT NULL,
-            part_number TEXT,
-            manufacturer TEXT,
-            aircraft_compatibility TEXT,
-            condition TEXT,
-            price INTEGER,
-            location TEXT,
-            description TEXT,
-            images TEXT,
-            contact_info TEXT,
-            status TEXT DEFAULT 'active',
-            quality_score REAL DEFAULT 0.0,
-            views INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (seller_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Empty leg flights table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS empty_leg_flights (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operator_id INTEGER,
-            aircraft_type TEXT NOT NULL,
-            aircraft_tail_number TEXT,
-            departure_airport TEXT NOT NULL,
-            arrival_airport TEXT NOT NULL,
-            departure_date DATE NOT NULL,
-            departure_time TIME,
-            estimated_duration INTEGER,
-            passenger_capacity INTEGER,
-            price INTEGER,
-            contact_info TEXT,
-            description TEXT,
-            status TEXT DEFAULT 'available',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP,
-            FOREIGN KEY (operator_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Service providers table for directory
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS service_providers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            business_name TEXT NOT NULL,
-            service_type TEXT NOT NULL,
-            service_subcategory TEXT,
-            description TEXT,
-            street_address TEXT,
-            city TEXT NOT NULL,
-            state TEXT NOT NULL,
-            zip_code TEXT,
-            country TEXT DEFAULT 'US',
-            latitude REAL,
-            longitude REAL,
-            phone TEXT,
-            email TEXT,
-            website TEXT,
-            business_hours TEXT,
-            certifications TEXT,
-            insurance_verified BOOLEAN DEFAULT 0,
-            is_verified BOOLEAN DEFAULT 0,
-            verification_date TIMESTAMP,
-            average_rating REAL DEFAULT 0.0,
-            total_reviews INTEGER DEFAULT 0,
-            price_range TEXT,
-            years_in_business INTEGER,
-            employee_count TEXT,
-            service_area_radius INTEGER DEFAULT 50,
-            accepts_insurance BOOLEAN DEFAULT 0,
-            emergency_service BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'active',
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Service provider reviews table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS service_provider_reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            provider_id INTEGER,
-            reviewer_id INTEGER,
-            rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
-            review_title TEXT,
-            review_text TEXT,
-            service_date DATE,
-            verified_purchase BOOLEAN DEFAULT 0,
-            helpful_votes INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'active',
-            FOREIGN KEY (provider_id) REFERENCES service_providers (id),
-            FOREIGN KEY (reviewer_id) REFERENCES users (id)
-        )
-    ''')
-
-    # Service provider contact requests table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS service_provider_contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            provider_id INTEGER,
-            customer_id INTEGER,
-            customer_name TEXT,
-            customer_email TEXT,
-            customer_phone TEXT,
-            service_requested TEXT,
-            message TEXT,
-            urgency TEXT DEFAULT 'normal',
-            preferred_contact_method TEXT DEFAULT 'email',
-            project_timeline TEXT,
-            estimated_budget TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (provider_id) REFERENCES service_providers (id),
-            FOREIGN KEY (customer_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Listing scores table for the new scoring system
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS listing_scores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            listing_id INTEGER,
-            listing_type TEXT DEFAULT 'aircraft',
-            aircraft_type TEXT,
-            
-            -- Priority Score Components
-            priority_score REAL DEFAULT 0.0,
-            engine_hours_score REAL DEFAULT 0.0,
-            interior_quality_score REAL DEFAULT 0.0,
-            avionics_rank_score REAL DEFAULT 0.0,
-            maintenance_recency_score REAL DEFAULT 0.0,
-            paint_condition_score REAL DEFAULT 0.0,
-            
-            -- Data Score Components
-            data_score REAL DEFAULT 0.0,
-            completeness_percentage REAL DEFAULT 0.0,
-            verification_score REAL DEFAULT 0.0,
-            required_fields_completed INTEGER DEFAULT 0,
-            total_required_fields INTEGER DEFAULT 0,
-            
-            -- Match Score (calculated per buyer)
-            avg_match_score REAL DEFAULT 0.0,
-            
-            -- Cross-comparison data
-            percentile_rank REAL DEFAULT 0.0,
-            category_best_score REAL DEFAULT 0.0,
-            category_position INTEGER DEFAULT 0,
-            total_in_category INTEGER DEFAULT 0,
-            
-            -- Metadata
-            last_calculated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            calculation_version TEXT DEFAULT '1.0',
-            
-            FOREIGN KEY (listing_id) REFERENCES aircraft_listings (id),
-            UNIQUE(listing_id, listing_type)
-        )
-    ''')
-    
-    # Buyer preferences table for match scoring
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS buyer_preferences (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            session_id TEXT,
-            
-            -- Aircraft preferences
-            max_total_hours INTEGER,
-            min_engine_hours_remaining INTEGER,
-            preferred_avionics TEXT,
-            min_interior_rating INTEGER,
-            max_maintenance_age_months INTEGER,
-            min_paint_rating INTEGER,
-            
-            -- Priority weights (0.0 to 1.0)
-            engine_hours_weight REAL DEFAULT 0.2,
-            interior_weight REAL DEFAULT 0.2,
-            avionics_weight REAL DEFAULT 0.2,
-            maintenance_weight REAL DEFAULT 0.2,
-            paint_weight REAL DEFAULT 0.2,
-            
-            -- Session info
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Individual match scores per listing per buyer
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS listing_match_scores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            listing_id INTEGER,
-            user_id INTEGER,
-            session_id TEXT,
-            
-            match_score REAL DEFAULT 0.0,
-            hours_match REAL DEFAULT 0.0,
-            engine_match REAL DEFAULT 0.0,
-            avionics_match REAL DEFAULT 0.0,
-            interior_match REAL DEFAULT 0.0,
-            maintenance_match REAL DEFAULT 0.0,
-            paint_match REAL DEFAULT 0.0,
-            
-            calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
-            FOREIGN KEY (listing_id) REFERENCES aircraft_listings (id),
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    """Create users, user_listings, user_subscriptions, per_use_purchases tables (Postgres or SQLite)."""
+    db_module.init_db()
 
 # Initialize database on startup
 init_db()
 
-# User management functions
+# User management: delegate to db module
 def get_user_by_id(user_id):
-    """Get user by ID"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    return dict(user) if user else None
+    return db_module.get_user_by_id(user_id)
 
 def get_user_by_email(email):
-    """Get user by email"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
-    user = cursor.fetchone()
-    conn.close()
-    return dict(user) if user else None
+    return db_module.get_user_by_email(email)
 
 def create_user(email, password, first_name, last_name, company=None, phone=None):
-    """Create a new user"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
     password_hash = generate_password_hash(password)
-    
-    try:
-        cursor.execute('''
-            INSERT INTO users (email, password_hash, first_name, last_name, company, phone)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (email, password_hash, first_name, last_name, company, phone))
-        user_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return user_id
-    except sqlite3.IntegrityError:
-        conn.close()
-        return None
+    return db_module.create_user(email, password_hash, first_name, last_name, company, phone)
 
 def get_user_subscriptions(user_id):
-    """Get all user's subscription details"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM user_subscriptions WHERE user_id = ?', (user_id,))
-    subscriptions = cursor.fetchall()
-    conn.close()
-    return [dict(sub) for sub in subscriptions]
+    return db_module.get_user_subscriptions(user_id)
 
 def get_user_subscription(user_id, subscription_type=None):
-    """Get specific user subscription or first active one"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    if subscription_type:
-        cursor.execute('SELECT * FROM user_subscriptions WHERE user_id = ? AND subscription_type = ?', 
-                      (user_id, subscription_type))
-    else:
-        cursor.execute('SELECT * FROM user_subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', 
-                      (user_id,))
-    
-    subscription = cursor.fetchone()
-    conn.close()
-    return dict(subscription) if subscription else None
+    return db_module.get_user_subscription(user_id, subscription_type)
 
-def update_user_subscription(user_id, subscription_type, stripe_customer_id=None, 
-                           stripe_subscription_id=None, subscription_status=None, 
+def update_user_subscription(user_id, subscription_type, stripe_customer_id=None,
+                           stripe_subscription_id=None, subscription_status=None,
                            activated_at=None, expires_at=None):
-    """Update or create user subscription for specific type"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    # Check if subscription exists for this type
-    existing = get_user_subscription(user_id, subscription_type)
-    
-    if existing:
-        # Update existing subscription
-        cursor.execute('''
-            UPDATE user_subscriptions 
-            SET stripe_customer_id = COALESCE(?, stripe_customer_id),
-                stripe_subscription_id = COALESCE(?, stripe_subscription_id),
-                subscription_status = COALESCE(?, subscription_status),
-                activated_at = COALESCE(?, activated_at),
-                expires_at = COALESCE(?, expires_at),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ? AND subscription_type = ?
-        ''', (stripe_customer_id, stripe_subscription_id, subscription_status, 
-              activated_at, expires_at, user_id, subscription_type))
-    else:
-        # Create new subscription
-        cursor.execute('''
-            INSERT INTO user_subscriptions (user_id, subscription_type, stripe_customer_id, 
-                                          stripe_subscription_id, subscription_status, 
-                                          activated_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, subscription_type, stripe_customer_id, stripe_subscription_id, 
-              subscription_status, activated_at, expires_at))
-    
-    conn.commit()
-    conn.close()
+    db_module.update_user_subscription(user_id, subscription_type,
+        stripe_customer_id=stripe_customer_id, stripe_subscription_id=stripe_subscription_id,
+        subscription_status=subscription_status, activated_at=activated_at, expires_at=expires_at)
 
 def has_active_subscription(user_id, subscription_type):
-    """Check if user has active subscription for specific type"""
     subscription = get_user_subscription(user_id, subscription_type)
     if not subscription:
         return False
-    
     if subscription.get('subscription_status') != 'active':
         return False
-    
-    # Check if subscription has expired
     if subscription.get('expires_at'):
-        expires_at = datetime.fromisoformat(subscription['expires_at'])
-        if expires_at < datetime.now():
+        try:
+            expires_at = datetime.fromisoformat(str(subscription['expires_at']).replace('Z', '+00:00'))
+        except Exception:
             return False
-    
+        if expires_at.tzinfo:
+            from datetime import timezone
+            if expires_at < datetime.now(timezone.utc):
+                return False
+        else:
+            if expires_at < datetime.now():
+                return False
     return True
 
 def record_per_use_purchase(user_id, service_type, amount, stripe_payment_intent_id=None):
-    """Record a per-use purchase"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT INTO per_use_purchases (user_id, service_type, amount, stripe_payment_intent_id, status)
-        VALUES (?, ?, ?, ?, 'completed')
-    ''', (user_id, service_type, amount, stripe_payment_intent_id))
-    
-    purchase_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return purchase_id
+    return db_module.record_per_use_purchase(user_id, service_type, amount, stripe_payment_intent_id)
 
 def use_per_use_purchase(user_id, service_type):
-    """Mark a per-use purchase as used"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    # Find unused purchase of this type
-    cursor.execute('''
-        SELECT id FROM per_use_purchases 
-        WHERE user_id = ? AND service_type = ? AND used_at IS NULL AND status = 'completed'
-        ORDER BY created_at ASC LIMIT 1
-    ''', (user_id, service_type))
-    
-    purchase = cursor.fetchone()
-    if purchase:
-        cursor.execute('''
-            UPDATE per_use_purchases SET used_at = CURRENT_TIMESTAMP WHERE id = ?
-        ''', (purchase[0],))
-        conn.commit()
-        conn.close()
-        return True
-    
-    conn.close()
-    return False
+    return db_module.use_per_use_purchase(user_id, service_type)
 
 # Authentication decorators
 def login_required(f):
@@ -1098,20 +469,20 @@ def get_service_categories():
     ]
 
 def load_aircraft_data():
-    """Load aircraft from CSV. Paths are relative to app root so Railway finds the file."""
-    _root = os.path.dirname(os.path.abspath(__file__))
+    """Load aircraft from CSV. Use pathlib so path works regardless of working directory (Railway)."""
+    _base = Path(__file__).resolve().parent
     _candidates = [
-        os.path.join(_root, 'Aircraft Data - Aircraft Data (1).csv'),
-        os.path.join(_root, 'static', 'data', 'Aircraft Data - Aircraft Data (1).csv'),
-        'Aircraft Data - Aircraft Data (1).csv',
+        _base / 'legacy' / 'static' / 'data' / 'aircraft_data.csv',
+        _base / 'Aircraft Data - Aircraft Data (1).csv',
+        _base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv',
     ]
     csv_path = None
     for p in _candidates:
-        if os.path.isfile(p):
-            csv_path = p
+        if p.is_file():
+            csv_path = str(p)
             break
     if not csv_path:
-        print("WARNING: Aircraft CSV not found; tried: " + ", ".join(_candidates))
+        logger.warning("Aircraft CSV not found; tried: %s", [str(p) for p in _candidates])
         return []
     try:
         df = pd.read_csv(csv_path)
@@ -1762,22 +1133,20 @@ _AIRPORTS_FALLBACK = [
 ]
 
 def _load_airports_data():
-    """Load airports JSON; use Flask root_path then __file__ dir; fallback to small list."""
-    roots = []
-    try:
-        roots.append(current_app.root_path)
-    except Exception:
-        pass
-    roots.append(os.path.dirname(os.path.abspath(__file__)))
-    for _root in roots:
-        for _sub in ('static/data/airports.json', 'airports.json'):
-            _path = os.path.join(_root, _sub)
-            if os.path.isfile(_path):
-                try:
-                    with open(_path, 'r') as f:
-                        return json.load(f)
-                except Exception as e:
-                    logger.warning("Could not load %s: %s", _path, e)
+    """Load airports JSON. Use pathlib so path works regardless of working directory (Railway)."""
+    _base = Path(__file__).resolve().parent
+    _candidates = [
+        _base / 'legacy' / 'static' / 'data' / 'airports.json',
+        _base / 'static' / 'data' / 'airports.json',
+        _base / 'airports.json',
+    ]
+    for _path in _candidates:
+        if _path.is_file():
+            try:
+                with open(_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning("Could not load %s: %s", _path, e)
     logger.warning("Airport data file not found; using fallback list")
     return _AIRPORTS_FALLBACK
 
@@ -1792,14 +1161,19 @@ def api_debug():
 
 @app.route('/api/health')
 def api_health():
-    """Health check: confirm data files loaded (counts for Railway debugging)."""
+    """Health check: db_ok, aircraft_count, profiles_count, airports_count (Railway debugging)."""
     try:
+        db_ok = db_module.check_db_ok()
         airports_data = _load_airports_data()
         airports_count = len(airports_data) if isinstance(airports_data, list) else 0
         aircraft_count = len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0
         profiles_count = aircraft_count  # one profile per aircraft
         return jsonify({
             'status': 'ok',
+            'db_ok': db_ok,
+            'aircraft_count': aircraft_count,
+            'profiles_count': profiles_count,
+            'airports_count': airports_count,
             'data_loaded': {
                 'airports': airports_count,
                 'aircraft': aircraft_count,
@@ -4874,155 +4248,119 @@ def api_performance_profiles():
         print(f"Error loading performance profiles: {e}")
         return jsonify([]), 500
 
+def _row_to_combined_listing(row, aircraft_map):
+    """Build combined listing dict from db row and profile map."""
+    listing_id = row['id']
+    profile_id = row['profile_id']
+    title = row.get('title') or ''
+    year = row.get('year')
+    price = row.get('price')
+    hours = row.get('hours', 0)
+    location = row.get('location') or ''
+    email = row.get('email') or ''
+    description = row.get('description') or ''
+    images = row.get('images') or ''
+    documents = row.get('documents') or ''
+    status = row.get('status') or 'active'
+    payment_status = row.get('payment_status') or 'pending'
+    engine_type = row.get('engine_type')
+    listing_manufacturer = row.get('manufacturer')
+    pricing_plan = row.get('pricing_plan') or 'monthly'
+    created_at = row.get('created_at')
+    updated_at = row.get('updated_at')
+    profile = aircraft_map.get(profile_id)
+    if not profile:
+        return None
+    profile_copy = dict(profile)
+    image_list = [img.strip() for img in (images or '').split(',') if img.strip()]
+    document_list = [doc.strip() for doc in (documents or '').split(',') if doc.strip()]
+    resolved_manufacturer = listing_manufacturer or profile_copy.get('manufacturer') or 'Unknown'
+    resolved_engine_type = engine_type or profile_copy.get('engine_type') or profile_copy.get('category') or 'Unknown'
+    listing_title = title or f"{resolved_manufacturer} {profile_copy.get('aircraft_name', profile_copy.get('name', 'Aircraft'))}".strip()
+    hero_image = image_list[0] if image_list else profile_copy.get('image', '/static/images/aircraft_placeholder.jpg')
+    return {
+        **profile_copy,
+        'id': listing_id,
+        'listing_id': listing_id,
+        'profile_id': profile_id,
+        'title': listing_title,
+        'listing_title': listing_title,
+        'price': price,
+        'listing_price': price,
+        'hours': hours,
+        'location': location,
+        'contact_email': email,
+        'email': email,
+        'description': description,
+        'listing_description': description,
+        'engine_type': resolved_engine_type,
+        'manufacturer': resolved_manufacturer,
+        'pricing_plan': pricing_plan,
+        'status': status,
+        'payment_status': payment_status,
+        'images': image_list,
+        'documents': document_list,
+        'image': hero_image,
+        'year': year or profile_copy.get('year'),
+        'created_at': created_at,
+        'updated_at': updated_at,
+        'is_user_listing': True,
+    }
+
+
 @app.route('/api/user-listings')
 def api_user_listings():
-    """API endpoint to get user-created listings"""
+    """API endpoint to get user-created listings (from Postgres/SQLite via db layer)."""
     try:
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Get all active user listings with performance profile data
-        cursor.execute('''
-            SELECT 
-                ul.id, ul.profile_id, ul.title, ul.year, ul.price, ul.hours,
-                ul.location, ul.email, ul.description, ul.images, ul.documents, ul.status,
-                ul.payment_status, ul.engine_type, ul.manufacturer, ul.pricing_plan,
-                ul.created_at, ul.updated_at
-            FROM user_listings ul
-            WHERE ul.status = 'active'
-            ORDER BY ul.created_at DESC
-        ''')
-        
-        listings = []
+        rows = db_module.get_active_user_listings()
         aircraft_data = get_unified_aircraft_data()
         aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
-        for row in cursor.fetchall():
-            (
-                listing_id,
-                profile_id,
-                title,
-                year,
-                price,
-                hours,
-                location,
-                email,
-                description,
-                images,
-                documents,
-                status,
-                payment_status,
-                engine_type,
-                listing_manufacturer,
-                pricing_plan,
-                created_at,
-                updated_at
-            ) = row
-            
-            # Get performance profile data
-            profile = aircraft_map.get(profile_id)
-            
-            if profile:
-                profile_copy = dict(profile)
-                image_list = [img.strip() for img in (images or '').split(',') if img.strip()]
-                document_list = [doc.strip() for doc in (documents or '').split(',') if doc.strip()]
-
-                resolved_manufacturer = listing_manufacturer or profile_copy.get('manufacturer') or 'Unknown'
-                resolved_engine_type = engine_type or profile_copy.get('engine_type') or profile_copy.get('category') or 'Unknown'
-                listing_title = title or f"{resolved_manufacturer} {profile_copy.get('aircraft_name', profile_copy.get('name', 'Aircraft'))}".strip()
-                hero_image = image_list[0] if image_list else profile_copy.get('image', '/static/images/aircraft_placeholder.jpg')
-
-                combined = {
-                    **profile_copy,
-                    'id': listing_id,
-                    'listing_id': listing_id,
-                    'profile_id': profile_id,
-                    'title': listing_title,
-                    'listing_title': listing_title,
-                    'price': price,
-                    'listing_price': price,
-                    'location': location,
-                    'contact_email': email,
-                    'email': email,
-                    'description': description,
-                    'listing_description': description,
-                    'engine_type': resolved_engine_type,
-                    'manufacturer': resolved_manufacturer,
-                    'pricing_plan': pricing_plan or 'monthly',
-                    'status': status,
-                    'payment_status': payment_status,
-                    'images': image_list,
-                    'documents': document_list,
-                    'image': hero_image,
-                    'year': year or profile_copy.get('year'),
-                    'hours': hours,
-                    'created_at': created_at,
-                    'updated_at': updated_at,
-                    'is_user_listing': True
-                }
-
+        listings = []
+        for row in rows:
+            combined = _row_to_combined_listing(row, aircraft_map)
+            if combined:
                 listings.append(combined)
-        
-        conn.close()
         return jsonify(listings)
-        
     except Exception as e:
-        print(f"Error loading user listings: {e}")
+        logger.exception("Error loading user listings")
         return jsonify([]), 500
 
 @app.route('/api/user-listings', methods=['POST'])
 def api_create_user_listing():
-    """API endpoint to create a new user listing with payment"""
+    """API endpoint to create a new user listing with payment (saved via db layer)."""
     try:
         data = request.get_json()
-        
-        # Validate required fields
         required_fields = ['profile_id', 'price', 'location', 'email', 'description', 'engine_type', 'manufacturer', 'pricing_plan']
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         
-        # Get the performance profile
         aircraft_data = get_unified_aircraft_data()
         profile = None
         for aircraft in aircraft_data:
             if aircraft.get('id') == data['profile_id']:
                 profile = aircraft
                 break
-        
         if not profile:
             return jsonify({'error': 'Performance profile not found'}), 404
         
-        # Save to database with pending status
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Convert images and documents arrays to comma-separated strings
         images_str = ','.join(data.get('images', [])) if data.get('images') else ''
         documents_str = ','.join(data.get('documents', [])) if data.get('documents') else ''
-        
-        # Derive default values from performance profile
         listing_title = data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', profile.get('name', 'Aircraft'))}".strip()
         if not listing_title:
             listing_title = profile.get('aircraft_name', 'Aircraft Listing')
-
-        year_value = profile.get('year')
-        if not year_value:
-            year_value = datetime.now().year
-
+        year_value = profile.get('year') or datetime.now().year
         valid_pricing_plans = {'monthly', 'six_month'}
         pricing_plan = data.get('pricing_plan', 'monthly')
         if pricing_plan not in valid_pricing_plans:
             return jsonify({'error': 'Invalid pricing plan selected'}), 400
 
-        cursor.execute('''
-            INSERT INTO user_listings 
-            (profile_id, title, year, price, hours, location, email, description, images, documents, engine_type, manufacturer, pricing_plan, status, payment_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending')
-        ''', (
+        user_id = session.get('user_id') if session else None
+        listing_id = db_module.create_user_listing(
             data['profile_id'],
             listing_title,
             year_value,
-            data['price'],
+            float(data['price']),
             data.get('hours', 0),
             data['location'],
             data['email'],
@@ -5031,18 +4369,10 @@ def api_create_user_listing():
             documents_str,
             data.get('engine_type', profile.get('category', 'Unknown')),
             data.get('manufacturer', profile.get('manufacturer', 'Unknown')),
-            pricing_plan
-        ))
+            pricing_plan,
+            user_id=user_id,
+        )
         
-        listing_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        # Create Stripe payment session (framework ready for integration)
-        # TODO: Integrate with Stripe
-        # stripe_session = create_stripe_session(listing_id, data['price'])
-        
-        # Create response with combined profile and listing data
         new_listing = {
             'id': listing_id,
             'profile_id': data['profile_id'],
@@ -5061,7 +4391,6 @@ def api_create_user_listing():
             'status': 'pending',
             'payment_status': 'pending',
             'message': 'Listing submitted successfully! Payment required for approval. Admin will review after payment.',
-            # Inherit performance characteristics from profile
             'name': profile.get('aircraft_name', 'Unknown Aircraft'),
             'category': profile.get('category', 'Unknown'),
             'range': profile.get('range', 0),
@@ -5072,63 +4401,41 @@ def api_create_user_listing():
             'baggage_volume': profile.get('baggage_volume', 0),
             'image': profile.get('image', '/static/images/aircraft_placeholder.jpg')
         }
-        
         return jsonify(new_listing), 201
-        
     except Exception as e:
-        print(f"Error creating user listing: {e}")
+        logger.exception("Error creating user listing")
         return jsonify({'error': 'Failed to create listing'}), 500
 
 @app.route('/api/user-listings/<int:listing_id>', methods=['GET'])
 def api_get_user_listing(listing_id):
-    """API endpoint to get a specific user listing"""
+    """API endpoint to get a specific user listing (from db layer)."""
     try:
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT 
-                ul.id, ul.profile_id, ul.title, ul.year, ul.price, ul.hours,
-                ul.location, ul.email, ul.description, ul.images, ul.status,
-                ul.created_at, ul.updated_at
-            FROM user_listings ul
-            WHERE ul.id = ? AND ul.status = 'active'
-        ''', (listing_id,))
-        
-        row = cursor.fetchone()
+        row = db_module.get_user_listing_by_id(listing_id, active_only=True)
         if not row:
-            conn.close()
             return jsonify({'error': 'Listing not found'}), 404
-        
-        listing_id, profile_id, title, year, price, hours, location, email, description, images, status, created_at, updated_at = row
-        
-        # Get performance profile data
         aircraft_data = get_unified_aircraft_data()
         profile = None
         for aircraft in aircraft_data:
-            if aircraft.get('id') == profile_id:
+            if aircraft.get('id') == row['profile_id']:
                 profile = aircraft
                 break
-        
         if not profile:
-            conn.close()
             return jsonify({'error': 'Performance profile not found'}), 404
-        
+        images = row.get('images') or ''
         listing = {
-            'id': listing_id,
-            'profile_id': profile_id,
-            'title': title,
-            'year': year,
-            'price': price,
-            'hours': hours,
-            'location': location,
-            'email': email,
-            'description': description,
-            'images': images.split(',') if images else [],
-            'status': status,
-            'created_at': created_at,
-            'updated_at': updated_at,
-            # Inherit performance characteristics from profile
+            'id': row['id'],
+            'profile_id': row['profile_id'],
+            'title': row.get('title'),
+            'year': row.get('year'),
+            'price': row.get('price'),
+            'hours': row.get('hours', 0),
+            'location': row.get('location'),
+            'email': row.get('email'),
+            'description': row.get('description'),
+            'images': [x.strip() for x in images.split(',') if x.strip()] if images else [],
+            'status': row.get('status'),
+            'created_at': row.get('created_at'),
+            'updated_at': row.get('updated_at'),
             'name': profile.get('aircraft_name', 'Unknown Aircraft'),
             'manufacturer': profile.get('manufacturer', 'Unknown'),
             'category': profile.get('category', 'Unknown'),
@@ -5140,46 +4447,27 @@ def api_get_user_listing(listing_id):
             'baggage_volume': profile.get('baggage_volume', 0),
             'image': profile.get('image', '/static/images/aircraft_placeholder.jpg')
         }
-        
-        conn.close()
         return jsonify(listing)
-        
     except Exception as e:
-        print(f"Error getting user listing: {e}")
+        logger.exception("Error getting user listing")
         return jsonify({'error': 'Failed to get listing'}), 500
 
 @app.route('/api/user-listings/<int:listing_id>', methods=['DELETE'])
 def api_delete_user_listing(listing_id):
-    """API endpoint to delete a user listing (soft delete)"""
+    """API endpoint to delete a user listing (soft delete via db layer)."""
     try:
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Soft delete by setting status to 'deleted'
-        cursor.execute('''
-            UPDATE user_listings 
-            SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (listing_id,))
-        
-        if cursor.rowcount == 0:
-            conn.close()
+        ok = db_module.delete_user_listing_soft(listing_id)
+        if not ok:
             return jsonify({'error': 'Listing not found'}), 404
-        
-        conn.commit()
-        conn.close()
-        
         return jsonify({'message': 'Listing deleted successfully'}), 200
-        
     except Exception as e:
-        print(f"Error deleting user listing: {e}")
+        logger.exception("Error deleting user listing")
         return jsonify({'error': 'Failed to delete listing'}), 500
 
 @app.route('/api/listings/search')
 def api_search_listings():
-    """API endpoint to search and filter user listings"""
+    """API endpoint to search and filter user listings (db layer)."""
     try:
-        # Get query parameters
         search_query = request.args.get('q', '').lower()
         category = request.args.get('category', '')
         min_price = request.args.get('min_price', type=float)
@@ -5188,265 +4476,134 @@ def api_search_listings():
         max_year = request.args.get('max_year', type=int)
         location = request.args.get('location', '').lower()
         
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Build dynamic query
-        query = '''
-            SELECT 
-                ul.id, ul.profile_id, ul.title, ul.year, ul.price, ul.hours,
-                ul.location, ul.email, ul.description, ul.images, ul.status,
-                ul.created_at, ul.updated_at
-            FROM user_listings ul
-            WHERE ul.status = 'active'
-        '''
-        params = []
-        
-        if min_price:
-            query += ' AND ul.price >= ?'
-            params.append(min_price)
-        
-        if max_price:
-            query += ' AND ul.price <= ?'
-            params.append(max_price)
-        
-        if min_year:
-            query += ' AND ul.year >= ?'
-            params.append(min_year)
-        
-        if max_year:
-            query += ' AND ul.year <= ?'
-            params.append(max_year)
-        
-        if location:
-            query += ' AND LOWER(ul.location) LIKE ?'
-            params.append(f'%{location}%')
-        
-        if search_query:
-            query += ' AND (LOWER(ul.title) LIKE ? OR LOWER(ul.description) LIKE ?)'
-            params.extend([f'%{search_query}%', f'%{search_query}%'])
-        
-        query += ' ORDER BY ul.created_at DESC'
-        
-        cursor.execute(query, params)
-        
-        listings = []
+        rows = db_module.search_user_listings(
+            min_price=min_price, max_price=max_price,
+            min_year=min_year, max_year=max_year,
+        )
         aircraft_data = get_unified_aircraft_data()
-        
-        for row in cursor.fetchall():
-            listing_id, profile_id, title, year, price, hours, location, email, description, images, status, created_at, updated_at = row
-            
-            # Get performance profile data
-            profile = None
-            for aircraft in aircraft_data:
-                if aircraft.get('id') == profile_id:
-                    profile = aircraft
-                    break
-            
-            if profile:
-                # Apply category filter if specified
-                if category and profile.get('category', '').lower() != category.lower():
+        aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
+        listings = []
+        for row in rows:
+            if location and (row.get('location') or '').lower().find(location) < 0:
+                continue
+            if search_query:
+                tit = (row.get('title') or '').lower()
+                desc = (row.get('description') or '').lower()
+                if search_query not in tit and search_query not in desc:
                     continue
-                
-                listing = {
-                    'id': listing_id,
-                    'profile_id': profile_id,
-                    'title': title,
-                    'year': year,
-                    'price': price,
-                    'hours': hours,
-                    'location': location,
-                    'email': email,
-                    'description': description,
-                    'images': images.split(',') if images else [],
-                    'status': status,
-                    'created_at': created_at,
-                    'updated_at': updated_at,
-                    # Inherit performance characteristics from profile
-                    'name': profile.get('aircraft_name', 'Unknown Aircraft'),
-                    'manufacturer': profile.get('manufacturer', 'Unknown'),
-                    'category': profile.get('category', 'Unknown'),
-                    'range': profile.get('range', 0),
-                    'speed': profile.get('speed', 0),
-                    'passengers': profile.get('passengers', 0),
-                    'max_altitude': profile.get('max_altitude', 0),
-                    'cabin_volume': profile.get('cabin_volume', 0),
-                    'baggage_volume': profile.get('baggage_volume', 0),
-                    'image': profile.get('image', '/static/images/aircraft_placeholder.jpg')
-                }
-                listings.append(listing)
-        
-        conn.close()
+            combined = _row_to_combined_listing(row, aircraft_map)
+            if not combined:
+                continue
+            if category and (combined.get('category') or '').lower() != category.lower():
+                continue
+            listings.append({
+                'id': combined['id'],
+                'profile_id': combined['profile_id'],
+                'title': combined.get('title'),
+                'year': combined.get('year'),
+                'price': combined.get('price'),
+                'hours': combined.get('hours', 0),
+                'location': combined.get('location'),
+                'email': combined.get('email'),
+                'description': combined.get('description'),
+                'images': combined.get('images', []),
+                'status': combined.get('status'),
+                'created_at': combined.get('created_at'),
+                'updated_at': combined.get('updated_at'),
+                'name': combined.get('name', 'Unknown Aircraft'),
+                'manufacturer': combined.get('manufacturer', 'Unknown'),
+                'category': combined.get('category', 'Unknown'),
+                'range': combined.get('range', 0),
+                'speed': combined.get('speed', 0),
+                'passengers': combined.get('passengers', 0),
+                'max_altitude': combined.get('max_altitude', 0),
+                'cabin_volume': combined.get('cabin_volume', 0),
+                'baggage_volume': combined.get('baggage_volume', 0),
+                'image': combined.get('image', '/static/images/aircraft_placeholder.jpg')
+            })
         return jsonify({'listings': listings, 'total': len(listings)})
-        
     except Exception as e:
-        print(f"Error searching user listings: {e}")
+        logger.exception("Error searching user listings")
         return jsonify({'error': 'Failed to search listings'}), 500
 
 # Admin approval routes
 @app.route('/admin/listings')
 def admin_listings():
-    """Admin page to approve/reject pending listings"""
+    """Admin page to approve/reject pending listings (from db layer)."""
     if not session.get('user_id'):
         flash('Please login to access admin panel', 'warning')
         return redirect(url_for('home'))
-    
-    # Check if user is admin (you can add admin check here)
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    # Get all pending listings
-    cursor.execute('''
-        SELECT 
-            ul.id, ul.profile_id, ul.title, ul.year, ul.price, ul.hours,
-            ul.location, ul.email, ul.description, ul.images, ul.documents,
-            ul.status, ul.payment_status, ul.engine_type, ul.manufacturer,
-            ul.pricing_plan, ul.created_at
-        FROM user_listings ul
-        WHERE ul.status = 'pending'
-        ORDER BY ul.created_at DESC
-    ''')
-    
-    pending_listings = []
+    rows = db_module.get_pending_user_listings()
     aircraft_data = get_unified_aircraft_data()
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
-    
-    for row in cursor.fetchall():
-        (
-            listing_id,
-            profile_id,
-            title,
-            year,
-            price,
-            hours,
-            location,
-            email,
-            description,
-            images,
-            documents,
-            status,
-            payment_status,
-            engine_type,
-            listing_manufacturer,
-            pricing_plan,
-            created_at
-        ) = row
-        
-        # Get performance profile data
-        profile = aircraft_map.get(profile_id)
-        
-        if profile:
-            listing = {
-                'id': listing_id,
-                'profile_id': profile_id,
-                'title': title,
-                'year': year,
-                'price': price,
-                'hours': hours,
-                'location': location,
-                'email': email,
-                'description': description,
-                'images': images.split(',') if images else [],
-                'documents': documents.split(',') if documents else [],
-                'status': status,
-                'payment_status': payment_status,
-                'pricing_plan': pricing_plan or 'monthly',
-                'engine_type': engine_type or profile.get('engine_type') or profile.get('category', 'Unknown'),
-                'created_at': created_at,
-                'manufacturer': listing_manufacturer or profile.get('manufacturer', 'Unknown'),
-                'model': profile.get('aircraft_name', 'Unknown'),
-                'category': profile.get('category', 'Unknown')
-            }
-            pending_listings.append(listing)
-    
-    conn.close()
-    
+    pending_listings = []
+    for row in rows:
+        profile = aircraft_map.get(row['profile_id'])
+        if not profile:
+            continue
+        images = row.get('images') or ''
+        documents = row.get('documents') or ''
+        pending_listings.append({
+            'id': row['id'],
+            'profile_id': row['profile_id'],
+            'title': row.get('title'),
+            'year': row.get('year'),
+            'price': row.get('price'),
+            'hours': row.get('hours', 0),
+            'location': row.get('location'),
+            'email': row.get('email'),
+            'description': row.get('description'),
+            'images': [x.strip() for x in images.split(',') if x.strip()] if images else [],
+            'documents': [x.strip() for x in documents.split(',') if x.strip()] if documents else [],
+            'status': row.get('status'),
+            'payment_status': row.get('payment_status'),
+            'pricing_plan': row.get('pricing_plan') or 'monthly',
+            'engine_type': row.get('engine_type') or profile.get('engine_type') or profile.get('category', 'Unknown'),
+            'created_at': row.get('created_at'),
+            'manufacturer': row.get('manufacturer') or profile.get('manufacturer', 'Unknown'),
+            'model': profile.get('aircraft_name', 'Unknown'),
+            'category': profile.get('category', 'Unknown')
+        })
     return render_template('admin/listings.html', pending_listings=pending_listings)
 
 @app.route('/api/admin/listings/<int:listing_id>/approve', methods=['POST'])
 def admin_approve_listing(listing_id):
-    """API endpoint to approve a pending listing"""
+    """API endpoint to approve a pending listing (db layer)."""
     if not session.get('user_id'):
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Check if listing exists and is pending
-        cursor.execute('SELECT status, payment_status FROM user_listings WHERE id = ?', (listing_id,))
-        result = cursor.fetchone()
-        
-        if not result:
-            conn.close()
+        status, _ = db_module.get_user_listing_status(listing_id)
+        if status is None:
             return jsonify({'error': 'Listing not found'}), 404
-        
-        status, payment_status = result
-        
         if status != 'pending':
-            conn.close()
             return jsonify({'error': f'Listing is already {status}'}), 400
-        
-        # Approve listing
-        cursor.execute('''
-            UPDATE user_listings 
-            SET status = 'active', 
-                approved_by = ?,
-                approved_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (session.get('user_id'), listing_id))
-        
-        conn.commit()
-        conn.close()
-        
+        ok = db_module.approve_user_listing(listing_id, session.get('user_id'))
+        if not ok:
+            return jsonify({'error': 'Listing not found or not pending'}), 404
         return jsonify({'message': 'Listing approved successfully', 'status': 'active'}), 200
-        
     except Exception as e:
-        print(f"Error approving listing: {e}")
+        logger.exception("Error approving listing")
         return jsonify({'error': 'Failed to approve listing'}), 500
 
 @app.route('/api/admin/listings/<int:listing_id>/reject', methods=['POST'])
 def admin_reject_listing(listing_id):
-    """API endpoint to reject a pending listing"""
+    """API endpoint to reject a pending listing (db layer)."""
     if not session.get('user_id'):
         return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         rejection_reason = data.get('reason', 'No reason provided')
-        
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Check if listing exists and is pending
-        cursor.execute('SELECT status FROM user_listings WHERE id = ?', (listing_id,))
-        result = cursor.fetchone()
-        
-        if not result:
-            conn.close()
+        status, _ = db_module.get_user_listing_status(listing_id)
+        if status is None:
             return jsonify({'error': 'Listing not found'}), 404
-        
-        if result[0] != 'pending':
-            conn.close()
-            return jsonify({'error': f'Listing is already {result[0]}'}), 400
-        
-        # Reject listing
-        cursor.execute('''
-            UPDATE user_listings 
-            SET status = 'rejected',
-                rejection_reason = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ''', (rejection_reason, listing_id))
-        
-        conn.commit()
-        conn.close()
-        
+        if status != 'pending':
+            return jsonify({'error': f'Listing is already {status}'}), 400
+        ok = db_module.reject_user_listing(listing_id, rejection_reason)
+        if not ok:
+            return jsonify({'error': 'Listing not found or not pending'}), 404
         return jsonify({'message': 'Listing rejected successfully', 'status': 'rejected'}), 200
-        
     except Exception as e:
-        print(f"Error rejecting listing: {e}")
+        logger.exception("Error rejecting listing")
         return jsonify({'error': 'Failed to reject listing'}), 500
 
 @app.route('/admin/populate-profiles')

@@ -56,14 +56,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
             try {
                 const response = await fetch(`/api/airports?q=${encodeURIComponent(query)}`);
-                const airports = await response.json();
+                const data = await response.json();
+                const airports = Array.isArray(data) ? data : [];
 
                 console.log(`📍 Found ${airports.length} airports for ${type}`);
 
                 // Clear dropdown
                 dropdown.innerHTML = '';
 
-                if (airports.length === 0) {
+                if (!airports || airports.length === 0) {
                     dropdown.innerHTML = '<div style="padding: 10px; color: #ccc;">No airports found</div>';
                 } else {
                     // Show up to 10 results

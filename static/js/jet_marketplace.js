@@ -97,11 +97,12 @@ class TripPlanning {
     async searchAirports(query, listElement, resultsElement, onSelect) {
         try {
             const response = await fetch(`/api/airports?q=${encodeURIComponent(query)}`);
-            const airports = await response.json();
+            const data = await response.json();
+            const airports = Array.isArray(data) ? data : [];
 
             listElement.innerHTML = '';
 
-            if (airports.length === 0) {
+            if (!airports || airports.length === 0) {
                 listElement.innerHTML = '<div class="list-group-item bg-dark text-white border-secondary">No airports found</div>';
             } else {
                 airports.slice(0, 10).forEach(airport => {

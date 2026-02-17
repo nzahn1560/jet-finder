@@ -601,13 +601,9 @@ function setupAirportSearch(inputId, resultListId, resultsContainerId, searchBtn
         // Fetch airports from API
         console.log(`Searching airports with query: ${query}`);
         fetch(`/api/airports?q=${encodeURIComponent(query)}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(airports => {
+            .then(response => response.json())
+            .then(data => {
+                const airports = Array.isArray(data) ? data : [];
                 console.log(`Found ${airports.length} airports matching "${query}"`);
                 resultsList.innerHTML = '';
 
