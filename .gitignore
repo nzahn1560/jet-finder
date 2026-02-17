@@ -29,18 +29,16 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# Legacy Python backend (old app.py in root - not used)
+# Legacy Python backend (unused)
 backend/
-app.py  # Root app.py is old, use legacy/app_production.py
-requirements.txt  # Root requirements.txt is old
+# Root app.py and requirements.txt ARE used for Railway (full site at jetschoolusa.com) - do not ignore
 runtime.txt
 railway.toml
 setup.py
 *.sh
 
-# Legacy production app (KEEP THIS - it's the production app!)
-# legacy/ folder contains the Railway production Flask app
-# DO NOT ignore legacy/ - it's the main app now
+# legacy/ = alternative production app (auth/listings only). For full site use root app.py.
+# DO NOT ignore legacy/
 
 # Database files (use D1 in production)
 *.db
