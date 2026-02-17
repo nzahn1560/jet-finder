@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session
+from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app
 import os
 import json
 import pandas as pd
@@ -1737,6 +1737,44 @@ def api_aircraft_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Fallback airport list when JSON file is missing (e.g. on some hosts)
+_AIRPORTS_FALLBACK = [
+    {'iata': 'LAX', 'icao': 'KLAX', 'name': 'Los Angeles International', 'city': 'Los Angeles', 'country': 'United States', 'lat': 33.9425, 'lon': -118.4081},
+    {'iata': 'JFK', 'icao': 'KJFK', 'name': 'John F Kennedy International', 'city': 'New York', 'country': 'United States', 'lat': 40.6398, 'lon': -73.7789},
+    {'iata': 'ORD', 'icao': 'KORD', 'name': 'Chicago O\'Hare International', 'city': 'Chicago', 'country': 'United States', 'lat': 41.9786, 'lon': -87.9047},
+    {'iata': 'DFW', 'icao': 'KDFW', 'name': 'Dallas Fort Worth International', 'city': 'Dallas', 'country': 'United States', 'lat': 32.8968, 'lon': -97.0380},
+    {'iata': 'ATL', 'icao': 'KATL', 'name': 'Hartsfield-Jackson Atlanta International', 'city': 'Atlanta', 'country': 'United States', 'lat': 33.6367, 'lon': -84.4281},
+]
+
+def _load_airports_data():
+    """Load airports JSON; use Flask root_path then __file__ dir; fallback to small list."""
+    roots = []
+    try:
+        roots.append(current_app.root_path)
+    except Exception:
+        pass
+    roots.append(os.path.dirname(os.path.abspath(__file__)))
+    for _root in roots:
+        for _sub in ('static/data/airports.json', 'airports.json'):
+            _path = os.path.join(_root, _sub)
+            if os.path.isfile(_path):
+                try:
+                    with open(_path, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    logger.warning("Could not load %s: %s", _path, e)
+    logger.warning("Airport data file not found; using fallback list")
+    return _AIRPORTS_FALLBACK
+
+@app.route('/api/debug')
+def api_debug():
+    """Debug route to verify app.py is running"""
+    return jsonify({
+        'app': 'app.py',
+        'routes': ['/api/airports', '/api/user-listings'],
+        'airports_route_exists': True
+    }), 200
+
 @app.route('/api/airports')
 def api_airports():
     """Airport search API endpoint"""
@@ -1746,20 +1784,7 @@ def api_airports():
         if not query or len(query) < 2:
             return jsonify([])
         
-        # Load airports data (paths relative to app root so Railway/CWD-independent)
-        _root = os.path.dirname(os.path.abspath(__file__))
-        _paths = [
-            os.path.join(_root, 'static', 'data', 'airports.json'),
-            os.path.join(_root, 'airports.json'),
-        ]
-        airports = None
-        for _path in _paths:
-            if os.path.isfile(_path):
-                with open(_path, 'r') as f:
-                    airports = json.load(f)
-                break
-        if airports is None:
-            return jsonify({'error': 'Airport data not found'}), 500
+        airports = _load_airports_data()
         
         # Search airports by IATA code, ICAO code, name, or city
         matching_airports = []
