@@ -16,17 +16,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import the enhanced data manager
+# Optional integrations (see integrations/ folder)
 try:
-    from enhanced_data_manager import enhanced_data_manager
+    from integrations import enhanced_data_manager, avinode_client
 except ImportError:
-    # Fallback if enhanced data manager isn't available
     enhanced_data_manager = None
-
-# Import Avinode integration
-try:
-    from avinode_integration import avinode_client
-except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
@@ -472,7 +466,7 @@ def load_aircraft_data():
     """Load aircraft from CSV. Use pathlib so path works regardless of working directory (Railway)."""
     _base = Path(__file__).resolve().parent
     _candidates = [
-        _base / 'legacy' / 'static' / 'data' / 'aircraft_data.csv',
+        _base / 'static' / 'data' / 'aircraft_data.csv',
         _base / 'Aircraft Data - Aircraft Data (1).csv',
         _base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv',
     ]
@@ -1136,7 +1130,6 @@ def _load_airports_data():
     """Load airports JSON. Use pathlib so path works regardless of working directory (Railway)."""
     _base = Path(__file__).resolve().parent
     _candidates = [
-        _base / 'legacy' / 'static' / 'data' / 'airports.json',
         _base / 'static' / 'data' / 'airports.json',
         _base / 'airports.json',
     ]
@@ -1184,6 +1177,38 @@ def api_health():
     except Exception as e:
         logger.exception("Error in /api/health")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/diagnostic')
+def api_diagnostic():
+    """Railway debugging: what is configured and which data files were found (no secrets)."""
+    _base = Path(__file__).resolve().parent
+    aircraft_candidates = [
+        _base / 'static' / 'data' / 'aircraft_data.csv',
+        _base / 'Aircraft Data - Aircraft Data (1).csv',
+        _base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv',
+    ]
+    airports_candidates = [
+        _base / 'static' / 'data' / 'airports.json',
+        _base / 'airports.json',
+    ]
+    aircraft_found = next((str(p) for p in aircraft_candidates if p.is_file()), None)
+    airports_found = next((str(p) for p in airports_candidates if p.is_file()), None)
+    db_url = os.environ.get('DATABASE_URL', '')
+    ap_data = _load_airports_data()
+    airports_count = len(ap_data) if isinstance(ap_data, list) else 0
+    return jsonify({
+        'app_root': str(_base),
+        'has_database_url': bool(db_url),
+        'database_type': 'postgresql' if db_url.startswith('postgres') else ('sqlite' if db_url.startswith('sqlite') else 'none'),
+        'aircraft_paths_tried': [str(p) for p in aircraft_candidates],
+        'aircraft_file_found': aircraft_found,
+        'airports_paths_tried': [str(p) for p in airports_candidates],
+        'airports_file_found': airports_found,
+        'aircraft_count': len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0,
+        'airports_count': airports_count,
+        'db_ok': db_module.check_db_ok(),
+    }), 200
 
 @app.route('/api/airports')
 def api_airports():

@@ -1,9 +1,0 @@
-# Legacy code - archived for reference only
-# Do not deploy or run this code
-__pycache__/
-*.pyc
-*.db
-*.sqlite
-*.sqlite3
-instance/
-venv/
