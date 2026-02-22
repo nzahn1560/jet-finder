@@ -1,0 +1,3 @@
+# Force Python-only build. Do not run npm build (no Vite/React).
+# The app is Flask (app.py); package.json at root is legacy and not used in production.
+providers = ["python"]

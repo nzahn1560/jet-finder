@@ -53,8 +53,8 @@ Without this, the app uses SQLite and you’ll get empty or reset data.
 
 - In the **web service** → **Settings** (or **Deploy**):
   - **Root Directory**: leave **empty** (so the repo root, where `app.py` and `Procfile` live, is the app root).
-  - **Build Command**: leave default (or empty) unless you use something specific.
-  - **Start Command**: use the Procfile. Railway usually picks it up automatically:  
+  - **Build Command**: leave empty. The repo has **nixpacks.toml** so Railway does a Python-only build (no `npm run build`).
+  - **Start Command**: leave empty so Railway uses the **Procfile**:  
     `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120`
 
 ### 3. Deploy
