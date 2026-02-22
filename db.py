@@ -5,6 +5,7 @@ otherwise SQLite for localhost. Replaces direct sqlite3 for users/listings.
 import os
 from contextlib import contextmanager
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text
+from sqlalchemy.types import JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -104,6 +105,38 @@ class UserSubscription(Base):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
+class Airport(Base):
+    __tablename__ = 'airports'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    iata = Column(String(10))
+    icao = Column(String(10))
+    name = Column(String(255))
+    city = Column(String(100))
+    country = Column(String(10))
+    lat = Column(Float)
+    lon = Column(Float)
+    size = Column(String(10))
+
+    def to_dict(self):
+        return {
+            'iata': self.iata, 'icao': self.icao, 'name': self.name,
+            'city': self.city, 'country': self.country,
+            'lat': self.lat, 'lon': self.lon, 'size': self.size,
+        }
+
+
+class AircraftProfile(Base):
+    """Stores full aircraft dict as JSON for /api/aircraft-data and performance profiles."""
+    __tablename__ = 'aircraft_profiles'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    data = Column(JSON, nullable=False)  # full aircraft dict (Postgres JSONB, SQLite TEXT)
+
+    def to_dict(self):
+        d = dict(self.data) if isinstance(self.data, dict) else {}
+        d['id'] = self.id  # ensure id matches primary key
+        return d
+
+
 class PerUsePurchase(Base):
     __tablename__ = 'per_use_purchases'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -119,9 +152,74 @@ class PerUsePurchase(Base):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
+def _find_data_paths():
+    """Return (aircraft_csv_path, airports_json_path) or (None, None)."""
+    from pathlib import Path
+    base = Path(__file__).resolve().parent
+    candidates = [
+        (base / 'static' / 'data' / 'aircraft_data.csv', base / 'static' / 'data' / 'airports.json'),
+        (base / 'Aircraft Data - Aircraft Data (1).csv', base / 'airports.json'),
+        (base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv', base / 'static' / 'data' / 'airports.json'),
+    ]
+    for csv_p, json_p in candidates:
+        if csv_p.is_file() and json_p.is_file():
+            return (str(csv_p), str(json_p))
+    return (None, None)
+
+
+def seed_aircraft_and_airports():
+    """Populate aircraft_profiles and airports from CSV/JSON if tables are empty."""
+    try:
+        from data_loader import load_aircraft_from_csv, load_airports_from_json
+    except ImportError:
+        return
+    csv_path, json_path = _find_data_paths()
+    if not csv_path or not json_path:
+        return
+    try:
+        with get_session() as s:
+            # Seed aircraft
+            if s.query(AircraftProfile).count() == 0:
+                aircraft_list = load_aircraft_from_csv(csv_path)
+                for ac in aircraft_list:
+                    ac_id = ac.get('id', 0)
+                    s.add(AircraftProfile(id=ac_id, data=ac))
+            # Seed airports
+            if s.query(Airport).count() == 0:
+                airports_list = load_airports_from_json(json_path)
+                for ap in airports_list:
+                    s.add(Airport(
+                        iata=ap.get('iata'),
+                        icao=ap.get('icao'),
+                        name=ap.get('name'),
+                        city=ap.get('city'),
+                        country=ap.get('country'),
+                        lat=float(ap.get('lat', 0) or 0),
+                        lon=float(ap.get('lon', 0) or 0),
+                        size=ap.get('size'),
+                    ))
+    except Exception:
+        pass
+
+
+def get_all_aircraft_profiles():
+    """Return list of aircraft dicts from DB (for /api/aircraft-data, performance profiles)."""
+    with get_session() as s:
+        rows = s.query(AircraftProfile).order_by(AircraftProfile.id).all()
+        return [r.to_dict() for r in rows]
+
+
+def get_all_airports():
+    """Return list of airport dicts from DB (for /api/airports)."""
+    with get_session() as s:
+        rows = s.query(Airport).all()
+        return [r.to_dict() for r in rows]
+
+
 def init_db():
     """Create tables if they do not exist. Safe to call on every startup."""
     Base.metadata.create_all(bind=engine)
+    seed_aircraft_and_airports()
     # SQLite: add columns that may be missing in existing DBs (e.g. created by older app)
     if DATABASE_URL.startswith('sqlite'):
         with engine.connect() as conn:

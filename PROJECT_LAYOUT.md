@@ -20,8 +20,16 @@ Then open **http://localhost:5015**. For production (Railway), see **[DEPLOY.md]
 | Path | Purpose |
 |------|--------|
 | **app.py** | Main Flask app: routes, auth, APIs, pages. Entry point. |
-| **db.py** | Database layer: Postgres (Railway) or SQLite (local). Users, listings, subscriptions. |
+| **db.py** | Database layer: Postgres (Railway) or SQLite (local). Users, listings, subscriptions, **aircraft_profiles**, **airports**. Seeds aircraft/airports from CSV/JSON on first run. |
 | **marketplace.py** | Marketplace blueprint: charter search, empty legs, parts, listings. |
+
+---
+
+## Data loader (for seeding)
+
+| Path | Purpose |
+|------|--------|
+| **data_loader.py** | Loads aircraft from CSV and airports from JSON. Used by `db.seed_aircraft_and_airports()` to populate `aircraft_profiles` and `airports` tables on first run. |
 
 ---
 
@@ -37,12 +45,12 @@ If the package or a module is missing, the app still runs (with fallbacks).
 
 ---
 
-## Data files (read at runtime)
+## Data files (used to seed DB on first run)
 
 | Path | Purpose |
 |------|--------|
-| **static/data/aircraft_data.csv** | Aircraft list (primary). Used for profiles and listings. |
-| **static/data/airports.json** | Airports (primary). Used for search/autocomplete. |
+| **static/data/aircraft_data.csv** | Aircraft list. Seeded into `aircraft_profiles` table on first run. |
+| **static/data/airports.json** | Airports. Seeded into `airports` table on first run. |
 | **Aircraft Data - Aircraft Data (1).csv** | Fallback aircraft CSV if `static/data/aircraft_data.csv` is missing. |
 | **airports.json** (root) | Fallback airports if `static/data/airports.json` is missing. |
 | **data/** | Optional JSON (e.g. listings.json, users.json) if used by other tools. |

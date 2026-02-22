@@ -32,7 +32,7 @@ For a full map of the repo, see **PROJECT_LAYOUT.md**.
 | **App** | Flask app in **`app.py`** (project root) |
 | **Server** | Gunicorn, started by the **Procfile**: `gunicorn app:app --bind 0.0.0.0:$PORT ...` |
 | **Database** | PostgreSQL (Railway Postgres). If `DATABASE_URL` is not set, the app falls back to SQLite, which is **ephemeral** on Railway (data is lost on restart). |
-| **Data files** | Aircraft list: **`static/data/aircraft_data.csv`**. Airports: **`static/data/airports.json`**. Loaded from the repo at runtime. |
+| **Data files** | Aircraft: **`static/data/aircraft_data.csv`**. Airports: **`static/data/airports.json`**. Used to **seed** the DB on first run. Data is then read from **PostgreSQL/SQLite** (same as users/listings). |
 
 So: one app (`app.py`), one start command (Procfile), one database (Postgres), data from the repo.
 

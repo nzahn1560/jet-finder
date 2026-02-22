@@ -463,187 +463,34 @@ def get_service_categories():
     ]
 
 def load_aircraft_data():
-    """Load aircraft from CSV. Use pathlib so path works regardless of working directory (Railway)."""
-    _base = Path(__file__).resolve().parent
-    _candidates = [
-        _base / 'static' / 'data' / 'aircraft_data.csv',
-        _base / 'Aircraft Data - Aircraft Data (1).csv',
-        _base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv',
-    ]
-    csv_path = None
-    for p in _candidates:
-        if p.is_file():
-            csv_path = str(p)
-            break
-    if not csv_path:
-        logger.warning("Aircraft CSV not found; tried: %s", [str(p) for p in _candidates])
-        return []
+    """Load aircraft from PostgreSQL/SQLite (seeded from CSV on first run). Falls back to file if DB empty."""
     try:
-        df = pd.read_csv(csv_path)
-        aircraft_data = []
-        
-        def safe_int_convert(value, default=0):
-            """Safely convert a value to int, handling commas and NaN"""
-            if pd.isna(value):
-                return default
-            if isinstance(value, (int, float)):
-                return int(value)
-            if isinstance(value, str):
-                # Remove commas, dollar signs, percentages, and other characters
-                cleaned = value.replace(',', '').replace('$', '').replace('%', '').strip()
-                try:
-                    return int(float(cleaned))
-                except (ValueError, TypeError):
-                    return default
-            return default
-        
-        def safe_float_convert(value, default=0.0):
-            """Safely convert a value to float, handling commas and NaN"""
-            if pd.isna(value):
-                return default
-            if isinstance(value, (int, float)):
-                return float(value)
-            if isinstance(value, str):
-                # Remove commas, dollar signs, percentages, and other characters
-                cleaned = value.replace(',', '').replace('$', '').replace('%', '').strip()
-                try:
-                    return float(cleaned)
-                except (ValueError, TypeError):
-                    return default
-            return default
-        
-        # --- Performance Profile Enforcement ---
-        def generate_performance_profile(aircraft):
-            """
-            Generate a mandatory performance profile for an aircraft, including all key metrics.
-            Returns a dict with all required fields, raising ValueError if any are missing or invalid.
-            """
-            required_metrics = [
-                'price', 'range', 'speed', 'passengers', 'year',
-                'total_hourly_cost', 'runway_length', 'max_altitude',
-                'cabin_volume', 'baggage_volume', 'depreciation_rate',
-                'best_speed_dollar', 'best_range_dollar', 'best_performance_dollar',
-                'best_efficiency_dollar', 'best_all_around_dollar'
-            ]
-            profile = {}
-            for metric in required_metrics:
-                value = aircraft.get(metric)
-                if value is None or value == '' or (isinstance(value, (int, float)) and value == 0):
-                    raise ValueError(f"Missing or invalid value for required metric: {metric}")
-                profile[metric] = value
-            return profile
-        
-        for _, row in df.iterrows():
-            # Map CSV columns to aircraft listing format using correct column names
-            aircraft = {
-                'id': len(aircraft_data) + 1,
-                'aircraft_name': str(row.get('316', 'Unknown')),  # Use first column (316) which contains aircraft names
-                'manufacturer': str(row.get('Manufacturer', 'Unknown')),
-                'model': str(row.get('316', 'Unknown')),  # Use column A (316) for the model name too
-                'year': safe_int_convert(row.get('Highest Year'), 2020),
-                'price': safe_int_convert(row.get('Average Price')),
-                'range': safe_int_convert(row.get('Range(NM)')),
-                'speed': safe_int_convert(row.get('Speed(KTS)')),
-                'passengers': safe_int_convert(row.get('Passengers')),
-                'category': str(row.get('Type', 'Unknown')),  # Use 'Type' column (e.g., 'Business Jet', 'Turboprop')
-                'location': 'Various Locations',  # Default location
-                'description': f"{row.get('Manufacturer', 'Unknown')} {row.get('Type', 'Unknown')} - {row.get('Date Range', 'Unknown years')}",
-                'image': '/static/images/aircraft_placeholder.jpg',  # Default image
-                
-                # Raw data for calculations
-                'date_range': str(row.get('Date Range', '')),
-                'lowest_year': safe_int_convert(row.get('Lowest Year')),
-                'highest_year': safe_int_convert(row.get('Highest Year')),
-                
-                # Physical specifications
-                'max_altitude': safe_int_convert(row.get('Max Operating Altitude (ft)')),
-                'runway_length': safe_int_convert(row.get('Balanced Field Length (ft)')),
-                'aircraft_height': safe_float_convert(row.get('Aircraft Height (ft)')),
-                'wingspan': safe_float_convert(row.get('Wingspan (ft)')),
-                'aircraft_length': safe_float_convert(row.get('Aircraft Length (ft)')),
-                'aircraft_volume': safe_int_convert(row.get('Aircraft Volume (cubic ft)')),
-                'cabin_height': safe_float_convert(row.get('Cabin Height (ft)')),
-                'cabin_width': safe_float_convert(row.get('Cabin Width (ft)')),
-                'cabin_length': safe_float_convert(row.get('Cabin Length (ft)')),
-                'cabin_volume': safe_float_convert(row.get('Cabin Volume (cubic ft)')),
-                'baggage_volume': safe_int_convert(row.get('Baggage Volume (cubic ft)')),
-                
-                # Operational data
-                'charter_rate': safe_float_convert(row.get('Hourly Charter Rate')),
-                'total_hourly_cost': safe_float_convert(row.get('Total Hourly Cost')),
-                'years_range': str(row.get('Date Range', 'Unknown')),
-                'multi_engine': str(row.get('Multi Engine', 'Unknown')),
-                'min_crew': safe_int_convert(row.get('Min Crew Required'), 1),
-                'depreciation_rate': safe_float_convert(row.get('Depreciation Rate')),
-                
-                # Trip time data from CSV columns
-                'average_trip_time': safe_float_convert(row.get('Average Trip Time')),
-                'total_trip_time': safe_float_convert(row.get('# of Hours')),
-                
-                # Base Financial Performance Metrics (will be recalculated based on user inputs)
-                'annual_budget': safe_float_convert(row.get('Annual Budget')),
-                'adjusted_annual_budget': safe_float_convert(row.get('Adjusted Annual Budget')),
-                'multi_year_total_cost': safe_float_convert(row.get('Multi-Year Total Cost')),
-                'mytc_with_aircraft_sale': safe_float_convert(row.get('MYTC w/ Aircraft Sale')),
-                'cost_to_charter': safe_float_convert(row.get('Cost To Charter')),
-                'total_fixed_cost': safe_float_convert(row.get('Total Fixed Cost')),
-                'total_variable_cost': safe_float_convert(row.get('Total Variable Cost')),
-                'adjusted_variable_cost': safe_float_convert(row.get('Adjusted Variable Cost')),
-                
-                # Ownership Metrics
-                'own_charter_ratio': safe_float_convert(row.get('Own/Charter Ratio')),
-                'own_charter_savings': safe_float_convert(row.get('Own/Charter Savings')),
-                
-                # Value Performance Metrics (from spreadsheet)
-                'best_speed_dollar': safe_float_convert(row.get('Best Speed/$')),
-                'normalized_speed_dollar': safe_float_convert(row.get('Normalized Speed/$')),
-                'best_seat_speed_dollar': safe_float_convert(row.get('Best Seat Speed/$')),
-                'best_range_dollar': safe_float_convert(row.get('Best Range/$')),
-                'normalized_range_dollar': safe_float_convert(row.get('Normalized Range/$')),
-                'best_seat_range_dollar': safe_float_convert(row.get('Best Seat Range/$')),
-                'best_performance_dollar': safe_float_convert(row.get('Best Performance/$')),
-                'normalized_performance_dollar': safe_float_convert(row.get('Normalized Performance/$')),
-                'best_seat_performance_dollar': safe_float_convert(row.get('Best Seat Performance/$')),
-                'best_efficiency_dollar': safe_float_convert(row.get('Best Efficiency/$')),
-                'normalized_efficiency_dollar': safe_float_convert(row.get('Normalized Effieciency/$')),
-                'best_seat_efficiency_dollar': safe_float_convert(row.get('Best Seat Efficiency/$')),
-                'best_all_around_dollar': safe_float_convert(row.get('Best All Around/$')),
-                'best_seat_all_around_dollar': safe_float_convert(row.get('Best Seat All Around/$')),
-                
-                # Cost per metrics
-                'hourly_cost_per_seat': safe_float_convert(row.get('Hourly Cost/Seat')),
-                'cost_per_mile': safe_float_convert(row.get('Cost/Mile')),
-                'cost_per_seat_mile': safe_float_convert(row.get('Cost/Seat Mile')),
-                'hourly_variable_cost': safe_float_convert(row.get('Hourly Variable Cost')),
-                'variable_cost_per_seat': safe_float_convert(row.get('Variable Cost/Seat')),
-                'variable_cost_per_mile': safe_float_convert(row.get('Variable Cost/Mile')),
-                'variable_cost_per_seat_mile': safe_float_convert(row.get('Variable Cost/Seat Mile')),
-                'BF': safe_float_convert(row.get('Best All Around/$'))
-            }
-            # Debug: Print normalized values for M600
-            if 'M600' in aircraft.get('aircraft_name', ''):
-                print(f"🔍 M600 DEBUG - Normalized values loaded:")
-                print(f"  Speed/$: {aircraft.get('normalized_speed_dollar')}")
-                print(f"  Range/$: {aircraft.get('normalized_range_dollar')}")
-                print(f"  Performance/$: {aircraft.get('normalized_performance_dollar')}")
-                print(f"  Efficiency/$: {aircraft.get('normalized_efficiency_dollar')}")
-            
-            # Attach mandatory performance profile
-            try:
-                aircraft['performance_profile'] = generate_performance_profile(aircraft)
-            except ValueError as e:
-                print(f"Skipping aircraft due to incomplete performance profile: {e}")
-                continue  # Skip aircraft with incomplete profile
-            aircraft_data.append(aircraft)
-        
-        print(f"Successfully loaded {len(aircraft_data)} aircraft from CSV with complete performance profiles")
-        return aircraft_data
+        aircraft = db_module.get_all_aircraft_profiles()
+        if aircraft:
+            return aircraft
+        db_module.seed_aircraft_and_airports()
+        aircraft = db_module.get_all_aircraft_profiles()
+        if aircraft:
+            logger.info("Loaded %d aircraft from DB (seeded from CSV)", len(aircraft))
+            return aircraft
     except Exception as e:
-        print(f"Error loading CSV data: {e}")
-        # Fallback to empty list if CSV loading fails
-        return []
+        logger.warning("DB aircraft load failed, falling back to file: %s", e)
+    # Fallback: load from file via data_loader (used by seed)
+    try:
+        from data_loader import load_aircraft_from_csv
+        _base = Path(__file__).resolve().parent
+        for p in [_base / 'static' / 'data' / 'aircraft_data.csv', _base / 'Aircraft Data - Aircraft Data (1).csv']:
+            if p.is_file():
+                out = load_aircraft_from_csv(str(p))
+                if out:
+                    logger.info("Loaded %d aircraft from file (fallback)", len(out))
+                    return out
+    except Exception as e:
+        logger.warning("File aircraft load failed: %s", e)
+    return []
 
-# Load aircraft data at startup
+
+# Load aircraft data at startup (from DB, seeded from CSV on first run)
 AIRCRAFT_DATA = load_aircraft_data()
 
 # Unified data function that merges spreadsheet and marketplace data
@@ -1127,13 +974,20 @@ _AIRPORTS_FALLBACK = [
 ]
 
 def _load_airports_data():
-    """Load airports JSON. Use pathlib so path works regardless of working directory (Railway)."""
+    """Load airports from PostgreSQL/SQLite (seeded from JSON on first run). Falls back to file if DB empty."""
+    try:
+        airports = db_module.get_all_airports()
+        if airports:
+            return airports
+        db_module.seed_aircraft_and_airports()
+        airports = db_module.get_all_airports()
+        if airports:
+            return airports
+    except Exception as e:
+        logger.warning("DB airports load failed, falling back to file: %s", e)
+    # Fallback: load from file
     _base = Path(__file__).resolve().parent
-    _candidates = [
-        _base / 'static' / 'data' / 'airports.json',
-        _base / 'airports.json',
-    ]
-    for _path in _candidates:
+    for _path in [_base / 'static' / 'data' / 'airports.json', _base / 'airports.json']:
         if _path.is_file():
             try:
                 with open(_path, 'r') as f:
