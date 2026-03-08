@@ -43,6 +43,8 @@ class User(Base):
     last_name = Column(String(100))
     company = Column(String(200))
     phone = Column(String(20))
+    profile_role = Column(String(50), default='other')  # broker, buyer, mechanic, other
+    profile_location = Column(String(255))  # city, region, or business location
     user_type = Column(String(50), default='free_user')
     is_verified_seller = Column(Boolean, default=False)
     verification_status = Column(String(50), default='unverified')
@@ -361,6 +363,28 @@ def init_db():
                 except Exception:
                     conn.rollback()
                     pass  # column already exists
+            for col_def in [
+                'profile_role VARCHAR(50) DEFAULT \'other\'',
+                'profile_location VARCHAR(255)',
+            ]:
+                try:
+                    conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    pass
+    elif DATABASE_URL.startswith('postgresql'):
+        with engine.connect() as conn:
+            for col, typ in [
+                ('profile_role', 'VARCHAR(50) DEFAULT \'other\''),
+                ('profile_location', 'VARCHAR(255)'),
+            ]:
+                try:
+                    conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    pass
 
 
 @contextmanager
@@ -425,7 +449,8 @@ def get_user_by_email(email):
         return user.to_dict() if user else None
 
 
-def create_user(email, password_hash, first_name=None, last_name=None, company=None, phone=None):
+def create_user(email, password_hash, first_name=None, last_name=None, company=None, phone=None,
+                profile_role=None, profile_location=None):
     with get_session() as s:
         u = User(
             email=email,
@@ -434,6 +459,8 @@ def create_user(email, password_hash, first_name=None, last_name=None, company=N
             last_name=last_name,
             company=company,
             phone=phone,
+            profile_role=(profile_role or 'other').lower().strip() if profile_role else 'other',
+            profile_location=profile_location.strip() if (profile_location and isinstance(profile_location, str)) else None,
         )
         s.add(u)
         s.flush()

@@ -74,9 +74,9 @@ def get_user_by_id(user_id):
 def get_user_by_email(email):
     return db_module.get_user_by_email(email)
 
-def create_user(email, password, first_name, last_name, company=None, phone=None):
+def create_user(email, password, first_name, last_name, company=None, phone=None, profile_role=None, profile_location=None):
     password_hash = generate_password_hash(password)
-    return db_module.create_user(email, password_hash, first_name, last_name, company, phone)
+    return db_module.create_user(email, password_hash, first_name, last_name, company, phone, profile_role=profile_role, profile_location=profile_location)
 
 def get_user_subscriptions(user_id):
     return db_module.get_user_subscriptions(user_id)
@@ -926,7 +926,7 @@ def api_diagnostic():
 
 @app.route('/api/airports')
 def api_airports():
-    """Airport search API endpoint"""
+    """Airport search: data from Postgres (airports table) or SQLite, seeded from static JSON."""
     try:
         query = request.args.get('q', '').strip().upper()
         
@@ -1869,11 +1869,14 @@ def register():
         last_name = request.form.get('last_name')
         company = request.form.get('company')
         phone = request.form.get('phone')
+        profile_role = request.form.get('profile_role')
+        profile_location = request.form.get('profile_location')
         
         if get_user_by_email(email):
             flash('Email already registered', 'error')
         else:
-            user_id = create_user(email, password, first_name, last_name, company, phone)
+            user_id = create_user(email, password, first_name, last_name, company, phone,
+                profile_role=profile_role, profile_location=profile_location)
             if user_id is not None:
                 session['user_id'] = user_id
                 flash('Account created successfully!', 'success')
