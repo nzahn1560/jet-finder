@@ -291,22 +291,25 @@ def _find_data_paths():
 
 def seed_aircraft_and_airports():
     """Populate aircraft_profiles and airports from CSV/JSON if tables are empty."""
+    import logging
+    _log = logging.getLogger(__name__)
     try:
         from data_loader import load_aircraft_from_csv, load_airports_from_json
-    except ImportError:
+    except ImportError as e:
+        _log.warning("seed_aircraft_and_airports: data_loader not available: %s", e)
         return
     csv_path, json_path = _find_data_paths()
     if not csv_path or not json_path:
+        _log.warning("seed_aircraft_and_airports: CSV or JSON not found (paths: %s, %s)", csv_path, json_path)
         return
     try:
         with get_session() as s:
-            # Seed aircraft
             if s.query(AircraftProfile).count() == 0:
                 aircraft_list = load_aircraft_from_csv(csv_path)
                 for ac in aircraft_list:
                     ac_id = ac.get('id', 0)
                     s.add(AircraftProfile(id=ac_id, data=ac))
-            # Seed airports
+                _log.info("Seeded %d aircraft from %s", len(aircraft_list), csv_path)
             if s.query(Airport).count() == 0:
                 airports_list = load_airports_from_json(json_path)
                 for ap in airports_list:
@@ -320,8 +323,9 @@ def seed_aircraft_and_airports():
                         lon=float(ap.get('lon', 0) or 0),
                         size=ap.get('size'),
                     ))
-    except Exception:
-        pass
+                _log.info("Seeded %d airports from %s", len(airports_list), json_path)
+    except Exception as e:
+        _log.exception("seed_aircraft_and_airports failed: %s", e)
 
 
 def get_all_aircraft_profiles():

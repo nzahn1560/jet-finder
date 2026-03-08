@@ -349,24 +349,21 @@ def load_aircraft_data() -> list[dict[str, Any]]:
 # Load aircraft data at startup (from DB, seeded from CSV on first run)
 AIRCRAFT_DATA: list[dict[str, Any]] = load_aircraft_data()
 
-# Unified data function that merges spreadsheet and marketplace data
+# Unified data function: prefer live DB so lookups always see Postgres
 def get_unified_aircraft_data() -> list[dict[str, Any]]:
-    """
-    Get aircraft data from CSV spreadsheet only (as requested by user).
-    Returns a list of aircraft with consistent data structure for filtering and scoring.
-    """
+    """Aircraft for search/listings. Uses Postgres every time; falls back to startup cache only if DB empty/fails."""
     try:
-        # Return only spreadsheet data (316 aircraft) - user requested to exclude marketplace listings
-        return list(AIRCRAFT_DATA)
-        
-        # DISABLED: Marketplace integration (was adding extra 328 listings)
-        # from marketplace import load_listings
-        # marketplace_listings = load_listings()
-        # ... marketplace processing code removed ...
-        
+        aircraft = db_module.get_all_aircraft_profiles()
+        if aircraft:
+            return aircraft
+        # DB empty: try to seed once (idempotent) then read again
+        db_module.seed_aircraft_and_airports()
+        aircraft = db_module.get_all_aircraft_profiles()
+        if aircraft:
+            return aircraft
     except Exception as e:
-        print(f"Error getting aircraft data: {e}")
-        return AIRCRAFT_DATA.copy() if AIRCRAFT_DATA else []
+        logger.warning("get_unified_aircraft_data: DB failed, using cache: %s", e)
+    return list(AIRCRAFT_DATA) if AIRCRAFT_DATA else []
 
 
 
@@ -619,7 +616,7 @@ def compare_aircraft():
             # marketplace listings may be 'listing_...' – skip for this compare
             if rid.isdigit():
                 ids.append(int(rid))
-        selected = [ac for ac in AIRCRAFT_DATA if ac.get('id') in ids]
+        selected = [ac for ac in get_unified_aircraft_data() if ac.get('id') in ids]
     except Exception:
         selected = []
     if not selected:
@@ -803,9 +800,10 @@ def api_stock_market_test():
 # Lightweight aircraft details API for comparison/details modals
 @app.route('/api/aircraft-detail/<int:aircraft_id>')
 def api_aircraft_detail(aircraft_id: int):
-    """Return a single aircraft from AIRCRAFT_DATA by numeric id as JSON."""
+    """Return a single aircraft by id (from DB-backed aircraft data)."""
     try:
-        for aircraft in AIRCRAFT_DATA:
+        aircraft_data = get_unified_aircraft_data()
+        for aircraft in aircraft_data:
             if aircraft.get('id') == aircraft_id:
                 return jsonify({'success': True, 'aircraft': aircraft})
         return jsonify({'success': False, 'error': 'Aircraft not found'}), 404
