@@ -316,8 +316,14 @@ def get_service_categories():
         'Consulting'
     ]
 
+def _is_railway_postgres():
+    """True when running on Railway with Postgres (public site). No file fallback in this case."""
+    url = os.environ.get('DATABASE_URL', '')
+    return url.startswith('postgres') or url.startswith('postgresql')
+
+
 def load_aircraft_data() -> list[dict[str, Any]]:
-    """Load aircraft from PostgreSQL/SQLite (seeded from CSV on first run). Falls back to file if DB empty."""
+    """Load aircraft from DB (seeded from CSV on first run). On Railway/Postgres: DB only, no file fallback."""
     try:
         aircraft = db_module.get_all_aircraft_profiles()
         if aircraft:
@@ -326,11 +332,13 @@ def load_aircraft_data() -> list[dict[str, Any]]:
         db_module.seed_aircraft_and_airports()
         aircraft = db_module.get_all_aircraft_profiles()
         if aircraft:
-            logger.info("Loaded %d aircraft from DB (seeded from CSV)", len(aircraft))
+            logger.info("Loaded %d aircraft from DB (seeded)", len(aircraft))
             return aircraft
     except Exception as e:
-        logger.warning("DB aircraft load failed, falling back to file: %s", e, exc_info=True)
-    # Fallback: load from file via data_loader (used by seed)
+        logger.warning("DB aircraft load failed: %s", e, exc_info=True)
+    if _is_railway_postgres():
+        logger.warning("Railway/Postgres: no file fallback; aircraft data is empty until seed succeeds")
+        return []
     try:
         from data_loader import load_aircraft_from_csv
         _base = Path(__file__).resolve().parent
@@ -338,31 +346,31 @@ def load_aircraft_data() -> list[dict[str, Any]]:
             if p.is_file():
                 out = load_aircraft_from_csv(str(p))
                 if out:
-                    logger.info("Loaded %d aircraft from file (fallback)", len(out))
+                    logger.info("Loaded %d aircraft from file (local fallback)", len(out))
                     return out
     except Exception as e:
         logger.warning("File aircraft load failed: %s", e)
-    logger.warning("No aircraft data available (DB failed and no CSV found)")
     return []
 
 
 # Load aircraft data at startup (from DB, seeded from CSV on first run)
 AIRCRAFT_DATA: list[dict[str, Any]] = load_aircraft_data()
 
-# Unified data function: prefer live DB so lookups always see Postgres
+# Unified data function: on Railway (Postgres) use only DB so public URL search uses Postgres
 def get_unified_aircraft_data() -> list[dict[str, Any]]:
-    """Aircraft for search/listings. Uses Postgres every time; falls back to startup cache only if DB empty/fails."""
+    """Aircraft for search/listings. On Railway: Postgres only. Local: Postgres or file fallback."""
     try:
         aircraft = db_module.get_all_aircraft_profiles()
         if aircraft:
             return aircraft
-        # DB empty: try to seed once (idempotent) then read again
         db_module.seed_aircraft_and_airports()
         aircraft = db_module.get_all_aircraft_profiles()
         if aircraft:
             return aircraft
     except Exception as e:
-        logger.warning("get_unified_aircraft_data: DB failed, using cache: %s", e)
+        logger.warning("get_unified_aircraft_data: DB failed: %s", e)
+    if _is_railway_postgres():
+        return []  # Railway: never serve file/cache; search must come from Postgres
     return list(AIRCRAFT_DATA) if AIRCRAFT_DATA else []
 
 
@@ -829,7 +837,7 @@ _AIRPORTS_FALLBACK = [
 ]
 
 def _load_airports_data():
-    """Load airports from PostgreSQL/SQLite (seeded from JSON on first run). Falls back to file if DB empty."""
+    """Load airports from DB (seeded from JSON on first run). On Railway/Postgres: DB only, no file fallback."""
     try:
         airports = db_module.get_all_airports()
         if airports:
@@ -839,8 +847,9 @@ def _load_airports_data():
         if airports:
             return airports
     except Exception as e:
-        logger.warning("DB airports load failed, falling back to file: %s", e, exc_info=True)
-    # Fallback: load from file
+        logger.warning("DB airports load failed: %s", e, exc_info=True)
+    if _is_railway_postgres():
+        return []  # Railway: never serve file; airport search must come from Postgres
     _base = Path(__file__).resolve().parent
     for _path in [_base / 'static' / 'data' / 'airports.json', _base / 'airports.json']:
         if _path.is_file():
@@ -849,7 +858,6 @@ def _load_airports_data():
                     return json.load(f)
             except Exception as e:
                 logger.warning("Could not load %s: %s", _path, e)
-    logger.warning("Airport data file not found; using fallback list")
     return _AIRPORTS_FALLBACK
 
 @app.route('/api/debug')
@@ -863,12 +871,16 @@ def api_debug():
 
 @app.route('/api/health')
 def api_health():
-    """Health check: db_ok, table counts, aircraft/airports loaded (Railway debugging)."""
+    """Health check: db_ok, table counts, aircraft/airports used by search (Railway debugging)."""
     try:
         db_status = db_module.get_database_status()
         airports_data = _load_airports_data()
         airports_count = len(airports_data) if isinstance(airports_data, list) else 0
-        aircraft_count = len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0
+        aircraft_data = get_unified_aircraft_data()
+        aircraft_count = len(aircraft_data)
+        is_pg = _is_railway_postgres()
+        aircraft_src = 'postgres' if (aircraft_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_cache')
+        airports_src = 'postgres' if (airports_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_fallback')
         return jsonify({
             'status': 'ok' if db_status['db_ok'] else 'db_error',
             'timestamp': int(datetime.now().timestamp() * 1000),
@@ -878,14 +890,46 @@ def api_health():
             'table_counts': db_status.get('table_counts', {}),
             'aircraft_count': aircraft_count,
             'airports_count': airports_count,
+            'aircraft_source': aircraft_src,
+            'airports_source': airports_src,
             'data_loaded': {
                 'airports': airports_count,
                 'aircraft': aircraft_count,
             },
+            'message': 'Search data from Postgres' if (db_status['db_ok'] and (aircraft_count or airports_count)) else (
+                'Search data empty - check Postgres seed and Railway logs' if is_pg else 'Using file/cache fallback'
+            ),
         }), 200
     except Exception as e:
         logger.exception("Error in /api/health")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/data-source')
+def api_data_source():
+    """Explicit report of where search data comes from (for public URL debugging)."""
+    try:
+        db_status = db_module.get_database_status()
+        aircraft = get_unified_aircraft_data()
+        airports = _load_airports_data()
+        ac_count = len(aircraft)
+        ap_count = len(airports) if isinstance(airports, list) else 0
+        is_pg = _is_railway_postgres()
+        return jsonify({
+            'database_connected': db_status['db_ok'],
+            'database_type': db_status['database_type'],
+            'aircraft_count': ac_count,
+            'airports_count': ap_count,
+            'aircraft_source': 'postgres' if (ac_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_cache'),
+            'airports_source': 'postgres' if (ap_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_fallback'),
+            'table_counts': db_status.get('table_counts', {}),
+            'message': 'Search data is served from Postgres' if (db_status['db_ok'] and (ac_count or ap_count)) else (
+                'Search data is empty - check seed and Railway logs' if is_pg else 'Search data from file/cache (local fallback)'
+            ),
+        }), 200
+    except Exception as e:
+        logger.exception("Error in /api/data-source")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/diagnostic')
@@ -907,6 +951,7 @@ def api_diagnostic():
     db_status = db_module.get_database_status()
     ap_data = _load_airports_data()
     airports_count = len(ap_data) if isinstance(ap_data, list) else 0
+    ac_data = get_unified_aircraft_data()
     return jsonify({
         'app_root': str(_base),
         'has_database_url': bool(db_url),
@@ -918,7 +963,7 @@ def api_diagnostic():
         'aircraft_file_found': aircraft_found,
         'airports_paths_tried': [str(p) for p in airports_candidates],
         'airports_file_found': airports_found,
-        'aircraft_count': len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0,
+        'aircraft_count': len(ac_data),
         'airports_count': airports_count,
     }), 200
 
