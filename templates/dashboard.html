@@ -344,6 +344,15 @@
                 Member since {{ user.created_at.split(' ')[0] if user.created_at else 'Recently' }}
             </p>
 
+            <div class="d-flex flex-wrap gap-3 mt-3">
+                <a href="{{ url_for('create_listing') }}" class="btn btn-danger btn-lg">
+                    <i class="fas fa-plus me-2"></i>Create a listing
+                </a>
+                <a href="{{ url_for('my_listings') }}" class="btn btn-outline-light btn-lg">
+                    <i class="fas fa-list me-2"></i>My listings
+                </a>
+            </div>
+
             {% if not user.is_pro_member %}
             <div class="upgrade-prompt">
                 <div class="upgrade-content">
@@ -352,7 +361,7 @@
                         Get advanced analytics, unlimited searches, price tracking, and exclusive marketplace access
                     </p>
                 </div>
-                <a href="{{ url_for('upgrade_to_pro') }}" class="upgrade-button">
+                <a href="{{ url_for('pricing') }}" class="upgrade-button">
                     Upgrade Now
                 </a>
             </div>

@@ -386,15 +386,25 @@
                                 <i class="fas fa-tachometer-alt me-2"></i>Dashboard
                             </a>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('create_listing') }}">
+                                <i class="fas fa-plus me-2"></i>Create listing
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('my_listings') }}">
+                                <i class="fas fa-list me-2"></i>My listings
+                            </a>
+                        </li>
                         {% if current_user.is_pro_member %}
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('pro_dashboard') }}">
+                            <a class="dropdown-item" href="{{ url_for('dashboard') }}">
                                 <i class="fas fa-crown me-2"></i>Pro Dashboard
                             </a>
                         </li>
                         {% else %}
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('upgrade_to_pro') }}">
+                            <a class="dropdown-item" href="{{ url_for('pricing') }}">
                                 <i class="fas fa-rocket me-2"></i>Upgrade to Pro
                                 <span class="upgrade-badge ms-2">$20/mo</span>
                             </a>
@@ -412,6 +422,10 @@
                 </div>
                 {% else %}
                 <div class="d-flex gap-2">
+                    <a href="{{ url_for('register') }}" class="login-btn">
+                        <i class="fas fa-user-plus"></i>
+                        <span>Register</span>
+                    </a>
                     <a href="{{ url_for('login') }}" class="login-btn">
                         <i class="fas fa-user"></i>
                         <span>Login</span>
@@ -432,6 +446,8 @@
 
     <!-- Common JavaScript Functions -->
     <script>
+        // Prevent "db is not defined" if any script or console references db (e.g. debug)
+        window.db = window.db || {};
         function showHelp() {
             alert('Help & Guide coming soon! Contact support for immediate assistance.');
         }

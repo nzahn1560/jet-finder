@@ -1675,9 +1675,8 @@
 
             if (response.ok) {
                 // Success - show message and redirect
-                alert('Listing submitted successfully! Payment required for approval. Admin will review after payment.');
-                // TODO: Redirect to payment page or admin review
-                window.location.href = '/';
+                alert('Listing created successfully! It is now live on the site.');
+                window.location.href = '/my-listings';
             } else {
                 throw new Error(result.error || 'Failed to create listing');
             }

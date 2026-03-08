@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}My Listings - Jet Finder{% endblock %}
+{% block additional_css %}
+<style>
+    .listings-container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+    .listings-header { margin-bottom: 2rem; }
+    .listings-header h1 { color: #fff; font-size: 1.75rem; margin-bottom: 0.5rem; }
+    .listings-header p { color: #8e8e93; }
+    .listing-card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    .listing-card img { width: 80px; height: 60px; object-fit: cover; border-radius: 8px; }
+    .listing-card .info { flex: 1; }
+    .listing-card .title { color: #fff; font-weight: 600; margin-bottom: 0.25rem; }
+    .listing-card .meta { color: #8e8e93; font-size: 0.9rem; }
+    .listing-card .status { padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; }
+    .listing-card .status.active { background: #28a745; color: #fff; }
+    .listing-card .status.pending { background: #ffc107; color: #000; }
+    .listing-card .status.deleted { background: #6c757d; color: #fff; }
+    .empty-state { text-align: center; padding: 3rem; color: #8e8e93; }
+    .empty-state a { color: #F05545; text-decoration: none; font-weight: 600; }
+    .empty-state a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="listings-container">
+    <div class="listings-header">
+        <h1>My listings</h1>
+        <p>Manage your aircraft listings. New listings go live immediately.</p>
+        <a href="{{ url_for('create_listing') }}" class="btn btn-danger mt-2"><i class="fas fa-plus me-2"></i>Create a listing</a>
+    </div>
+    <div id="listings-list"></div>
+    <div id="listings-empty" class="empty-state" style="display:none;">
+        <p>You don't have any listings yet.</p>
+        <a href="{{ url_for('create_listing') }}">Create your first listing</a>
+    </div>
+    <div id="listings-loading" class="empty-state">Loading...</div>
+</div>
+<script>
+(function() {
+    const listEl = document.getElementById('listings-list');
+    const emptyEl = document.getElementById('listings-empty');
+    const loadingEl = document.getElementById('listings-loading');
+    fetch('/api/my-listings', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(listings => {
+            loadingEl.style.display = 'none';
+            if (!Array.isArray(listings) || listings.length === 0) {
+                emptyEl.style.display = 'block';
+                return;
+            }
+            listings.forEach(l => {
+                const card = document.createElement('div');
+                card.className = 'listing-card';
+                const img = l.image || '/static/images/aircraft_placeholder.jpg';
+                const status = (l.status || 'active').toLowerCase();
+                card.innerHTML = [
+                    '<img src="' + img + '" alt="">',
+                    '<div class="info">',
+                    '<div class="title">' + (l.title || 'Aircraft Listing') + '</div>',
+                    '<div class="meta">' + (l.manufacturer || '') + ' • $' + Number(l.price).toLocaleString() + ' • ' + (l.location || '') + '</div>',
+                    '</div>',
+                    '<span class="status ' + status + '">' + status + '</span>'
+                ].join('');
+                listEl.appendChild(card);
+            });
+        })
+        .catch(() => {
+            loadingEl.style.display = 'none';
+            emptyEl.innerHTML = '<p>Could not load listings. <a href="{{ url_for("create_listing") }}">Create a listing</a></p>';
+            emptyEl.style.display = 'block';
+        });
+})();
+</script>
+{% endblock %}

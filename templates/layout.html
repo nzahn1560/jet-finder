@@ -733,6 +733,8 @@
     <!-- <script src="{{ url_for('static', filename='js/aircraft_analysis.js') }}"></script> -->
 
     <script>
+        // Prevent "db is not defined" if any script or console references db (e.g. debug)
+        window.db = window.db || {};
         // Save and restore scroll position
         document.addEventListener('DOMContentLoaded', function () {
             // Restore scroll position if it was saved

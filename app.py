@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app
 import os
 import json
 from pathlib import Path
+from typing import Any, cast
+
 import pandas as pd
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from marketplace import marketplace, load_listings, recommend_aircraft, get_current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-import sqlite3
 from functools import wraps
 import stripe
 import logging
@@ -242,35 +245,19 @@ def parts_required(f):
     return decorated_function
 
 def service_provider_search_required(f):
-    """Require $5 per-use payment for service provider search"""
+    """Require $5 per-use payment for service provider search (uses DB layer for Railway)."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             return jsonify({'error': 'Authentication required', 'redirect': '/login'}), 401
-        
-        # Check if user has unused service provider search credits
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id FROM per_use_purchases 
-            WHERE user_id = ? AND service_type = 'service_provider_search' 
-            AND status = 'completed' AND used_at IS NULL
-            ORDER BY created_at DESC LIMIT 1
-        ''', (session['user_id'],))
-        
-        unused_purchase = cursor.fetchone()
-        conn.close()
-        
-        if unused_purchase:
+        if db_module.has_unused_service_provider_credit(session['user_id']):
             return f(*args, **kwargs)
-        else:
-            return jsonify({
-                'error': 'Service provider search requires $5 payment',
-                'service_type': 'service_provider_search',
-                'price': 5.00,
-                'redirect': '/pricing'
-            }), 402
-    
+        return jsonify({
+            'error': 'Service provider search requires $5 payment',
+            'service_type': 'service_provider_search',
+            'price': 5.00,
+            'redirect': '/pricing'
+        }), 402
     return decorated_function
 
 def safe_int_convert_form(value):
@@ -282,162 +269,29 @@ def safe_int_convert_form(value):
     except (ValueError, TypeError):
         return None
 
-# Service Provider Management Functions
+# Service Provider Management (DB layer for Railway Postgres)
 def create_service_provider(user_id, provider_data):
-    """Create a new service provider listing"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    # Get coordinates for address if provided
-    latitude, longitude = None, None
-    if provider_data.get('street_address') and provider_data.get('city') and provider_data.get('state'):
-        try:
-            # In a real app, you'd use a geocoding service like Google Maps API
-            # For now, we'll use placeholder coordinates
-            latitude, longitude = 40.7128, -74.0060  # NYC coordinates as placeholder
-        except:
-            pass
-    
-    cursor.execute('''
-        INSERT INTO service_providers (
-            user_id, business_name, service_type, service_subcategory, description,
-            street_address, city, state, zip_code, country, latitude, longitude,
-            phone, email, website, business_hours, certifications, price_range,
-            years_in_business, employee_count, service_area_radius, 
-            accepts_insurance, emergency_service
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        user_id, provider_data['business_name'], provider_data['service_type'],
-        provider_data.get('service_subcategory'), provider_data.get('description'),
-        provider_data.get('street_address'), provider_data['city'], provider_data['state'],
-        provider_data.get('zip_code'), provider_data.get('country', 'US'),
-        latitude, longitude, provider_data.get('phone'), provider_data.get('email'),
-        provider_data.get('website'), provider_data.get('business_hours'),
-        provider_data.get('certifications'), provider_data.get('price_range'),
-        provider_data.get('years_in_business'), provider_data.get('employee_count'),
-        provider_data.get('service_area_radius', 50), 
-        provider_data.get('accepts_insurance', False), provider_data.get('emergency_service', False)
-    ))
-    
-    provider_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return provider_id
+    """Create a new service provider listing."""
+    return db_module.create_service_provider(user_id, provider_data)
 
-def search_service_providers(service_type=None, location=None, radius=50, keywords=None, 
+
+def search_service_providers(service_type=None, location=None, radius=50, keywords=None,
                            verified_only=False, sort_by='rating', limit=20):
-    """Search service providers with filters"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # Build query
-    query = '''
-        SELECT sp.*, u.first_name, u.last_name 
-        FROM service_providers sp
-        LEFT JOIN users u ON sp.user_id = u.id
-        WHERE sp.status = 'active'
-    '''
-    params = []
-    
-    if service_type:
-        query += ' AND sp.service_type = ?'
-        params.append(service_type)
-    
-    if verified_only:
-        query += ' AND sp.is_verified = 1'
-    
-    if keywords:
-        query += ' AND (sp.business_name LIKE ? OR sp.description LIKE ? OR sp.service_subcategory LIKE ?)'
-        keyword_param = f'%{keywords}%'
-        params.extend([keyword_param, keyword_param, keyword_param])
-    
-    if location:
-        # Simple location filter by city/state for now
-        # In production, you'd implement proper geolocation filtering
-        query += ' AND (sp.city LIKE ? OR sp.state LIKE ?)'
-        location_param = f'%{location}%'
-        params.extend([location_param, location_param])
-    
-    # Add sorting
-    if sort_by == 'rating':
-        query += ' ORDER BY sp.average_rating DESC, sp.total_reviews DESC'
-    elif sort_by == 'name':
-        query += ' ORDER BY sp.business_name ASC'
-    elif sort_by == 'newest':
-        query += ' ORDER BY sp.created_at DESC'
-    else:
-        query += ' ORDER BY sp.average_rating DESC'
-    
-    query += f' LIMIT {limit}'
-    
-    cursor.execute(query, params)
-    providers = cursor.fetchall()
-    conn.close()
-    
-    # Convert to dictionaries
-    return [dict(provider) for provider in providers]
+    """Search service providers with filters."""
+    return db_module.search_service_providers(
+        service_type=service_type, location=location, radius=radius, keywords=keywords,
+        verified_only=verified_only, sort_by=sort_by, limit=limit,
+    )
+
 
 def get_service_provider_details(provider_id):
-    """Get detailed information about a service provider"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # Get provider details
-    cursor.execute('''
-        SELECT sp.*, u.first_name, u.last_name, u.email as user_email
-        FROM service_providers sp
-        LEFT JOIN users u ON sp.user_id = u.id
-        WHERE sp.id = ? AND sp.status = 'active'
-    ''', (provider_id,))
-    
-    provider = cursor.fetchone()
-    if not provider:
-        return None
-    
-    provider = dict(provider)
-    
-    # Get recent reviews
-    cursor.execute('''
-        SELECT spr.*, u.first_name, u.last_name
-        FROM service_provider_reviews spr
-        LEFT JOIN users u ON spr.reviewer_id = u.id
-        WHERE spr.provider_id = ? AND spr.status = 'active'
-        ORDER BY spr.created_at DESC
-        LIMIT 10
-    ''', (provider_id,))
-    
-    reviews = [dict(review) for review in cursor.fetchall()]
-    provider['reviews'] = reviews
-    
-    conn.close()
-    return provider
+    """Get detailed information about a service provider."""
+    return db_module.get_service_provider_details(provider_id)
+
 
 def contact_service_provider(provider_id, customer_data):
-    """Record a contact request to a service provider"""
-    conn = sqlite3.connect('instance/jet_finder.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT INTO service_provider_contacts (
-            provider_id, customer_id, customer_name, customer_email, customer_phone,
-            service_requested, message, urgency, preferred_contact_method,
-            project_timeline, estimated_budget
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        provider_id, customer_data.get('customer_id'),
-        customer_data['customer_name'], customer_data['customer_email'],
-        customer_data.get('customer_phone'), customer_data.get('service_requested'),
-        customer_data['message'], customer_data.get('urgency', 'normal'),
-        customer_data.get('preferred_contact_method', 'email'),
-        customer_data.get('project_timeline'), customer_data.get('estimated_budget')
-    ))
-    
-    contact_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return contact_id
+    """Record a contact request to a service provider."""
+    return db_module.contact_service_provider(provider_id, customer_data)
 
 def get_service_categories():
     """Get available service categories"""
@@ -462,11 +316,12 @@ def get_service_categories():
         'Consulting'
     ]
 
-def load_aircraft_data():
+def load_aircraft_data() -> list[dict[str, Any]]:
     """Load aircraft from PostgreSQL/SQLite (seeded from CSV on first run). Falls back to file if DB empty."""
     try:
         aircraft = db_module.get_all_aircraft_profiles()
         if aircraft:
+            logger.info("Loaded %d aircraft from database", len(aircraft))
             return aircraft
         db_module.seed_aircraft_and_airports()
         aircraft = db_module.get_all_aircraft_profiles()
@@ -474,7 +329,7 @@ def load_aircraft_data():
             logger.info("Loaded %d aircraft from DB (seeded from CSV)", len(aircraft))
             return aircraft
     except Exception as e:
-        logger.warning("DB aircraft load failed, falling back to file: %s", e)
+        logger.warning("DB aircraft load failed, falling back to file: %s", e, exc_info=True)
     # Fallback: load from file via data_loader (used by seed)
     try:
         from data_loader import load_aircraft_from_csv
@@ -487,21 +342,22 @@ def load_aircraft_data():
                     return out
     except Exception as e:
         logger.warning("File aircraft load failed: %s", e)
+    logger.warning("No aircraft data available (DB failed and no CSV found)")
     return []
 
 
 # Load aircraft data at startup (from DB, seeded from CSV on first run)
-AIRCRAFT_DATA = load_aircraft_data()
+AIRCRAFT_DATA: list[dict[str, Any]] = load_aircraft_data()
 
 # Unified data function that merges spreadsheet and marketplace data
-def get_unified_aircraft_data():
+def get_unified_aircraft_data() -> list[dict[str, Any]]:
     """
     Get aircraft data from CSV spreadsheet only (as requested by user).
     Returns a list of aircraft with consistent data structure for filtering and scoring.
     """
     try:
         # Return only spreadsheet data (316 aircraft) - user requested to exclude marketplace listings
-        return AIRCRAFT_DATA.copy()
+        return list(AIRCRAFT_DATA)
         
         # DISABLED: Marketplace integration (was adding extra 328 listings)
         # from marketplace import load_listings
@@ -808,10 +664,11 @@ def marketplace_search():
     return render_template('marketplace/listings.html')
 
 @app.route('/dashboard')
+@login_required
 def dashboard():
-    """User dashboard"""
+    """User dashboard (login required)."""
     user = get_current_user_info()
-    return render_template('dashboard.html', user=user)
+    return render_template('dashboard.html', user=user, subscription=user.get('subscription') if user else None)
 
 @app.route('/airplane-stock-market')
 def airplane_stock_market():
@@ -984,7 +841,7 @@ def _load_airports_data():
         if airports:
             return airports
     except Exception as e:
-        logger.warning("DB airports load failed, falling back to file: %s", e)
+        logger.warning("DB airports load failed, falling back to file: %s", e, exc_info=True)
     # Fallback: load from file
     _base = Path(__file__).resolve().parent
     for _path in [_base / 'static' / 'data' / 'airports.json', _base / 'airports.json']:
@@ -1008,25 +865,25 @@ def api_debug():
 
 @app.route('/api/health')
 def api_health():
-    """Health check: db_ok, aircraft_count, profiles_count, airports_count (Railway debugging)."""
+    """Health check: db_ok, table counts, aircraft/airports loaded (Railway debugging)."""
     try:
-        db_ok = db_module.check_db_ok()
+        db_status = db_module.get_database_status()
         airports_data = _load_airports_data()
         airports_count = len(airports_data) if isinstance(airports_data, list) else 0
         aircraft_count = len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0
-        profiles_count = aircraft_count  # one profile per aircraft
         return jsonify({
-            'status': 'ok',
-            'db_ok': db_ok,
+            'status': 'ok' if db_status['db_ok'] else 'db_error',
+            'timestamp': int(datetime.now().timestamp() * 1000),
+            'db_ok': db_status['db_ok'],
+            'database_type': db_status['database_type'],
+            'connection_error': db_status.get('connection_error'),
+            'table_counts': db_status.get('table_counts', {}),
             'aircraft_count': aircraft_count,
-            'profiles_count': profiles_count,
             'airports_count': airports_count,
             'data_loaded': {
                 'airports': airports_count,
                 'aircraft': aircraft_count,
-                'performance_profiles': profiles_count,
             },
-            'app': 'app.py',
         }), 200
     except Exception as e:
         logger.exception("Error in /api/health")
@@ -1035,7 +892,7 @@ def api_health():
 
 @app.route('/api/diagnostic')
 def api_diagnostic():
-    """Railway debugging: what is configured and which data files were found (no secrets)."""
+    """Railway debugging: DB status, table counts, connection errors, file fallbacks (no secrets)."""
     _base = Path(__file__).resolve().parent
     aircraft_candidates = [
         _base / 'static' / 'data' / 'aircraft_data.csv',
@@ -1049,19 +906,22 @@ def api_diagnostic():
     aircraft_found = next((str(p) for p in aircraft_candidates if p.is_file()), None)
     airports_found = next((str(p) for p in airports_candidates if p.is_file()), None)
     db_url = os.environ.get('DATABASE_URL', '')
+    db_status = db_module.get_database_status()
     ap_data = _load_airports_data()
     airports_count = len(ap_data) if isinstance(ap_data, list) else 0
     return jsonify({
         'app_root': str(_base),
         'has_database_url': bool(db_url),
-        'database_type': 'postgresql' if db_url.startswith('postgres') else ('sqlite' if db_url.startswith('sqlite') else 'none'),
+        'database_type': db_status['database_type'],
+        'db_ok': db_status['db_ok'],
+        'connection_error': db_status.get('connection_error'),
+        'table_counts': db_status.get('table_counts', {}),
         'aircraft_paths_tried': [str(p) for p in aircraft_candidates],
         'aircraft_file_found': aircraft_found,
         'airports_paths_tried': [str(p) for p in airports_candidates],
         'airports_file_found': airports_found,
         'aircraft_count': len(AIRCRAFT_DATA) if AIRCRAFT_DATA else 0,
         'airports_count': airports_count,
-        'db_ok': db_module.check_db_ok(),
     }), 200
 
 @app.route('/api/airports')
@@ -1995,7 +1855,6 @@ def login():
             flash('Successfully logged in!', 'success')
             next_page = request.args.get('next')
             return redirect(next_page or url_for('dashboard'))
-    else:
         flash('Invalid email or password', 'error')
     
     return render_template('auth/login.html')
@@ -2015,7 +1874,7 @@ def register():
             flash('Email already registered', 'error')
         else:
             user_id = create_user(email, password, first_name, last_name, company, phone)
-            if user_id:
+            if user_id is not None:
                 session['user_id'] = user_id
                 flash('Account created successfully!', 'success')
                 return redirect(url_for('dashboard'))
@@ -2053,9 +1912,16 @@ def aircraft_recommendations():
 # Pro dashboard removed
 
 @app.route('/create-listing')
+@login_required
 def create_listing():
-    """Create listing page for aircraft, charter, parts, and services"""
+    """Create listing page (login required)."""
     return render_template('create_listing.html')
+
+@app.route('/my-listings')
+@login_required
+def my_listings():
+    """My listings page (login required)."""
+    return render_template('my_listings.html')
 
 @app.route('/api/listings/create', methods=['POST'])
 def create_listing_api():
@@ -3647,43 +3513,7 @@ def api_save_buyer_preferences():
         
         user_id = session.get('user_id')
         session_id = session.get('session_id', 'anonymous')
-        
-        # Save preferences to database
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Delete existing preferences for this user/session
-        if user_id:
-            cursor.execute('DELETE FROM buyer_preferences WHERE user_id = ?', (user_id,))
-        else:
-            cursor.execute('DELETE FROM buyer_preferences WHERE session_id = ?', (session_id,))
-        
-        # Insert new preferences
-        cursor.execute('''
-            INSERT INTO buyer_preferences (
-                user_id, session_id, max_total_hours, min_engine_hours_remaining,
-                preferred_avionics, min_interior_rating, max_maintenance_age_months,
-                min_paint_rating, engine_hours_weight, interior_weight,
-                avionics_weight, maintenance_weight, paint_weight
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            user_id, session_id,
-            data.get('max_total_hours'),
-            data.get('min_engine_hours_remaining'),
-            data.get('preferred_avionics'),
-            data.get('min_interior_rating'),
-            data.get('max_maintenance_age_months'),
-            data.get('min_paint_rating'),
-            data.get('engine_hours_weight', 0.2),
-            data.get('interior_weight', 0.2),
-            data.get('avionics_weight', 0.2),
-            data.get('maintenance_weight', 0.2),
-            data.get('paint_weight', 0.2)
-        ))
-        
-        conn.commit()
-        conn.close()
-        
+        db_module.save_buyer_preferences(user_id, session_id, data)
         return jsonify({
             'success': True,
             'message': 'Buyer preferences saved successfully'
@@ -3699,24 +3529,9 @@ def api_calculate_match_scores():
     try:
         user_id = session.get('user_id')
         session_id = session.get('session_id', 'anonymous')
-        
-        # Get buyer preferences
-        conn = sqlite3.connect('instance/jet_finder.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        if user_id:
-            cursor.execute('SELECT * FROM buyer_preferences WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', (user_id,))
-        else:
-            cursor.execute('SELECT * FROM buyer_preferences WHERE session_id = ? ORDER BY created_at DESC LIMIT 1', (session_id,))
-        
-        preferences = cursor.fetchone()
-        
+        preferences = db_module.get_buyer_preferences(user_id, session_id)
         if not preferences:
             return jsonify({'error': 'No buyer preferences found. Please set preferences first.'}), 400
-        
-        preferences = dict(preferences)
-        
         # Calculate match scores for all aircraft
         aircraft_with_match_scores = []
         
@@ -3747,9 +3562,6 @@ def api_calculate_match_scores():
         
         # Sort by match score (highest first)
         aircraft_with_match_scores.sort(key=lambda x: x['match_score'], reverse=True)
-        
-        conn.close()
-        
         return jsonify({
             'success': True,
             'buyer_preferences': preferences,
@@ -3801,19 +3613,7 @@ def api_get_aircraft_scores(aircraft_id):
         # Get buyer preferences for match score
         user_id = session.get('user_id')
         session_id = session.get('session_id', 'anonymous')
-        
-        conn = sqlite3.connect('instance/jet_finder.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        if user_id:
-            cursor.execute('SELECT * FROM buyer_preferences WHERE user_id = ? ORDER BY created_at DESC LIMIT 1', (user_id,))
-        else:
-            cursor.execute('SELECT * FROM buyer_preferences WHERE session_id = ? ORDER BY created_at DESC LIMIT 1', (session_id,))
-        
-        preferences = cursor.fetchone()
-        preferences = dict(preferences) if preferences else None
-        
+        preferences = db_module.get_buyer_preferences(user_id, session_id)
         match_score = calculate_match_score(aircraft, preferences) if preferences else 50
         
         # Calculate category position
@@ -3825,9 +3625,6 @@ def api_get_aircraft_scores(aircraft_id):
         category_scores.sort(reverse=True)
         position = category_scores.index(priority_score) + 1
         best_in_category = category_scores[0] if category_scores else priority_score
-        
-        conn.close()
-        
         return jsonify({
             'success': True,
             'aircraft': aircraft,
@@ -3867,7 +3664,6 @@ def api_get_aircraft_scores(aircraft_id):
                 } if preferences else 'No buyer preferences set'
             }
         })
-        
     except Exception as e:
         print(f"Error getting aircraft scores: {e}")
         return jsonify({'error': str(e)}), 500
@@ -4206,7 +4002,9 @@ def api_user_listings():
 
 @app.route('/api/user-listings', methods=['POST'])
 def api_create_user_listing():
-    """API endpoint to create a new user listing with payment (saved via db layer)."""
+    """Create a new user listing (login required; saved to DB, goes live immediately)."""
+    if not session.get('user_id'):
+        return jsonify({'error': 'You must be logged in to create a listing. Please register or log in.'}), 401
     try:
         data = request.get_json()
         required_fields = ['profile_id', 'price', 'location', 'email', 'description', 'engine_type', 'manufacturer', 'pricing_plan']
@@ -4234,7 +4032,7 @@ def api_create_user_listing():
         if pricing_plan not in valid_pricing_plans:
             return jsonify({'error': 'Invalid pricing plan selected'}), 400
 
-        user_id = session.get('user_id') if session else None
+        user_id = session.get('user_id')
         listing_id = db_module.create_user_listing(
             data['profile_id'],
             listing_title,
@@ -4284,6 +4082,27 @@ def api_create_user_listing():
     except Exception as e:
         logger.exception("Error creating user listing")
         return jsonify({'error': 'Failed to create listing'}), 500
+
+@app.route('/api/my-listings')
+def api_my_listings():
+    """Return the current user's listings (login required)."""
+    if not session.get('user_id'):
+        return jsonify({'error': 'Not logged in'}), 401
+    try:
+        rows = db_module.get_listings_by_user_id(session['user_id'])
+        aircraft_data = get_unified_aircraft_data()
+        aircraft_map = {a.get('id'): a for a in aircraft_data}
+        out = []
+        for row in rows:
+            combined = _row_to_combined_listing(row, aircraft_map)
+            if combined:
+                combined['status'] = row.get('status')
+                combined['created_at'] = row.get('created_at')
+                out.append(combined)
+        return jsonify(out)
+    except Exception as e:
+        logger.exception("Error loading my listings")
+        return jsonify([]), 500
 
 @app.route('/api/user-listings/<int:listing_id>', methods=['GET'])
 def api_get_user_listing(listing_id):
@@ -4451,12 +4270,13 @@ def admin_approve_listing(listing_id):
     if not session.get('user_id'):
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        status, _ = db_module.get_user_listing_status(listing_id)
+        raw_status, _ = db_module.get_user_listing_status(listing_id)
+        status = cast("str | None", raw_status)
         if status is None:
             return jsonify({'error': 'Listing not found'}), 404
         if status != 'pending':
             return jsonify({'error': f'Listing is already {status}'}), 400
-        ok = db_module.approve_user_listing(listing_id, session.get('user_id'))
+        ok = cast(bool, db_module.approve_user_listing(listing_id, session.get('user_id')))
         if not ok:
             return jsonify({'error': 'Listing not found or not pending'}), 404
         return jsonify({'message': 'Listing approved successfully', 'status': 'active'}), 200
@@ -4472,12 +4292,13 @@ def admin_reject_listing(listing_id):
     try:
         data = request.get_json() or {}
         rejection_reason = data.get('reason', 'No reason provided')
-        status, _ = db_module.get_user_listing_status(listing_id)
+        raw_status, _ = db_module.get_user_listing_status(listing_id)
+        status = cast("str | None", raw_status)
         if status is None:
             return jsonify({'error': 'Listing not found'}), 404
         if status != 'pending':
             return jsonify({'error': f'Listing is already {status}'}), 400
-        ok = db_module.reject_user_listing(listing_id, rejection_reason)
+        ok = cast(bool, db_module.reject_user_listing(listing_id, rejection_reason))
         if not ok:
             return jsonify({'error': 'Listing not found or not pending'}), 404
         return jsonify({'message': 'Listing rejected successfully', 'status': 'rejected'}), 200
@@ -4487,51 +4308,15 @@ def admin_reject_listing(listing_id):
 
 @app.route('/admin/populate-profiles')
 def admin_populate_profiles():
-    """Admin endpoint to populate performance profiles cache table"""
+    """Admin endpoint to populate performance profiles cache table (DB layer for Railway)."""
     try:
         aircraft_data = get_unified_aircraft_data()
-        
-        conn = sqlite3.connect('instance/jet_finder.db')
-        cursor = conn.cursor()
-        
-        # Clear existing profiles
-        cursor.execute('DELETE FROM performance_profiles')
-        
-        # Insert all aircraft as performance profiles
-        for aircraft in aircraft_data:
-            cursor.execute('''
-                INSERT INTO performance_profiles 
-                (id, name, manufacturer, category, range_nm, speed_kts, passengers, 
-                 max_altitude, cabin_volume, baggage_volume, runway_length, 
-                 fuel_capacity, empty_weight, max_weight, image_url, performance_metrics)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                aircraft.get('id'),
-                aircraft.get('aircraft_name', 'Unknown Aircraft'),
-                aircraft.get('manufacturer', 'Unknown'),
-                aircraft.get('category', 'Unknown'),
-                aircraft.get('range', 0),
-                aircraft.get('speed', 0),
-                aircraft.get('passengers', 0),
-                aircraft.get('max_altitude', 0),
-                aircraft.get('cabin_volume', 0),
-                aircraft.get('baggage_volume', 0),
-                aircraft.get('runway_length', 0),
-                aircraft.get('fuel_capacity', 0),
-                aircraft.get('empty_weight', 0),
-                aircraft.get('max_weight', 0),
-                aircraft.get('image', '/static/images/aircraft_placeholder.jpg'),
-                f"Speed: {aircraft.get('best_speed_dollar', 0)}, Range: {aircraft.get('best_range_dollar', 0)}, Performance: {aircraft.get('best_performance_dollar', 0)}"
-            ))
-        
-        conn.commit()
-        conn.close()
-        
+        db_module.clear_performance_profiles()
+        db_module.add_performance_profiles(aircraft_data)
         return jsonify({
             'message': f'Successfully populated {len(aircraft_data)} performance profiles',
             'total': len(aircraft_data)
         })
-        
     except Exception as e:
         print(f"Error populating performance profiles: {e}")
         return jsonify({'error': 'Failed to populate profiles'}), 500
