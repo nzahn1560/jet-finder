@@ -827,6 +827,46 @@ def api_aircraft_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/aircraft')
+def api_aircraft():
+    """Alias for static/app.js: returns aircraft list as { success, aircraft }."""
+    try:
+        raw = get_unified_aircraft_data()
+        aircraft = []
+        for ac in raw:
+            aircraft.append({
+                'name': ac.get('aircraft_name') or ac.get('name') or ac.get('model', 'Unknown'),
+                'manufacturer': ac.get('manufacturer', 'Unknown'),
+                'type': ac.get('category') or ac.get('type', 'N/A'),
+                'range': ac.get('range') or ac.get('range_nm') or 'N/A',
+                'cruise_speed': ac.get('speed') or ac.get('cruise_speed') or 'N/A',
+                'price': ac.get('price'),
+            })
+        return jsonify({'success': True, 'aircraft': aircraft})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/aircraft/ranges')
+def api_aircraft_ranges():
+    """Aircraft ranges for charts (static/app.js)."""
+    try:
+        raw = get_unified_aircraft_data()
+        ranges = []
+        for ac in raw:
+            r = ac.get('range') or ac.get('range_nm')
+            if r is not None:
+                try:
+                    r = float(r)
+                except (TypeError, ValueError):
+                    continue
+            name = ac.get('aircraft_name') or ac.get('name') or ac.get('model', 'Unknown')
+            ranges.append({'name': name, 'range': r if r is not None else 0})
+        return jsonify({'success': True, 'ranges': ranges})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 # Fallback airport list when JSON file is missing (e.g. on some hosts)
 _AIRPORTS_FALLBACK = [
     {'iata': 'LAX', 'icao': 'KLAX', 'name': 'Los Angeles International', 'city': 'Los Angeles', 'country': 'United States', 'lat': 33.9425, 'lon': -118.4081},
