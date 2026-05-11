@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Portal - Jet Finder{% endblock %}
+
+{% block additional_css %}
+<style>
+    .ap { min-height: 100vh; background: linear-gradient(160deg, #0a0a0a, #111 50%, #0d0d0d); padding: 2rem 1.5rem 4rem; }
+    .ap__inner { max-width: 1200px; margin: 0 auto; }
+    .ap__title { font-family: 'Orbitron', sans-serif; color: #fff; font-size: clamp(1.5rem, 3vw, 2rem); margin-bottom: 0.5rem; }
+    .ap__sub { color: #8e8e93; font-family: 'Rajdhani', sans-serif; margin-bottom: 2rem; }
+    .ap__tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .ap__tab { padding: 0.5rem 1rem; border-radius: 999px; background: rgba(255,255,255,0.05); color: #c0c0c0; border: 1px solid rgba(255,255,255,0.1); font-family: 'Rajdhani', sans-serif; font-weight: 700; cursor: pointer; }
+    .ap__tab.active { background: linear-gradient(135deg, rgba(240,85,69,0.25), rgba(240,85,69,0.1)); color: #F05545; border-color: rgba(240,85,69,0.4); }
+    .ap__card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 1.25rem; margin-bottom: 1rem; }
+    .ap__row { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; }
+    .ap__col { color: #d0d0d0; font-family: 'Rajdhani', sans-serif; font-size: 0.95rem; }
+    .ap__col strong { color: #fff; }
+    .ap__badge { padding: 0.2rem 0.65rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .ap__btn { padding: 0.5rem 0.9rem; border-radius: 8px; border: 0; font-weight: 700; font-family: 'Rajdhani', sans-serif; cursor: pointer; }
+    .ap__btn--approve { background: #22c55e; color: #000; }
+    .ap__btn--reject { background: #ef4444; color: #fff; }
+    .ap__btn--secondary { background: rgba(255,255,255,0.1); color: #fff; }
+    .ap__filter { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .ap__filter select, .ap__filter input { padding: 0.5rem 0.75rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-family: 'Rajdhani', sans-serif; }
+    .ap__empty { color: #8e8e93; padding: 1rem; text-align: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ap">
+    <div class="ap__inner">
+        <h1 class="ap__title">Admin Portal</h1>
+        <p class="ap__sub">Approve listings, manage users, view platform activity.</p>
+
+        <div class="ap__tabs">
+            <button class="ap__tab active" data-tab="listings">Listings</button>
+            <button class="ap__tab" data-tab="users">Users</button>
+        </div>
+
+        <div id="tab-listings">
+            <div class="ap__filter">
+                <select id="status-filter">
+                    <option value="pending">Pending</option>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="active">Active (approved)</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="archived">Archived</option>
+                    <option value="">All</option>
+                </select>
+                <button class="ap__btn ap__btn--secondary" id="refresh-listings">Refresh</button>
+            </div>
+            <div id="listings-list"></div>
+        </div>
+
+        <div id="tab-users" style="display:none;">
+            <div id="users-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Admin portal: all fetch calls send the jet_session HttpOnly cookie.
+const STATUS_COLORS = {
+    pending: '#fbbf24', unpaid: '#fbbf24', active: '#22c55e',
+    rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
+};
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+}
+
+async function loadAdminListings() {
+    const status = document.getElementById('status-filter').value;
+    const target = document.getElementById('listings-list');
+    target.innerHTML = '<div class="ap__empty">Loading...</div>';
+    try {
+        const url = status ? '/api/admin/listings?status=' + encodeURIComponent(status) : '/api/admin/listings';
+        const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        if (r.status === 403) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
+        const data = await r.json();
+        const items = data.listings || [];
+        if (!items.length) { target.innerHTML = '<div class="ap__empty">No listings.</div>'; return; }
+        target.innerHTML = items.map(function (l) {
+            const color = STATUS_COLORS[l.status] || '#8e8e93';
+            const owner = l.owner ? (l.owner.email || (l.owner.first_name + ' ' + l.owner.last_name)) : 'unknown';
+            return ''
+                + '<div class="ap__card" data-id="' + l.id + '">'
+                + '  <div class="ap__row">'
+                + '    <div class="ap__col" style="flex:1;min-width:220px;">'
+                + '      <strong>' + esc(l.title || l.name || 'Listing #' + l.id) + '</strong><br>'
+                + '      ' + esc(l.manufacturer || '') + ' &middot; ' + esc(l.category || '') + '<br>'
+                + '      $' + (Number(l.price) || 0).toLocaleString() + ' &middot; ' + esc(l.location || '') + '<br>'
+                + '      <span style="color:#8e8e93;font-size:0.85rem;">Owner: ' + esc(owner) + '</span>'
+                + '    </div>'
+                + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(l.status) + '</span></div>'
+                + '    <div class="ap__col" style="display:flex;gap:0.5rem;">'
+                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '">Approve</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '">Reject</button>'
+                + '    </div>'
+                + '  </div>'
+                + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ef4444;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
+                + '</div>';
+        }).join('');
+        target.querySelectorAll('button[data-act]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const id = btn.getAttribute('data-id');
+                const act = btn.getAttribute('data-act');
+                let body = undefined;
+                if (act === 'reject') {
+                    const reason = prompt('Reason for rejection?') || '';
+                    body = JSON.stringify({ reason: reason });
+                }
+                const resp = await fetch('/api/admin/listings/' + id + '/' + act, {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body,
+                });
+                if (resp.ok) { loadAdminListings(); } else {
+                    const err = await resp.json().catch(function () { return {}; });
+                    alert(err.message || err.error || 'Action failed');
+                }
+            });
+        });
+    } catch (e) {
+        target.innerHTML = '<div class="ap__empty">Failed to load listings.</div>';
+        console.error(e);
+    }
+}
+
+async function loadAdminUsers() {
+    const target = document.getElementById('users-list');
+    target.innerHTML = '<div class="ap__empty">Loading...</div>';
+    try {
+        const r = await fetch('/api/admin/users', { credentials: 'include', cache: 'no-store' });
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        if (r.status === 403) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
+        const data = await r.json();
+        const users = data.users || [];
+        if (!users.length) { target.innerHTML = '<div class="ap__empty">No users.</div>'; return; }
+        target.innerHTML = users.map(function (u) {
+            return ''
+                + '<div class="ap__card">'
+                + '  <div class="ap__row">'
+                + '    <div class="ap__col" style="flex:1;min-width:220px;">'
+                + '      <strong>' + esc(u.email) + '</strong> ' + (u.is_admin ? '<span class="ap__badge" style="background:#F0554522;color:#F05545;margin-left:0.5rem;">ADMIN</span>' : '') + '<br>'
+                + '      ' + esc(u.first_name || '') + ' ' + esc(u.last_name || '') + ' &middot; ' + esc(u.company || '—') + '<br>'
+                + '      <span style="color:#8e8e93;font-size:0.85rem;">Role: ' + esc(u.profile_role || 'other') + ' &middot; Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
+                + '    </div>'
+                + '  </div>'
+                + '</div>';
+        }).join('');
+    } catch (e) {
+        target.innerHTML = '<div class="ap__empty">Failed to load users.</div>';
+        console.error(e);
+    }
+}
+
+document.querySelectorAll('.ap__tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+        document.querySelectorAll('.ap__tab').forEach(function (x) { x.classList.remove('active'); });
+        t.classList.add('active');
+        const tab = t.getAttribute('data-tab');
+        document.getElementById('tab-listings').style.display = (tab === 'listings') ? '' : 'none';
+        document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
+        if (tab === 'users') loadAdminUsers();
+    });
+});
+
+document.getElementById('status-filter').addEventListener('change', loadAdminListings);
+document.getElementById('refresh-listings').addEventListener('click', loadAdminListings);
+
+(async function init() {
+    const me = await fetch('/api/auth/me', { credentials: 'include' });
+    if (me.status === 401) { window.location.href = '/login'; return; }
+    const u = (await me.json()).user;
+    if (!u || !u.is_admin) {
+        document.querySelector('.ap__inner').innerHTML = '<h1 class="ap__title">Admin access required</h1><p class="ap__sub">Your account is not an admin.</p>';
+        return;
+    }
+    loadAdminListings();
+})();
+</script>
+{% endblock %}

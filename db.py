@@ -45,6 +45,7 @@ class User(Base):
     phone = Column(String(20))
     profile_role = Column(String(50), default='other')  # broker, buyer, mechanic, other
     profile_location = Column(String(255))  # city, region, or business location
+    is_admin = Column(Boolean, default=False, nullable=False)  # Admin portal access
     user_type = Column(String(50), default='free_user')
     is_verified_seller = Column(Boolean, default=False)
     verification_status = Column(String(50), default='unverified')
@@ -88,6 +89,24 @@ class UserListing(Base):
     pricing_plan = Column(String(50), default='monthly')
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class UserSession(Base):
+    """Token-based browser session, set as `jet_session` HttpOnly cookie.
+
+    Login/signup inserts a row with a random 128-hex-char token and 30-day expiry.
+    Every authenticated request looks up the user by cookie token here.
+    Logout deletes the row, invalidating the cookie immediately.
+    """
+    __tablename__ = 'user_sessions'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    token = Column(String(128), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -370,6 +389,7 @@ def init_db():
             for col_def in [
                 'profile_role VARCHAR(50) DEFAULT \'other\'',
                 'profile_location VARCHAR(255)',
+                'is_admin BOOLEAN DEFAULT 0',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -380,8 +400,9 @@ def init_db():
     elif DATABASE_URL.startswith('postgresql'):
         with engine.connect() as conn:
             for col, typ in [
-                ('profile_role', 'VARCHAR(50) DEFAULT \'other\''),
+                ('profile_role', "VARCHAR(50) DEFAULT 'other'"),
                 ('profile_location', 'VARCHAR(255)'),
+                ('is_admin', 'BOOLEAN DEFAULT FALSE NOT NULL'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -428,7 +449,7 @@ def get_database_status():
         out['connection_error'] = str(e)
         return out
     # Collect row counts for main tables (same names as model __tablename__)
-    tables = ['users', 'user_listings', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
+    tables = ['users', 'user_sessions', 'user_listings', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
               'service_providers', 'buyer_preferences', 'performance_profiles']
     for table in tables:
         try:
@@ -469,6 +490,83 @@ def create_user(email, password_hash, first_name=None, last_name=None, company=N
         s.add(u)
         s.flush()
         return u.id
+
+
+# --- Session/token helpers (jet_session cookie) ---
+def create_user_session(user_id, token, expires_at):
+    """Insert a new session row tied to user_id with the given random token."""
+    with get_session() as s:
+        row = UserSession(user_id=user_id, token=token, expires_at=expires_at)
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_user_by_session_token(token):
+    """Return user dict for a valid (non-expired) session token, else None.
+
+    Caller is the auth layer; never trust a user_id from the client — always
+    derive it via this lookup from the HttpOnly `jet_session` cookie.
+    """
+    if not token:
+        return None
+    with get_session() as s:
+        sess = s.query(UserSession).filter(UserSession.token == token).first()
+        if not sess:
+            return None
+        expires = getattr(sess, 'expires_at', None)
+        if expires is not None and expires < datetime.utcnow():
+            s.delete(sess)
+            return None
+        u = s.query(User).filter(User.id == sess.user_id).first()
+        return u.to_dict() if u else None
+
+
+def delete_user_session_token(token):
+    """Remove a session row (used on logout). Returns True if deleted."""
+    if not token:
+        return False
+    with get_session() as s:
+        n = s.query(UserSession).filter(UserSession.token == token).delete()
+        return n > 0
+
+
+def purge_expired_user_sessions():
+    """Best-effort cleanup of expired session rows. Safe to call periodically."""
+    try:
+        cutoff = datetime.utcnow()
+        with get_session() as s:
+            s.query(UserSession).filter(UserSession.expires_at < cutoff).delete()
+    except Exception:
+        pass
+
+
+def set_user_admin(user_id, is_admin=True):
+    """Grant/revoke admin. Used by a one-off script or psql."""
+    with get_session() as s:
+        n = s.query(User).filter(User.id == user_id).update({'is_admin': bool(is_admin)}, synchronize_session=False)
+        return n > 0
+
+
+def list_all_users_basic(limit=500):
+    """Admin: list users with basic account info, no sensitive fields."""
+    with get_session() as s:
+        rows = s.query(User).order_by(User.created_at.desc()).limit(limit).all()
+        out = []
+        for u in rows:
+            out.append({
+                'id': u.id,
+                'email': u.email,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'company': u.company,
+                'phone': u.phone,
+                'profile_role': u.profile_role,
+                'profile_location': u.profile_location,
+                'is_admin': bool(u.is_admin),
+                'created_at': (u.created_at.isoformat() if getattr(u, 'created_at', None) is not None else None),
+            })
+        return out
 
 
 # --- User listings helpers ---
@@ -587,6 +685,72 @@ def reject_user_listing(listing_id, rejection_reason):
         n = s.query(UserListing).filter(UserListing.id == listing_id, UserListing.status == 'pending').update({
             'status': 'rejected',
             'rejection_reason': rejection_reason,
+        }, synchronize_session=False)
+        return n > 0
+
+
+# --- Ownership-aware listing helpers (used by /api/listings/<id>) ---
+def get_listing_with_owner(listing_id):
+    """Return listing dict (any status) or None. Caller must check ownership."""
+    with get_session() as s:
+        row = s.query(UserListing).filter(UserListing.id == listing_id).first()
+        return row.to_dict() if row else None
+
+
+def update_user_listing_fields(listing_id, fields):
+    """Update an existing listing with a whitelisted set of fields. Returns True if updated.
+
+    Only allowed columns can be patched. user_id can never be overwritten via this path.
+    """
+    allowed = {
+        'title', 'year', 'price', 'hours', 'location', 'email', 'description',
+        'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan',
+    }
+    safe = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if not safe:
+        return False
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(safe, synchronize_session=False)
+        return n > 0
+
+
+def archive_user_listing(listing_id):
+    """Soft-archive a listing (status=archived). Returns True if updated."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
+            {'status': 'archived'}, synchronize_session=False
+        )
+        return n > 0
+
+
+def admin_list_user_listings(status=None, limit=500):
+    """Admin: list all listings, optionally filtered by status."""
+    with get_session() as s:
+        q = s.query(UserListing)
+        if status:
+            q = q.filter(UserListing.status == status)
+        rows = q.order_by(UserListing.created_at.desc()).limit(limit).all()
+        return [r.to_dict() for r in rows]
+
+
+def admin_approve_listing_any(listing_id, approved_by_user_id):
+    """Admin approve from ANY current status (pending, unpaid, draft). Sets status=active."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update({
+            'status': 'active',
+            'approved_by': approved_by_user_id,
+            'approved_at': datetime.utcnow(),
+            'rejection_reason': None,
+        }, synchronize_session=False)
+        return n > 0
+
+
+def admin_reject_listing_any(listing_id, rejection_reason):
+    """Admin reject from ANY current status. Records reason."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update({
+            'status': 'rejected',
+            'rejection_reason': rejection_reason or 'No reason provided',
         }, synchronize_session=False)
         return n > 0
 

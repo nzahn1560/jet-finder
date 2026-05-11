@@ -268,6 +268,72 @@
             <a href="{{ url_for('pricing') }}">View plans</a>
         </div>
         {% endif %}
+
+        <h2 class="dash__section-title" style="margin-top: 3rem;">My listings</h2>
+        <div id="my-listings-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading your listings...</div>
+        <div id="my-listings" class="dash__grid"></div>
     </div>
 </div>
+
+<script>
+// Customer dashboard: load only this user's listings from /api/listings/me.
+// Uses credentials:'include' so the jet_session HttpOnly cookie is sent.
+(async function loadMyListings() {
+    const listEl = document.getElementById('my-listings');
+    const statusEl = document.getElementById('my-listings-status');
+    try {
+        const me = await fetch('/api/auth/me', { credentials: 'include' });
+        if (me.status === 401) { window.location.href = '/login'; return; }
+        const r = await fetch('/api/listings/me', { credentials: 'include', cache: 'no-store' });
+        if (!r.ok) throw new Error('Failed to load listings');
+        const data = await r.json();
+        const listings = data.listings || [];
+        if (listings.length === 0) {
+            statusEl.textContent = 'You have no listings yet. Click "Create listing" above to make your first one.';
+            return;
+        }
+        statusEl.textContent = listings.length + ' listing' + (listings.length === 1 ? '' : 's');
+        const html = listings.map(function (l) {
+            const statusColor = ({
+                active: '#22c55e', pending: '#fbbf24', unpaid: '#fbbf24',
+                rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
+            })[l.status] || '#8e8e93';
+            const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
+            const canEdit = l.status !== 'active' && l.status !== 'archived';
+            const canDelete = l.status !== 'active';
+            return '\n<div class="dash__card">\n'
+                + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
+                + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
+                + '  <strong>$' + (Number(l.price) || 0).toLocaleString() + '</strong> &middot; ' + escapeHtml(l.location || '') + '</p>\n'
+                + '  <span class="dash__badge" style="color:' + statusColor + ';">Status: ' + escapeHtml(l.status || 'unknown') + '</span>\n'
+                + rej + '\n'
+                + '  <div style="margin-top:0.8rem; display:flex; gap:0.5rem;">'
+                + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
+                + (canDelete ? ' <button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
+                + '  </div>\n'
+                + '</div>';
+        }).join('');
+        listEl.innerHTML = html;
+        listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                if (!confirm('Delete this listing?')) return;
+                const id = btn.getAttribute('data-delete');
+                const resp = await fetch('/api/listings/' + id, { method: 'DELETE', credentials: 'include' });
+                if (resp.ok) { loadMyListings(); } else {
+                    const err = await resp.json().catch(function () { return {}; });
+                    alert(err.message || err.error || 'Failed to delete');
+                }
+            });
+        });
+    } catch (e) {
+        statusEl.textContent = 'Could not load your listings.';
+        console.error(e);
+    }
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+})();
+</script>
 {% endblock %}

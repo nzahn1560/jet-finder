@@ -117,12 +117,146 @@ def record_per_use_purchase(user_id, service_type, amount, stripe_payment_intent
 def use_per_use_purchase(user_id, service_type):
     return db_module.use_per_use_purchase(user_id, service_type)
 
-# Authentication decorators
+# =============================================================================
+# Auth layer (jet_session HttpOnly cookie + Flask session for backward compat).
+#
+# Truth source for "who is logged in":
+#   1. `jet_session` cookie  -> db_module.get_user_by_session_token()
+#   2. Flask `session['user_id']` (legacy form-based login)
+# All routes derive the current user via get_current_user_from_request().
+# Never trust user_id from the request body or query string.
+# =============================================================================
+import secrets
+
+JET_SESSION_COOKIE = 'jet_session'
+JET_SESSION_DAYS = 30
+# Secure cookie when running on Railway/Postgres (production).
+# Locally on SQLite + HTTP, leave Secure=False so the cookie still sets.
+_PRODUCTION = bool(os.environ.get('DATABASE_URL', '').startswith('postgres')) or os.environ.get('FLASK_ENV') == 'production'
+
+
+def _new_session_token() -> str:
+    """Cryptographically strong opaque token stored in jet_session cookie + DB."""
+    return secrets.token_hex(64)  # 128 hex chars
+
+
+def _set_jet_session_cookie(response, token: str):
+    """Apply jet_session cookie settings. HttpOnly, SameSite=Lax, Secure in prod."""
+    response.set_cookie(
+        JET_SESSION_COOKIE,
+        token,
+        max_age=JET_SESSION_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=_PRODUCTION,
+        samesite='Lax',
+        path='/',
+    )
+
+
+def _clear_jet_session_cookie(response):
+    response.set_cookie(
+        JET_SESSION_COOKIE, '', max_age=0,
+        httponly=True, secure=_PRODUCTION, samesite='Lax', path='/',
+    )
+
+
+def _start_jet_session(user_id: int) -> str:
+    """Create a new DB-backed session for a user; returns the token to put in the cookie."""
+    token = _new_session_token()
+    db_module.create_user_session(
+        user_id=user_id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(days=JET_SESSION_DAYS),
+    )
+    return token
+
+
+def get_current_user_from_request():
+    """Return current user dict or None. Checks cookie first, then legacy Flask session.
+
+    This is the only function trusted to identify the logged-in user.
+    """
+    token = request.cookies.get(JET_SESSION_COOKIE)
+    if token:
+        user = db_module.get_user_by_session_token(token)
+        if user:
+            return user
+    if 'user_id' in session:
+        user = get_user_by_id(session['user_id'])
+        if user:
+            return user
+    return None
+
+
+def _is_api_request() -> bool:
+    """True if the request looks like an API/AJAX call (return JSON 401/403, not redirect)."""
+    if request.path.startswith('/api/'):
+        return True
+    accept = request.headers.get('Accept', '')
+    if 'application/json' in accept:
+        return True
+    return request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+
+def require_auth(f):
+    """Decorator: require any logged-in user (cookie or Flask session).
+
+    - API requests: returns JSON 401 with `{'error': 'not_logged_in'}`.
+    - Page requests: redirects to /login?next=<current url>.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user = get_current_user_from_request()
+        if not user:
+            if _is_api_request():
+                return jsonify({'error': 'not_logged_in'}), 401
+            return redirect(url_for('login', next=request.url))
+        request.current_user = user  # type: ignore[attr-defined]
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def require_admin(f):
+    """Decorator: require logged-in user with is_admin=True.
+
+    - API: JSON 401 if anon, 403 if non-admin.
+    - Page: redirect to /login if anon, return 403 page if non-admin.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user = get_current_user_from_request()
+        if not user:
+            if _is_api_request():
+                return jsonify({'error': 'not_logged_in'}), 401
+            return redirect(url_for('login', next=request.url))
+        if not user.get('is_admin'):
+            if _is_api_request():
+                return jsonify({'error': 'forbidden'}), 403
+            return ('Admin access required.', 403)
+        request.current_user = user  # type: ignore[attr-defined]
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.after_request
+def _no_cache_auth_endpoints(response):
+    """Force no-cache for any auth/dashboard/admin/API path so Cloudflare/browsers never serve stale data."""
+    path = request.path or ''
+    if (path.startswith('/api/') or path.startswith('/admin') or path in (
+        '/login', '/logout', '/register', '/dashboard', '/my-listings', '/create-listing'
+    )):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
+# Existing legacy decorator (Flask-session based) kept for old routes still using flash/redirect.
 def login_required(f):
-    """Decorator to require user login"""
+    """Decorator to require user login (legacy: redirects to /login)."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
+        if get_current_user_from_request() is None:
             flash('Please log in to access this page.', 'error')
             return redirect(url_for('login', next=request.url))
         return f(*args, **kwargs)
@@ -911,7 +1045,7 @@ def api_debug():
 
 @app.route('/api/health')
 def api_health():
-    """Health check: db_ok, table counts, aircraft/airports used by search (Railway debugging)."""
+    """Health check: db_ok, table counts (incl. accounts), data source (Railway debugging)."""
     try:
         db_status = db_module.get_database_status()
         airports_data = _load_airports_data()
@@ -921,21 +1055,25 @@ def api_health():
         is_pg = _is_railway_postgres()
         aircraft_src = 'postgres' if (aircraft_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_cache')
         airports_src = 'postgres' if (airports_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_fallback')
+        tc = db_status.get('table_counts', {}) or {}
+        accounts = {
+            'users': tc.get('users', 0),
+            'user_sessions': tc.get('user_sessions', 0),
+            'user_listings': tc.get('user_listings', 0),
+        }
         return jsonify({
             'status': 'ok' if db_status['db_ok'] else 'db_error',
             'timestamp': int(datetime.now().timestamp() * 1000),
             'db_ok': db_status['db_ok'],
             'database_type': db_status['database_type'],
             'connection_error': db_status.get('connection_error'),
-            'table_counts': db_status.get('table_counts', {}),
+            'table_counts': tc,
+            'accounts': accounts,
             'aircraft_count': aircraft_count,
             'airports_count': airports_count,
             'aircraft_source': aircraft_src,
             'airports_source': airports_src,
-            'data_loaded': {
-                'airports': airports_count,
-                'aircraft': aircraft_count,
-            },
+            'data_loaded': {'airports': airports_count, 'aircraft': aircraft_count},
             'message': 'Search data from Postgres' if (db_status['db_ok'] and (aircraft_count or airports_count)) else (
                 'Search data empty - check Postgres seed and Railway logs' if is_pg else 'Using file/cache fallback'
             ),
@@ -1924,57 +2062,196 @@ def setup_jinja_globals():
 # Call setup immediately
 setup_jinja_globals()
 
-# Authentication routes
+# Authentication routes (HTML form posts; also set jet_session cookie)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login page"""
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
-        
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
         user = get_user_by_email(email)
         if user and password and check_password_hash(user['password_hash'], password):
-            session['user_id'] = user['id']
+            user_id = int(user['id'])
+            session['user_id'] = user_id
+            token = _start_jet_session(user_id)
             flash('Successfully logged in!', 'success')
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('dashboard'))
+            next_page = request.args.get('next') or url_for('dashboard')
+            resp = redirect(next_page)
+            _set_jet_session_cookie(resp, token)
+            return resp
         flash('Invalid email or password', 'error')
-    
     return render_template('auth/login.html')
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """User registration page"""
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password') or ''
         first_name = request.form.get('first_name')
         last_name = request.form.get('last_name')
         company = request.form.get('company')
         phone = request.form.get('phone')
         profile_role = request.form.get('profile_role')
         profile_location = request.form.get('profile_location')
-        
-        if get_user_by_email(email):
+
+        if not email or not password:
+            flash('Email and password are required', 'error')
+        elif get_user_by_email(email):
             flash('Email already registered', 'error')
         else:
             user_id = create_user(email, password, first_name, last_name, company, phone,
                 profile_role=profile_role, profile_location=profile_location)
             if user_id is not None:
-                session['user_id'] = user_id
+                user_id_int = cast(int, user_id)
+                session['user_id'] = user_id_int
+                token = _start_jet_session(user_id_int)
                 flash('Account created successfully!', 'success')
-                return redirect(url_for('dashboard'))
+                resp = redirect(url_for('dashboard'))
+                _set_jet_session_cookie(resp, token)
+                return resp
             else:
                 flash('Error creating account', 'error')
-    
     return render_template('auth/register.html')
+
 
 @app.route('/logout')
 def logout():
-    """User logout"""
+    """User logout (clears Flask session AND jet_session cookie)."""
+    token = request.cookies.get(JET_SESSION_COOKIE)
+    if token:
+        try:
+            db_module.delete_user_session_token(token)
+        except Exception:
+            logger.exception("Failed to delete session token on logout")
     session.clear()
     flash('Successfully logged out', 'success')
-    return redirect(url_for('home'))
+    resp = redirect(url_for('home'))
+    _clear_jet_session_cookie(resp)
+    return resp
+
+
+# =============================================================================
+# /api/auth/* JSON endpoints (used by SPA-style fetch calls).
+# All set/clear the `jet_session` HttpOnly cookie.
+# Frontends MUST call these with `credentials: 'include'`.
+# =============================================================================
+
+# Minimal in-process rate limiter for /api/auth/{signup,login}.
+# (Plenty for current traffic; swap in flask-limiter later if needed.)
+_AUTH_RATE_LIMITS: dict[str, list[float]] = {}
+_AUTH_MAX_PER_MIN = 10
+
+
+def _auth_rate_limited() -> bool:
+    """True if the caller's IP has exceeded the rate budget in the last 60s."""
+    import time
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown').split(',')[0].strip()
+    now = time.time()
+    bucket = [t for t in _AUTH_RATE_LIMITS.get(ip, []) if now - t < 60]
+    bucket.append(now)
+    _AUTH_RATE_LIMITS[ip] = bucket
+    return len(bucket) > _AUTH_MAX_PER_MIN
+
+
+def _user_public_dict(user) -> dict:
+    """Strip sensitive fields before returning user JSON to the client."""
+    if not user:
+        return {}
+    out = {k: v for k, v in user.items() if k not in {'password_hash', 'verification_documents'}}
+    if out.get('created_at') and not isinstance(out['created_at'], str):
+        try:
+            out['created_at'] = out['created_at'].isoformat()
+        except Exception:
+            out['created_at'] = str(out['created_at'])
+    if out.get('updated_at') and not isinstance(out['updated_at'], str):
+        try:
+            out['updated_at'] = out['updated_at'].isoformat()
+        except Exception:
+            out['updated_at'] = str(out['updated_at'])
+    return out
+
+
+@app.route('/api/auth/signup', methods=['POST'])
+def api_auth_signup():
+    """Create account, hash password, start session, set jet_session cookie."""
+    if _auth_rate_limited():
+        return jsonify({'error': 'rate_limited'}), 429
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    if not email or not password:
+        return jsonify({'error': 'missing_fields', 'message': 'email and password are required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'weak_password', 'message': 'Password must be at least 8 characters'}), 400
+    if get_user_by_email(email):
+        return jsonify({'error': 'email_in_use'}), 400
+    try:
+        user_id = create_user(
+            email, password,
+            data.get('first_name'), data.get('last_name'),
+            data.get('company'), data.get('phone'),
+            profile_role=data.get('profile_role'),
+            profile_location=data.get('profile_location'),
+        )
+    except Exception:
+        logger.exception('signup failed')
+        return jsonify({'error': 'server_error'}), 500
+    if user_id is None:
+        return jsonify({'error': 'server_error'}), 500
+    user_id = cast(int, user_id)
+    session['user_id'] = user_id
+    token = _start_jet_session(user_id)
+    user = get_user_by_id(user_id)
+    resp = jsonify({'ok': True, 'user': _user_public_dict(user)})
+    _set_jet_session_cookie(resp, token)
+    return resp, 201
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """Verify email+password, start session, set jet_session cookie."""
+    if _auth_rate_limited():
+        return jsonify({'error': 'rate_limited'}), 429
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    if not email or not password:
+        return jsonify({'error': 'missing_fields'}), 400
+    user = get_user_by_email(email)
+    if not user or not check_password_hash(user['password_hash'], password):
+        return jsonify({'error': 'invalid_credentials'}), 401
+    user_id = int(user['id'])
+    session['user_id'] = user_id
+    token = _start_jet_session(user_id)
+    resp = jsonify({'ok': True, 'user': _user_public_dict(user)})
+    _set_jet_session_cookie(resp, token)
+    return resp, 200
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """Delete session row from DB and clear cookie. Always returns 200."""
+    token = request.cookies.get(JET_SESSION_COOKIE)
+    if token:
+        try:
+            db_module.delete_user_session_token(token)
+        except Exception:
+            logger.exception('logout: failed to delete session row')
+    session.clear()
+    resp = jsonify({'ok': True})
+    _clear_jet_session_cookie(resp)
+    return resp, 200
+
+
+@app.route('/api/auth/me')
+def api_auth_me():
+    """Return the logged-in user or 401. Used by the dashboard on page load."""
+    user = get_current_user_from_request()
+    if not user:
+        return jsonify({'error': 'not_logged_in'}), 401
+    return jsonify({'user': _user_public_dict(user)}), 200
 
 # Pro subscription removed - upgrade route removed
 
@@ -4169,9 +4446,134 @@ def api_create_user_listing():
         logger.exception("Error creating user listing")
         return jsonify({'error': 'Failed to create listing'}), 500
 
+# =============================================================================
+# /api/listings/* — ownership-aware listings API.
+# Always uses get_current_user_from_request() — never user_id from the body.
+# =============================================================================
+@app.route('/api/listings/me')
+@require_auth
+def api_listings_me():
+    """Return only the listings owned by the current user, with status info."""
+    user = request.current_user  # type: ignore[attr-defined]
+    try:
+        rows = db_module.get_listings_by_user_id(user['id'])
+        aircraft_data = get_unified_aircraft_data()
+        aircraft_map = {a.get('id'): a for a in aircraft_data}
+        out = []
+        for row in rows:
+            combined = _row_to_combined_listing(row, aircraft_map)
+            base = {
+                'id': row.get('id'),
+                'title': row.get('title'),
+                'year': row.get('year'),
+                'price': row.get('price'),
+                'hours': row.get('hours', 0),
+                'location': row.get('location'),
+                'status': row.get('status'),
+                'payment_status': row.get('payment_status'),
+                'pricing_plan': row.get('pricing_plan'),
+                'rejection_reason': row.get('rejection_reason'),
+                'created_at': str(row.get('created_at')) if row.get('created_at') else None,
+                'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
+            }
+            if combined:
+                base.update({
+                    'name': combined.get('name'),
+                    'manufacturer': combined.get('manufacturer'),
+                    'category': combined.get('category'),
+                    'image': combined.get('image'),
+                })
+            out.append(base)
+        return jsonify({'listings': out, 'total': len(out)}), 200
+    except Exception:
+        logger.exception('api_listings_me failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/api/listings', methods=['POST'])
+@require_auth
+def api_listings_create():
+    """Create a new listing owned by the current user. Default status='unpaid'."""
+    user = request.current_user  # type: ignore[attr-defined]
+    data = request.get_json(silent=True) or {}
+    required = ['profile_id', 'price', 'location', 'email']
+    missing = [f for f in required if data.get(f) in (None, '')]
+    if missing:
+        return jsonify({'error': 'missing_fields', 'fields': missing}), 400
+
+    aircraft_data = get_unified_aircraft_data()
+    profile = next((a for a in aircraft_data if a.get('id') == data['profile_id']), None)
+    if not profile:
+        return jsonify({'error': 'profile_not_found'}), 404
+
+    images_str = ','.join(data.get('images', [])) if data.get('images') else ''
+    documents_str = ','.join(data.get('documents', [])) if data.get('documents') else ''
+    title = data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}".strip()
+    year_value = data.get('year') or profile.get('year') or datetime.now().year
+    valid_plans = {'monthly', 'six_month'}
+    pricing_plan = data.get('pricing_plan', 'monthly')
+    if pricing_plan not in valid_plans:
+        return jsonify({'error': 'invalid_pricing_plan'}), 400
+
+    try:
+        listing_id = db_module.create_user_listing(
+            data['profile_id'], title, year_value,
+            float(data['price']), int(data.get('hours', 0) or 0),
+            data['location'], data['email'],
+            data.get('description', ''), images_str, documents_str,
+            data.get('engine_type', profile.get('category', 'Unknown')),
+            data.get('manufacturer', profile.get('manufacturer', 'Unknown')),
+            pricing_plan,
+            user_id=user['id'],
+        )
+        return jsonify({'ok': True, 'id': listing_id}), 201
+    except Exception:
+        logger.exception('api_listings_create failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/api/listings/<int:listing_id>', methods=['PATCH'])
+@require_auth
+def api_listings_patch(listing_id: int):
+    """Update a listing. Owners can edit their own; admins can edit any.
+
+    Non-admin owners may not edit listings that are already 'active' (approved).
+    """
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    is_owner = row.get('user_id') == user['id']
+    if not is_owner and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    if is_owner and not user.get('is_admin') and row.get('status') == 'active':
+        return jsonify({'error': 'cannot_edit_active', 'message': 'Approved listings cannot be edited.'}), 403
+    data = request.get_json(silent=True) or {}
+    if not db_module.update_user_listing_fields(listing_id, data):
+        return jsonify({'error': 'no_changes'}), 400
+    return jsonify({'ok': True}), 200
+
+
+@app.route('/api/listings/<int:listing_id>', methods=['DELETE'])
+@require_auth
+def api_listings_delete(listing_id: int):
+    """Soft-archive a listing. Owner only; only allowed when status is draft/unpaid/pending/rejected."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    if not user.get('is_admin') and row.get('status') == 'active':
+        return jsonify({'error': 'cannot_delete_active', 'message': 'Approved listings cannot be deleted.'}), 403
+    if not db_module.archive_user_listing(listing_id):
+        return jsonify({'error': 'server_error'}), 500
+    return jsonify({'ok': True}), 200
+
+
 @app.route('/api/my-listings')
 def api_my_listings():
-    """Return the current user's listings (login required)."""
+    """Return the current user's listings (login required) — legacy compat."""
     if not session.get('user_id'):
         return jsonify({'error': 'Not logged in'}), 401
     try:
@@ -4310,13 +4712,71 @@ def api_search_listings():
         logger.exception("Error searching user listings")
         return jsonify({'error': 'Failed to search listings'}), 500
 
-# Admin approval routes
+# =============================================================================
+# Admin routes — all gated by @require_admin (user.is_admin must be true).
+# =============================================================================
+@app.route('/admin')
+@require_admin
+def admin_index():
+    """Admin dashboard landing page."""
+    return render_template('admin_portal.html', user=request.current_user)  # type: ignore[attr-defined]
+
+
+@app.route('/api/admin/listings')
+@require_admin
+def api_admin_listings():
+    """Admin: list all listings (filter by ?status=pending|active|rejected|...)."""
+    status_filter = request.args.get('status') or None
+    try:
+        rows = db_module.admin_list_user_listings(status=status_filter)
+        aircraft_data = get_unified_aircraft_data()
+        aircraft_map = {a.get('id'): a for a in aircraft_data}
+        out = []
+        for row in rows:
+            combined = _row_to_combined_listing(row, aircraft_map) or {}
+            owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
+            out.append({
+                'id': row.get('id'),
+                'title': row.get('title'),
+                'year': row.get('year'),
+                'price': row.get('price'),
+                'location': row.get('location'),
+                'email': row.get('email'),
+                'status': row.get('status'),
+                'payment_status': row.get('payment_status'),
+                'rejection_reason': row.get('rejection_reason'),
+                'created_at': str(row.get('created_at')) if row.get('created_at') else None,
+                'name': combined.get('name'),
+                'manufacturer': combined.get('manufacturer'),
+                'category': combined.get('category'),
+                'image': combined.get('image'),
+                'owner': {
+                    'id': owner['id'], 'email': owner['email'],
+                    'first_name': owner.get('first_name'), 'last_name': owner.get('last_name'),
+                } if owner else None,
+            })
+        return jsonify({'listings': out, 'total': len(out)}), 200
+    except Exception:
+        logger.exception('api_admin_listings failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/api/admin/users')
+@require_admin
+def api_admin_users():
+    """Admin: list all users with basic info."""
+    try:
+        users = db_module.list_all_users_basic()
+        return jsonify({'users': users, 'total': len(users)}), 200
+    except Exception:
+        logger.exception('api_admin_users failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
 @app.route('/admin/listings')
+@require_admin
 def admin_listings():
     """Admin page to approve/reject pending listings (from db layer)."""
-    if not session.get('user_id'):
-        flash('Please login to access admin panel', 'warning')
-        return redirect(url_for('home'))
     rows = db_module.get_pending_user_listings()
     aircraft_data = get_unified_aircraft_data()
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
@@ -4351,46 +4811,38 @@ def admin_listings():
     return render_template('admin/listings.html', pending_listings=pending_listings)
 
 @app.route('/api/admin/listings/<int:listing_id>/approve', methods=['POST'])
+@require_admin
 def admin_approve_listing(listing_id):
-    """API endpoint to approve a pending listing (db layer)."""
-    if not session.get('user_id'):
-        return jsonify({'error': 'Unauthorized'}), 401
+    """Admin: approve a listing from any current status (sets status=active)."""
+    admin = request.current_user  # type: ignore[attr-defined]
     try:
-        raw_status, _ = db_module.get_user_listing_status(listing_id)
-        status = cast("str | None", raw_status)
-        if status is None:
-            return jsonify({'error': 'Listing not found'}), 404
-        if status != 'pending':
-            return jsonify({'error': f'Listing is already {status}'}), 400
-        ok = cast(bool, db_module.approve_user_listing(listing_id, session.get('user_id')))
-        if not ok:
-            return jsonify({'error': 'Listing not found or not pending'}), 404
-        return jsonify({'message': 'Listing approved successfully', 'status': 'active'}), 200
-    except Exception as e:
+        existing = db_module.get_listing_with_owner(listing_id)
+        if not existing:
+            return jsonify({'error': 'not_found'}), 404
+        if not db_module.admin_approve_listing_any(listing_id, admin['id']):
+            return jsonify({'error': 'server_error'}), 500
+        return jsonify({'ok': True, 'status': 'active'}), 200
+    except Exception:
         logger.exception("Error approving listing")
-        return jsonify({'error': 'Failed to approve listing'}), 500
+        return jsonify({'error': 'server_error'}), 500
+
 
 @app.route('/api/admin/listings/<int:listing_id>/reject', methods=['POST'])
+@require_admin
 def admin_reject_listing(listing_id):
-    """API endpoint to reject a pending listing (db layer)."""
-    if not session.get('user_id'):
-        return jsonify({'error': 'Unauthorized'}), 401
+    """Admin: reject a listing from any current status. Body: { "reason": "..." }."""
     try:
-        data = request.get_json() or {}
-        rejection_reason = data.get('reason', 'No reason provided')
-        raw_status, _ = db_module.get_user_listing_status(listing_id)
-        status = cast("str | None", raw_status)
-        if status is None:
-            return jsonify({'error': 'Listing not found'}), 404
-        if status != 'pending':
-            return jsonify({'error': f'Listing is already {status}'}), 400
-        ok = cast(bool, db_module.reject_user_listing(listing_id, rejection_reason))
-        if not ok:
-            return jsonify({'error': 'Listing not found or not pending'}), 404
-        return jsonify({'message': 'Listing rejected successfully', 'status': 'rejected'}), 200
-    except Exception as e:
+        data = request.get_json(silent=True) or {}
+        reason = data.get('reason') or 'No reason provided'
+        existing = db_module.get_listing_with_owner(listing_id)
+        if not existing:
+            return jsonify({'error': 'not_found'}), 404
+        if not db_module.admin_reject_listing_any(listing_id, reason):
+            return jsonify({'error': 'server_error'}), 500
+        return jsonify({'ok': True, 'status': 'rejected'}), 200
+    except Exception:
         logger.exception("Error rejecting listing")
-        return jsonify({'error': 'Failed to reject listing'}), 500
+        return jsonify({'error': 'server_error'}), 500
 
 @app.route('/admin/populate-profiles')
 def admin_populate_profiles():
