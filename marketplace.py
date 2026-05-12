@@ -2,17 +2,34 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import json
+import logging
 from datetime import datetime
 import uuid
+
+_log = logging.getLogger(__name__)
 
 # Create blueprint
 marketplace = Blueprint('marketplace', __name__, url_prefix='/marketplace')
 
-# Simulated database - in a real app, this would be in a database
+# =============================================================================
+# PRODUCTION DATA SAFETY
+# These JSON files are LEGACY dev fallbacks. Production user data lives ONLY
+# in Railway PostgreSQL (db.py). In production, save_users / save_listings
+# refuse to write so we never mirror real user/listing data to local files.
+# =============================================================================
 USERS_DB_FILE = 'data/users.json'
 LISTINGS_DB_FILE = 'data/listings.json'
 
-# Helper function to load users
+
+def _is_production() -> bool:
+    """Inline production check (mirrors db.is_production to keep this file standalone)."""
+    if (os.environ.get('FLASK_ENV') or '').lower() == 'production':
+        return True
+    if (os.environ.get('RAILWAY_ENVIRONMENT') or '').lower() == 'production':
+        return True
+    if (os.environ.get('DATABASE_URL') or '').startswith('postgres'):
+        return True
+    return False
 
 
 def load_users():
@@ -21,15 +38,15 @@ def load_users():
             return json.load(f)
     return []
 
-# Helper function to save users
-
 
 def save_users(users):
+    """SAFETY: production user data is in Postgres. Refuse to write JSON in prod."""
+    if _is_production():
+        _log.warning("marketplace.save_users: REFUSED in production (use db.create_user/db.py).")
+        return
     os.makedirs(os.path.dirname(USERS_DB_FILE), exist_ok=True)
     with open(USERS_DB_FILE, 'w') as f:
         json.dump(users, f, indent=2)
-
-# Helper function to load listings
 
 
 def load_listings():
@@ -38,10 +55,12 @@ def load_listings():
             return json.load(f)
     return []
 
-# Helper function to save listings
-
 
 def save_listings(listings):
+    """SAFETY: production listings live in Postgres. Refuse to write JSON in prod."""
+    if _is_production():
+        _log.warning("marketplace.save_listings: REFUSED in production (use db.create_user_listing/db.py).")
+        return
     os.makedirs(os.path.dirname(LISTINGS_DB_FILE), exist_ok=True)
     with open(LISTINGS_DB_FILE, 'w') as f:
         json.dump(listings, f, indent=2)

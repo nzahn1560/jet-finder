@@ -1069,6 +1069,7 @@ def api_health():
             'connection_error': db_status.get('connection_error'),
             'table_counts': tc,
             'accounts': accounts,
+            'safety': db_module.safety_status(),
             'aircraft_count': aircraft_count,
             'airports_count': airports_count,
             'aircraft_source': aircraft_src,
@@ -1081,6 +1082,46 @@ def api_health():
     except Exception as e:
         logger.exception("Error in /api/health")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/data-safety')
+def api_data_safety():
+    """Production data-safety posture.
+
+    Returns:
+      - is_production (per FLASK_ENV / RAILWAY_ENVIRONMENT / DATABASE_URL)
+      - destructive_ops_blocked (True when guards are active)
+      - listings_storage: should be 'postgres' in production (never 'json_file')
+      - row counts for users / user_sessions / user_listings
+    Use this after each deploy to confirm production data is intact.
+    """
+    try:
+        safety = db_module.safety_status()
+        db_status = db_module.get_database_status()
+        tc = db_status.get('table_counts', {}) or {}
+        listings_storage = 'postgres' if safety.get('database_type') == 'postgresql' else 'sqlite_or_other'
+        return jsonify({
+            'is_production': safety['is_production'],
+            'destructive_ops_blocked': safety['is_production'] and not safety['destructive_ops_override_set'],
+            'destructive_ops_override_set': safety['destructive_ops_override_set'],
+            'database_type': safety['database_type'],
+            'listings_storage': listings_storage,
+            'json_file_writes_blocked_in_prod': True,  # enforced in marketplace.py
+            'init_db_is_additive_only': True,           # documented contract in db.py
+            'counts': {
+                'users': tc.get('users', 0),
+                'user_sessions': tc.get('user_sessions', 0),
+                'user_listings': tc.get('user_listings', 0),
+            },
+            'notes': [
+                'init_db() only does CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS.',
+                'No code path writes user accounts or listings to JSON/CSV/SQLite in production.',
+                'See BACKUPS.md before running any destructive operation.',
+            ],
+        }), 200
+    except Exception as e:
+        logger.exception('api_data_safety failed')
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/data-source')

@@ -1,8 +1,24 @@
 """
 Database layer for Jet Finder. Uses PostgreSQL when DATABASE_URL is set (Railway),
 otherwise SQLite for localhost. Replaces direct sqlite3 for users/listings.
+
+=============================================================================
+PRODUCTION DATA SAFETY GUARANTEES
+=============================================================================
+1. User accounts and user_listings ONLY live in PostgreSQL (Railway).
+   No code path in this file writes user data to JSON, CSV, or local files.
+2. init_db() is *additive only*:
+   - Uses Base.metadata.create_all (creates missing tables, never drops).
+   - Uses ALTER TABLE ... ADD COLUMN IF NOT EXISTS (Postgres).
+   - Never runs DROP TABLE / TRUNCATE / DELETE FROM user_listings / drop_all.
+3. Any function that COULD be destructive (clear caches, drop schema) must
+   call assert_not_production() first, which raises in prod unless the
+   operator explicitly sets ALLOW_DESTRUCTIVE_DB_OPS=yes_i_understand.
+4. See BACKUPS.md for pg_dump / restore steps before doing any destructive op.
+=============================================================================
 """
 import os
+import logging
 from contextlib import contextmanager
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text
 from sqlalchemy.types import JSON
@@ -10,7 +26,73 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
 from datetime import datetime
 
+_log = logging.getLogger(__name__)
 Base = declarative_base()
+
+
+# -----------------------------------------------------------------------------
+# Production-safety helpers
+# -----------------------------------------------------------------------------
+_DESTRUCTIVE_OVERRIDE_VALUE = 'yes_i_understand'
+
+
+def is_production() -> bool:
+    """True when running in production. Any of the following triggers True:
+      - FLASK_ENV=production
+      - RAILWAY_ENVIRONMENT=production
+      - DATABASE_URL starts with postgres (Railway-attached Postgres)
+    """
+    if (os.environ.get('FLASK_ENV') or '').lower() == 'production':
+        return True
+    if (os.environ.get('RAILWAY_ENVIRONMENT') or '').lower() == 'production':
+        return True
+    db_url = os.environ.get('DATABASE_URL') or ''
+    if db_url.startswith('postgres'):
+        return True
+    return False
+
+
+def assert_not_production(action: str) -> None:
+    """Refuse to run a destructive action in production.
+
+    Raises RuntimeError unless ALLOW_DESTRUCTIVE_DB_OPS=yes_i_understand is set.
+    That override is intended for ONE-OFF emergency ops AFTER taking a pg_dump
+    backup (see BACKUPS.md). Never bake the override into deploy config.
+    """
+    if not is_production():
+        return
+    if os.environ.get('ALLOW_DESTRUCTIVE_DB_OPS') == _DESTRUCTIVE_OVERRIDE_VALUE:
+        _log.warning("PRODUCTION DESTRUCTIVE OP ALLOWED via env override: %s", action)
+        return
+    raise RuntimeError(
+        f"BLOCKED in production: '{action}'. "
+        f"Set ALLOW_DESTRUCTIVE_DB_OPS={_DESTRUCTIVE_OVERRIDE_VALUE} only after a pg_dump backup."
+    )
+
+
+def DROP_ALL_TABLES_DANGEROUS():  # noqa: N802 - intentional SHOUT name
+    """Last-resort full schema drop. Refuses in production without override.
+
+    DO NOT call this from app startup. Only for local dev or manual recovery.
+    """
+    assert_not_production('Base.metadata.drop_all() / DROP_ALL_TABLES')
+    Base.metadata.drop_all(bind=engine)
+    _log.warning("DROP_ALL_TABLES_DANGEROUS: all tables dropped (non-production).")
+
+
+def safety_status() -> dict:
+    """Return current safety posture for /api/health and ops debugging."""
+    return {
+        'is_production': is_production(),
+        'destructive_ops_override_set': (
+            os.environ.get('ALLOW_DESTRUCTIVE_DB_OPS') == _DESTRUCTIVE_OVERRIDE_VALUE
+        ),
+        'database_type': 'postgresql' if (os.environ.get('DATABASE_URL') or '').startswith('postgres') else (
+            'sqlite' if (os.environ.get('DATABASE_URL') or 'sqlite').startswith('sqlite') else 'unknown'
+        ),
+        'flask_env': os.environ.get('FLASK_ENV'),
+        'railway_environment': os.environ.get('RAILWAY_ENVIRONMENT'),
+    }
 
 # DATABASE_URL from env (Railway Postgres) or SQLite for local
 DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///instance/jet_finder.db')
@@ -362,7 +444,18 @@ def get_all_airports():
 
 
 def init_db():
-    """Create tables if they do not exist. Safe to call on every startup."""
+    """Create tables if they do not exist. Safe to call on every startup.
+
+    SAFETY GUARANTEE (do not break this contract):
+      * Only ever calls Base.metadata.create_all (additive: CREATE TABLE IF NOT EXISTS).
+      * Only ever uses ALTER TABLE ... ADD COLUMN IF NOT EXISTS for schema upgrades.
+      * Never drops, truncates, deletes from, or recreates user_listings / users.
+      * Seeding only inserts when the target table is EMPTY (see seed_aircraft_and_airports).
+
+    If you need to change a column type or remove a column, write a separate
+    migration script that takes a backup first (see BACKUPS.md) and never put
+    DROP/DELETE/TRUNCATE into this function.
+    """
     Base.metadata.create_all(bind=engine)
     seed_aircraft_and_airports()
     # SQLite: add columns that may be missing in existing DBs (e.g. created by older app)
@@ -1004,8 +1097,26 @@ def get_buyer_preferences(user_id, session_id):
 
 # --- Performance profiles cache (admin populate) ---
 def clear_performance_profiles():
+    """Wipe the performance_profiles cache table.
+
+    This table is a *cache* derived from aircraft CSV — no user data lives here.
+    Even so, it's a bulk DELETE so it goes through assert_not_production() to
+    prevent accidental bulk operations in prod without explicit override.
+    """
+    assert_not_production('clear_performance_profiles (DELETE FROM performance_profiles)')
     with get_session() as s:
         s.query(PerformanceProfile).delete()
+    return True
+
+
+def wipe_all_user_sessions_DANGEROUS():  # noqa: N802 - intentional SHOUT name
+    """Force-logout every user by deleting all session rows.
+
+    Use only after a credential leak. Production requires explicit override.
+    """
+    assert_not_production('wipe_all_user_sessions (DELETE FROM user_sessions)')
+    with get_session() as s:
+        s.query(UserSession).delete()
     return True
 
 
