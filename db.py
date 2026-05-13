@@ -17,6 +17,8 @@ PRODUCTION DATA SAFETY GUARANTEES
 4. See BACKUPS.md for pg_dump / restore steps before doing any destructive op.
 =============================================================================
 """
+from __future__ import annotations
+
 import os
 import logging
 from contextlib import contextmanager
@@ -189,6 +191,29 @@ class UserSession(Base):
     token = Column(String(128), unique=True, nullable=False, index=True)
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=False)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class ListingMedia(Base):
+    """Per-listing photo/video metadata. Files themselves live in Cloudflare R2.
+
+    PostgreSQL only stores the metadata: which listing, what type, the R2 object
+    key, the public URL, and a sort order. The bytes never live in Railway's
+    disk or Postgres — only in R2 (or, locally for dev, in static/uploads/dev).
+    """
+    __tablename__ = 'listing_media'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    listing_id = Column(Integer, ForeignKey('user_listings.id'), nullable=False, index=True)
+    media_type = Column(String(16), nullable=False, default='photo')  # 'photo' | 'video'
+    r2_object_key = Column(String(512), nullable=False)
+    url = Column(String(1024), nullable=False)
+    thumbnail_url = Column(String(1024))
+    content_type = Column(String(128))
+    size_bytes = Column(Integer)
+    sort_order = Column(Integer, default=0, index=True)
+    created_at = Column(DateTime, server_default=func.now())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -542,7 +567,7 @@ def get_database_status():
         out['connection_error'] = str(e)
         return out
     # Collect row counts for main tables (same names as model __tablename__)
-    tables = ['users', 'user_sessions', 'user_listings', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
+    tables = ['users', 'user_sessions', 'user_listings', 'listing_media', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
               'service_providers', 'buyer_preferences', 'performance_profiles']
     for table in tables:
         try:
@@ -846,6 +871,78 @@ def admin_reject_listing_any(listing_id, rejection_reason):
             'rejection_reason': rejection_reason or 'No reason provided',
         }, synchronize_session=False)
         return n > 0
+
+
+# --- Listing media helpers (Cloudflare R2 backed) ---
+def add_listing_media(listing_id: int, media_type: str, r2_object_key: str, url: str,
+                      *, thumbnail_url: str | None = None, content_type: str | None = None,
+                      size_bytes: int | None = None, sort_order: int = 0) -> int:
+    """Insert a listing_media row. Bytes themselves are in R2; we only store metadata."""
+    with get_session() as s:
+        row = ListingMedia(
+            listing_id=listing_id,
+            media_type=(media_type or 'photo').lower(),
+            r2_object_key=r2_object_key,
+            url=url,
+            thumbnail_url=thumbnail_url,
+            content_type=content_type,
+            size_bytes=size_bytes,
+            sort_order=sort_order,
+        )
+        s.add(row)
+        s.flush()
+        return int(row.id)  # type: ignore[arg-type]
+
+
+def list_listing_media(listing_id: int) -> list[dict]:
+    """Return ordered media metadata for a listing (used by display endpoints)."""
+    with get_session() as s:
+        rows = (
+            s.query(ListingMedia)
+            .filter(ListingMedia.listing_id == listing_id)
+            .order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc())
+            .all()
+        )
+        return [r.to_dict() for r in rows]
+
+
+def list_media_for_listings(listing_ids: list[int]) -> dict[int, list[dict]]:
+    """Batch lookup: return {listing_id: [media_dict, ...]} for many listings (avoid N+1)."""
+    if not listing_ids:
+        return {}
+    with get_session() as s:
+        rows = (
+            s.query(ListingMedia)
+            .filter(ListingMedia.listing_id.in_(listing_ids))
+            .order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc())
+            .all()
+        )
+        out: dict[int, list[dict]] = {}
+        for r in rows:
+            out.setdefault(int(r.listing_id), []).append(r.to_dict())  # type: ignore[arg-type]
+        return out
+
+
+def get_listing_media_row(media_id: int) -> dict | None:
+    with get_session() as s:
+        row = s.query(ListingMedia).filter(ListingMedia.id == media_id).first()
+        return row.to_dict() if row else None
+
+
+def delete_listing_media_row(media_id: int) -> bool:
+    """Delete a single media row by id. Caller is responsible for deleting the R2 object."""
+    with get_session() as s:
+        n = s.query(ListingMedia).filter(ListingMedia.id == media_id).delete()
+        return n > 0
+
+
+def count_listing_media(listing_id: int, media_type: str | None = None) -> int:
+    """Count media items for a listing, optionally filtered by media_type (photo/video)."""
+    with get_session() as s:
+        q = s.query(ListingMedia).filter(ListingMedia.listing_id == listing_id)
+        if media_type:
+            q = q.filter(ListingMedia.media_type == media_type)
+        return int(q.count() or 0)
 
 
 # --- UserSubscription / PerUsePurchase (used by app.py auth) ---

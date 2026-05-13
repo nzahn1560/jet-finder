@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app
 import os
+import io
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -29,8 +30,10 @@ except ImportError:
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this'
 
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+app.config['UPLOAD_FOLDER'] = 'uploads'  # ephemeral only; long-term media lives in R2
+# Allow large uploads so listing videos can be sent to R2 in one request.
+# Per-file caps are enforced in r2_storage.py (PHOTO_MAX_BYTES, VIDEO_MAX_BYTES).
+app.config['MAX_CONTENT_LENGTH'] = 300 * 1024 * 1024  # 300MB total request size
 
 # Global scoring dataset (set per-request to ensure normalization uses the current filtered set)
 SCORING_DATASET = None
@@ -1100,22 +1103,32 @@ def api_data_safety():
         db_status = db_module.get_database_status()
         tc = db_status.get('table_counts', {}) or {}
         listings_storage = 'postgres' if safety.get('database_type') == 'postgresql' else 'sqlite_or_other'
+        try:
+            r2 = _r2.storage_status()
+        except Exception:
+            r2 = {'r2_configured': False, 'error': 'r2 module not loaded'}
         return jsonify({
             'is_production': safety['is_production'],
             'destructive_ops_blocked': safety['is_production'] and not safety['destructive_ops_override_set'],
             'destructive_ops_override_set': safety['destructive_ops_override_set'],
             'database_type': safety['database_type'],
             'listings_storage': listings_storage,
+            'media_storage': 'cloudflare_r2' if r2.get('r2_configured') else (
+                'local_dev_fallback' if r2.get('local_dev_fallback_active') else 'not_configured'
+            ),
+            'r2': r2,
             'json_file_writes_blocked_in_prod': True,  # enforced in marketplace.py
             'init_db_is_additive_only': True,           # documented contract in db.py
             'counts': {
                 'users': tc.get('users', 0),
                 'user_sessions': tc.get('user_sessions', 0),
                 'user_listings': tc.get('user_listings', 0),
+                'listing_media': tc.get('listing_media', 0),
             },
             'notes': [
                 'init_db() only does CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS.',
                 'No code path writes user accounts or listings to JSON/CSV/SQLite in production.',
+                'Listing photos/videos are stored in Cloudflare R2; PostgreSQL only stores metadata.',
                 'See BACKUPS.md before running any destructive operation.',
             ],
         }), 200
@@ -4500,9 +4513,14 @@ def api_listings_me():
         rows = db_module.get_listings_by_user_id(user['id'])
         aircraft_data = get_unified_aircraft_data()
         aircraft_map = {a.get('id'): a for a in aircraft_data}
+        listing_ids: list[int] = [int(r['id']) for r in rows if r.get('id') is not None]
+        media_by_listing = db_module.list_media_for_listings(listing_ids)
         out = []
         for row in rows:
             combined = _row_to_combined_listing(row, aircraft_map)
+            media = media_by_listing.get(int(row.get('id') or 0), [])
+            # cover_image = first photo URL (lazy-load gallery on detail page)
+            cover = next((m['url'] for m in media if m.get('media_type') == 'photo'), None)
             base = {
                 'id': row.get('id'),
                 'title': row.get('title'),
@@ -4516,13 +4534,16 @@ def api_listings_me():
                 'rejection_reason': row.get('rejection_reason'),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
+                'photo_count': sum(1 for m in media if m.get('media_type') == 'photo'),
+                'video_count': sum(1 for m in media if m.get('media_type') == 'video'),
+                'cover_image': cover,
             }
             if combined:
                 base.update({
                     'name': combined.get('name'),
                     'manufacturer': combined.get('manufacturer'),
                     'category': combined.get('category'),
-                    'image': combined.get('image'),
+                    'image': cover or combined.get('image'),  # prefer uploaded photo over placeholder
                 })
             out.append(base)
         return jsonify({'listings': out, 'total': len(out)}), 200
@@ -4595,6 +4616,162 @@ def api_listings_patch(listing_id: int):
     return jsonify({'ok': True}), 200
 
 
+# =============================================================================
+# /api/listings/<id>/media — Cloudflare R2 backed photo/video uploads.
+# Photos/videos NEVER live in Postgres or on Railway disk long-term.
+# Postgres only stores media metadata (see db.ListingMedia).
+# =============================================================================
+import r2_storage as _r2  # type: ignore[import-not-found]  # local module
+
+
+def _listing_owner_or_admin(listing_id: int, user: dict) -> tuple[dict | None, str | None]:
+    """Return (listing_row, None) if user owns/admin can edit; ({}, error_code) otherwise."""
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return None, 'not_found'
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return row, 'forbidden'
+    return row, None
+
+
+@app.route('/api/listings/<int:listing_id>/media', methods=['GET'])
+def api_listings_media_list(listing_id: int):
+    """Public: ordered media metadata for a listing (for galleries/detail page)."""
+    try:
+        items = db_module.list_listing_media(listing_id)
+        return jsonify({'media': items, 'total': len(items)}), 200
+    except Exception:
+        logger.exception('api_listings_media_list failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
+@app.route('/api/listings/<int:listing_id>/media', methods=['POST'])
+@require_auth
+def api_listings_media_upload(listing_id: int):
+    """Upload one or more files for a listing. Owner or admin only.
+
+    Form fields (multipart/form-data):
+      file        — one or more files (use field name 'file' or 'files')
+      sort_order  — optional starting sort order (int)
+
+    Validates content-type, per-file size, and per-listing count.
+    Uploads to R2, stores metadata in Postgres, returns the created rows.
+    """
+    user = request.current_user  # type: ignore[attr-defined]
+    row, err = _listing_owner_or_admin(listing_id, user)
+    if err == 'not_found':
+        return jsonify({'error': 'not_found'}), 404
+    if err == 'forbidden':
+        return jsonify({'error': 'forbidden'}), 403
+    assert row is not None  # for type-checker
+
+    files = request.files.getlist('file') or request.files.getlist('files')
+    if not files:
+        return jsonify({'error': 'no_files'}), 400
+
+    existing_photos = db_module.count_listing_media(listing_id, 'photo')
+    existing_videos = db_module.count_listing_media(listing_id, 'video')
+    try:
+        start_sort = int(request.form.get('sort_order') or (existing_photos + existing_videos))
+    except (TypeError, ValueError):
+        start_sort = existing_photos + existing_videos
+
+    created: list[dict] = []
+    rejected: list[dict] = []
+
+    for idx, f in enumerate(files):
+        content_type = (f.mimetype or '').lower() or None
+        kind = _r2.classify_content_type(content_type)
+        if not kind:
+            rejected.append({'filename': f.filename, 'reason': 'unsupported_type', 'content_type': content_type})
+            continue
+
+        # Per-listing count caps
+        if kind == 'photo' and existing_photos >= _r2.MAX_PHOTOS_PER_LISTING:
+            rejected.append({'filename': f.filename, 'reason': 'photo_limit_reached'})
+            continue
+        if kind == 'video' and existing_videos >= _r2.MAX_VIDEOS_PER_LISTING:
+            rejected.append({'filename': f.filename, 'reason': 'video_limit_reached'})
+            continue
+
+        # Per-file size cap. We read into memory once (Flask MAX_CONTENT_LENGTH gates total).
+        blob = f.read()
+        size = len(blob)
+        max_bytes = _r2.PHOTO_MAX_BYTES if kind == 'photo' else _r2.VIDEO_MAX_BYTES
+        if size > max_bytes:
+            rejected.append({'filename': f.filename, 'reason': 'too_large', 'size': size, 'max': max_bytes})
+            continue
+
+        object_key = _r2.build_object_key(listing_id, content_type, kind)
+        try:
+            public_url = _r2.upload_fileobj(io.BytesIO(blob), object_key, content_type)
+        except Exception as e:
+            logger.exception('R2 upload failed')
+            rejected.append({'filename': f.filename, 'reason': 'upload_failed', 'detail': str(e)})
+            continue
+
+        media_id = db_module.add_listing_media(
+            listing_id=listing_id,
+            media_type=kind,
+            r2_object_key=object_key,
+            url=public_url,
+            content_type=content_type,
+            size_bytes=size,
+            sort_order=start_sort + idx,
+        )
+        if kind == 'photo':
+            existing_photos += 1
+        else:
+            existing_videos += 1
+        created.append({
+            'id': media_id,
+            'media_type': kind,
+            'url': public_url,
+            'r2_object_key': object_key,
+            'content_type': content_type,
+            'size_bytes': size,
+            'sort_order': start_sort + idx,
+        })
+
+    status = 201 if created else 400
+    return jsonify({
+        'ok': bool(created),
+        'created': created,
+        'rejected': rejected,
+        'photo_count': existing_photos,
+        'video_count': existing_videos,
+    }), status
+
+
+@app.route('/api/listings/<int:listing_id>/media/<int:media_id>', methods=['DELETE'])
+@require_auth
+def api_listings_media_delete(listing_id: int, media_id: int):
+    """Delete a single media item: removes the R2 object AND the DB row.
+
+    Owner-only (admins also allowed). Approved (active) listings: owner cannot
+    delete unless admin (parallel to listing-edit rule).
+    """
+    user = request.current_user  # type: ignore[attr-defined]
+    row, err = _listing_owner_or_admin(listing_id, user)
+    if err == 'not_found':
+        return jsonify({'error': 'not_found'}), 404
+    if err == 'forbidden':
+        return jsonify({'error': 'forbidden'}), 403
+    assert row is not None
+    if not user.get('is_admin') and row.get('status') == 'active':
+        return jsonify({'error': 'cannot_modify_active'}), 403
+    media = db_module.get_listing_media_row(media_id)
+    if not media or media.get('listing_id') != listing_id:
+        return jsonify({'error': 'not_found'}), 404
+    try:
+        _r2.delete_object(media['r2_object_key'])
+    except Exception:
+        logger.exception('R2 delete failed (continuing to remove DB row)')
+    if not db_module.delete_listing_media_row(media_id):
+        return jsonify({'error': 'server_error'}), 500
+    return jsonify({'ok': True}), 200
+
+
 @app.route('/api/listings/<int:listing_id>', methods=['DELETE'])
 @require_auth
 def api_listings_delete(listing_id: int):
@@ -4649,6 +4826,13 @@ def api_get_user_listing(listing_id):
         if not profile:
             return jsonify({'error': 'Performance profile not found'}), 404
         images = row.get('images') or ''
+        legacy_images = [x.strip() for x in images.split(',') if x.strip()] if images else []
+        media_rows = db_module.list_listing_media(row['id'])
+        # Media is the canonical source going forward; legacy `images` column is kept
+        # for back-compat with old listings created before R2 integration.
+        photos = [m for m in media_rows if m.get('media_type') == 'photo']
+        videos = [m for m in media_rows if m.get('media_type') == 'video']
+        cover = (photos[0]['url'] if photos else (legacy_images[0] if legacy_images else None))
         listing = {
             'id': row['id'],
             'profile_id': row['profile_id'],
@@ -4659,7 +4843,11 @@ def api_get_user_listing(listing_id):
             'location': row.get('location'),
             'email': row.get('email'),
             'description': row.get('description'),
-            'images': [x.strip() for x in images.split(',') if x.strip()] if images else [],
+            'images': legacy_images,                                  # legacy
+            'photos': [m['url'] for m in photos],                     # R2 photo URLs
+            'videos': [m['url'] for m in videos],                     # R2 video URLs
+            'media': media_rows,                                      # full metadata
+            'cover_image': cover,
             'status': row.get('status'),
             'created_at': row.get('created_at'),
             'updated_at': row.get('updated_at'),
