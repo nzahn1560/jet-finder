@@ -595,7 +595,7 @@
                     <input type="checkbox" name="remember" id="remember">
                     Remember me
                 </label>
-                <a href="#" class="forgot-password" onclick="showForgotPassword(); return false;">
+                <a href="{{ url_for('forgot_password') }}" class="forgot-password">
                     Forgot password?
                 </a>
             </div>
@@ -610,14 +610,17 @@
                 <span>Or continue with</span>
             </div>
             <div class="social-buttons">
+                {% if google_login_enabled %}
+                <a href="{{ url_for('auth_google') }}" class="social-btn">
+                    <i class="fab fa-google"></i>
+                    Google
+                </a>
+                {% else %}
                 <a href="#" class="social-btn" onclick="showComingSoon('Google'); return false;">
                     <i class="fab fa-google"></i>
                     Google
                 </a>
-                <a href="#" class="social-btn" onclick="showComingSoon('Microsoft'); return false;">
-                    <i class="fab fa-microsoft"></i>
-                    Microsoft
-                </a>
+                {% endif %}
             </div>
         </div>
 

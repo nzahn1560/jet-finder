@@ -828,36 +828,196 @@
         }
     }
 
-    // Form submission
-    document.getElementById('listing-form').addEventListener('submit', function (e) {
+    // =========================================================================
+    // REAL form submission: create (or edit) the listing via the API,
+    // upload photos to R2-backed media endpoint, then go to payment/dashboard.
+    // =========================================================================
+    const EDIT_LISTING_ID = new URLSearchParams(window.location.search).get('edit');
+
+    function buildListingPayload() {
+        const fd = new FormData(document.getElementById('listing-form'));
+        const get = (k) => (fd.get(k) || '').toString().trim();
+        let description = get('description');
+        const serial = get('serial_number');
+        // No dedicated serial column: keep it inside the description (create only).
+        if (serial && !EDIT_LISTING_ID && !description.includes('Serial Number:')) {
+            description += `\n\nSerial Number: ${serial}`;
+        }
+        return {
+            profile_id: get('profile_id'),
+            title: get('listing_name') || undefined,
+            price: parseFloat(get('price') || '0'),
+            location: get('location').toUpperCase(),
+            email: get('email'),
+            year: parseInt(get('year_model') || '0', 10) || undefined,
+            hours: parseInt(get('total_time') || '0', 10) || 0,
+            description: description,
+            engine_type: get('engine_type') || undefined,
+            manufacturer: get('manufacturer') || undefined,
+            pricing_plan: get('pricing_plan') || 'monthly',
+        };
+    }
+
+    async function uploadListingPhotos(listingId) {
+        const input = document.getElementById('photos');
+        const files = input && input.files ? Array.from(input.files) : [];
+        if (!files.length) return { uploaded: 0, errors: [] };
+        const fd = new FormData();
+        files.forEach(f => fd.append('files', f));
+        try {
+            const resp = await fetch(`/api/listings/${listingId}/media`, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd,
+            });
+            const data = await resp.json().catch(() => ({}));
+            return {
+                uploaded: (data.created || []).length,
+                errors: (data.rejected || []).map(r => `${r.filename}: ${r.reason}`),
+            };
+        } catch (err) {
+            return { uploaded: 0, errors: [String(err)] };
+        }
+    }
+
+    async function startCheckoutOrFinish(listingId) {
+        try {
+            const resp = await fetch(`/api/listings/${listingId}/checkout`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data.url) {
+                window.location.href = data.url;  // Stripe Checkout
+                return;
+            }
+        } catch (err) { /* fall through to dashboard */ }
+        window.location.href = '/dashboard?submitted=1';
+    }
+
+    document.getElementById('listing-form').addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        const formData = new FormData(this);
+        if (currentListingType === 'aircraft' && !document.getElementById('selectedProfileId').value) {
+            alert('Please select a performance profile before submitting.');
+            return;
+        }
 
-        // Show loading state
         const submitBtn = this.querySelector('[type="submit"]');
         const originalText = submitBtn.innerHTML;
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Creating Listing...';
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>' + (EDIT_LISTING_ID ? 'Saving...' : 'Creating Listing...');
         submitBtn.disabled = true;
 
-        // Simulate form submission
-        setTimeout(() => {
-            alert(`${currentListingType.charAt(0).toUpperCase() + currentListingType.slice(1)} listing created successfully!\\n\\nYour listing will be reviewed and published within 24 hours.\\nYou'll receive a confirmation email with your listing details.`);
-
-            // Clear draft
-            localStorage.removeItem('listing_draft');
-
-            // Reset form
-            this.reset();
-            setListingType('aircraft');
-            updatePrice();
-
-            // Restore button
+        const fail = (msg) => {
+            alert(msg);
             submitBtn.innerHTML = originalText;
             submitBtn.disabled = false;
+        };
 
-        }, 2000);
+        try {
+            const payload = buildListingPayload();
+            let listingId = EDIT_LISTING_ID;
+
+            if (EDIT_LISTING_ID) {
+                const resp = await fetch(`/api/listings/${EDIT_LISTING_ID}`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search); return; }
+                if (resp.status === 403) { const d = await resp.json().catch(() => ({})); return fail(d.message || 'You cannot edit this listing.'); }
+                if (!resp.ok && resp.status !== 400) return fail('Failed to save changes. Please try again.');
+            } else {
+                const resp = await fetch('/api/listings', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname); return; }
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    if (data.fields) return fail('Missing required fields: ' + data.fields.join(', '));
+                    return fail(data.message || data.error || 'Failed to create listing. Please try again.');
+                }
+                listingId = data.id;
+            }
+
+            // Upload photos (if any were selected)
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading photos...';
+            const media = await uploadListingPhotos(listingId);
+            if (media.errors && media.errors.length) {
+                console.warn('Some photos failed to upload:', media.errors);
+            }
+
+            localStorage.removeItem('listing_draft');
+
+            if (EDIT_LISTING_ID) {
+                window.location.href = '/dashboard?updated=1';
+            } else {
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Finishing up...';
+                await startCheckoutOrFinish(listingId);
+            }
+        } catch (err) {
+            console.error('Listing submission failed:', err);
+            fail('Something went wrong submitting your listing. Please try again.');
+        }
     });
+
+    // =========================================================================
+    // Edit mode: /create-listing?edit=<id> loads the listing and PATCHes it.
+    // =========================================================================
+    async function initEditMode() {
+        if (!EDIT_LISTING_ID) return;
+        try {
+            const resp = await fetch(`/api/listings/${EDIT_LISTING_ID}/mine`, { credentials: 'include' });
+            if (resp.status === 401) {
+                window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                return;
+            }
+            if (!resp.ok) {
+                alert('Could not load this listing for editing.');
+                window.location.href = '/dashboard';
+                return;
+            }
+            const { listing } = await resp.json();
+            const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== null && v !== undefined) el.value = v; };
+            setVal('selectedProfileId', listing.profile_id);
+            setVal('listingName', listing.title);
+            setVal('serialNumber', '');
+            setVal('price', listing.price);
+            setVal('engineType', listing.engine_type);
+            setVal('totalTime', listing.hours);
+            setVal('manufacturerInput', listing.manufacturer);
+            setVal('location', listing.location);
+            setVal('yearModel', listing.year);
+            setVal('email', listing.email);
+            setVal('description', listing.description);
+            const planRadio = document.querySelector(`[name="pricing_plan"][value="${listing.pricing_plan || 'monthly'}"]`);
+            if (planRadio) { planRadio.checked = true; updatePrice(); }
+            // Serial number lives inside the description in edit mode; relax the field.
+            const serialEl = document.getElementById('serialNumber');
+            if (serialEl) serialEl.required = false;
+            // Profile is already chosen; the search field is only required for new listings.
+            const profileSearch = document.getElementById('profileSearchInput');
+            if (profileSearch) profileSearch.required = false;
+            const submitBtn = document.querySelector('#listing-form [type="submit"]');
+            if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-save me-2"></i>Save Changes';
+            const header = document.querySelector('.page-header h1, h1');
+            if (header) header.textContent = 'Edit Listing';
+            // Show existing photos count
+            if (listing.media && listing.media.length) {
+                const statusDiv = document.getElementById('photosStatus');
+                if (statusDiv) {
+                    statusDiv.innerHTML = `<div class="alert alert-info"><i class="fas fa-images me-2"></i>${listing.media.length} photo(s) already attached. New photos you add will be appended.</div>`;
+                }
+            }
+        } catch (err) {
+            console.error('Edit mode init failed:', err);
+        }
+    }
+    document.addEventListener('DOMContentLoaded', initEditMode);
 
     // Drag and drop functionality
     function setupFileUpload() {

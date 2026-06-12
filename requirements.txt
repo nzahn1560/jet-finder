@@ -40,3 +40,6 @@ psycopg2-binary==2.9.9
 
 # Cloudflare R2 (S3-compatible object storage) for listing photos/videos
 boto3==1.34.69
+
+# Google OAuth login ("Continue with Google")
+Authlib==1.3.0

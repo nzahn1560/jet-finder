@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Privacy Policy - JetSchool{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 860px; color: #ddd;">
+    <h1 class="mb-1" style="color:#fff;">Privacy Policy</h1>
+    <p class="text-muted mb-4">Last updated: February 2026</p>
+
+    <h4 style="color:#fff;">Who we are</h4>
+    <p>JetSchool ("we", "us") operates jetschoolusa.com, an aviation marketplace and aircraft
+        performance platform.</p>
+
+    <h4 style="color:#fff;">Information we collect</h4>
+    <ul>
+        <li><strong>Account information:</strong> email address, name, company, phone number, and a
+            hashed password when you create an account. If you sign in with Google, we receive your
+            email and name from Google.</li>
+        <li><strong>Listing content:</strong> aircraft details, photos, videos, and contact
+            information you choose to publish in a listing.</li>
+        <li><strong>Payment information:</strong> payments are processed by Stripe. We never see or
+            store your full card number.</li>
+        <li><strong>Usage data:</strong> standard server logs (IP address, browser type, pages
+            visited) used for security and debugging.</li>
+    </ul>
+
+    <h4 style="color:#fff;">How we use it</h4>
+    <ul>
+        <li>To operate your account, listings, and purchases.</li>
+        <li>To send transactional emails (e.g. password resets, listing status updates).</li>
+        <li>To prevent fraud and abuse.</li>
+    </ul>
+    <p>We do not sell your personal information.</p>
+
+    <h4 style="color:#fff;">Third-party services</h4>
+    <ul>
+        <li><strong>Google</strong> — optional sign-in (OAuth).</li>
+        <li><strong>Stripe</strong> — payment processing.</li>
+        <li><strong>Cloudflare</strong> — DNS, CDN, and media storage (R2).</li>
+        <li><strong>Railway</strong> — application and database hosting.</li>
+    </ul>
+
+    <h4 style="color:#fff;">Data retention &amp; deletion</h4>
+    <p>We keep your account data while your account is active. To request deletion of your account
+        and associated data, contact us at the email below.</p>
+
+    <h4 style="color:#fff;">Cookies</h4>
+    <p>We use a session cookie (<code>jet_session</code>) to keep you logged in. It is HttpOnly and
+        not used for advertising or cross-site tracking.</p>
+
+    <h4 style="color:#fff;">Contact</h4>
+    <p>Questions about this policy: <a href="mailto:support@jetschoolusa.com"
+            style="color:#F05545;">support@jetschoolusa.com</a></p>
+</div>
+{% endblock %}

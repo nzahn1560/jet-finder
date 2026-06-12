@@ -219,6 +219,20 @@ class ListingMedia(Base):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
+class PasswordResetToken(Base):
+    """One-time password reset token, emailed to the user as a link."""
+    __tablename__ = 'password_reset_tokens'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    token = Column(String(128), unique=True, nullable=False, index=True)
+    used = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
 class UserSubscription(Base):
     __tablename__ = 'user_subscriptions'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -666,6 +680,52 @@ def set_user_admin(user_id, is_admin=True):
         return n > 0
 
 
+# --- Password reset tokens ---
+def create_password_reset_token(user_id, token, expires_at):
+    with get_session() as s:
+        row = PasswordResetToken(user_id=user_id, token=token, expires_at=expires_at)
+        s.add(row)
+        s.flush()
+        return int(row.id)  # type: ignore[arg-type]
+
+
+def get_valid_reset_token(token):
+    """Return the token row dict if it exists, is unused, and not expired."""
+    if not token:
+        return None
+    with get_session() as s:
+        row = s.query(PasswordResetToken).filter(PasswordResetToken.token == token).first()
+        if not row:
+            return None
+        if bool(row.used):
+            return None
+        expires = getattr(row, 'expires_at', None)
+        if expires is not None and expires < datetime.utcnow():
+            return None
+        return row.to_dict()
+
+
+def use_reset_token_and_set_password(token, new_password_hash):
+    """Atomically mark the token used and update the user's password.
+
+    Also deletes all existing sessions for that user (force re-login everywhere).
+    Returns the user_id, or None on failure.
+    """
+    with get_session() as s:
+        row = s.query(PasswordResetToken).filter(PasswordResetToken.token == token).first()
+        if not row or bool(row.used):
+            return None
+        expires = getattr(row, 'expires_at', None)
+        if expires is not None and expires < datetime.utcnow():
+            return None
+        uid = int(row.user_id)  # type: ignore[arg-type]
+        s.query(PasswordResetToken).filter(PasswordResetToken.id == row.id).update(
+            {'used': True}, synchronize_session=False)
+        s.query(User).filter(User.id == uid).update({'password_hash': new_password_hash}, synchronize_session=False)
+        s.query(UserSession).filter(UserSession.user_id == uid).delete(synchronize_session=False)
+        return uid
+
+
 def list_all_users_basic(limit=500):
     """Admin: list users with basic account info, no sensitive fields."""
     with get_session() as s:
@@ -696,7 +756,13 @@ def get_active_user_listings():
 
 
 def create_user_listing(profile_id, title, year, price, hours, location, email, description,
-                        images_str, documents_str, engine_type, manufacturer, pricing_plan, user_id=None):
+                        images_str, documents_str, engine_type, manufacturer, pricing_plan, user_id=None,
+                        status='pending'):
+    """Create a listing. Default status='pending' (awaiting admin approval).
+
+    Pass status='unpaid' when payment is required before review.
+    Listings only become publicly visible when an admin approves (status='active').
+    """
     with get_session() as s:
         row = UserListing(
             user_id=user_id,
@@ -713,12 +779,40 @@ def create_user_listing(profile_id, title, year, price, hours, location, email, 
             engine_type=engine_type,
             manufacturer=manufacturer,
             pricing_plan=pricing_plan or 'monthly',
-            status='active',
+            status=status or 'pending',
             payment_status='pending',
         )
         s.add(row)
         s.flush()
         return row.id
+
+
+def set_listing_payment_session(listing_id, session_id):
+    """Store the Stripe Checkout session id on a listing (before redirecting to pay)."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
+            {'payment_session_id': session_id}, synchronize_session=False
+        )
+        return n > 0
+
+
+def mark_listing_paid_by_session(session_id):
+    """Stripe webhook: mark the listing paid and move it to 'pending' review.
+
+    Returns the listing_id, or None if no listing matches the checkout session.
+    """
+    if not session_id:
+        return None
+    with get_session() as s:
+        row = s.query(UserListing).filter(UserListing.payment_session_id == session_id).first()
+        if not row:
+            return None
+        lid = int(row.id)  # type: ignore[arg-type]
+        updates: dict = {'payment_status': 'paid'}
+        if row.status in ('unpaid', 'draft'):
+            updates['status'] = 'pending'
+        s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
+        return lid
 
 
 def get_listings_by_user_id(user_id):

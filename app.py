@@ -174,6 +174,20 @@ def _start_jet_session(user_id: int) -> str:
     return token
 
 
+def _maybe_promote_admin(user_id: int, email: str) -> None:
+    """Admin bootstrap: auto-promote emails listed in ADMIN_EMAILS env var.
+
+    Set ADMIN_EMAILS=you@example.com,other@example.com in Railway and those
+    accounts become admins on their next login — no SQL required.
+    """
+    admin_emails = {e.strip().lower() for e in (os.environ.get('ADMIN_EMAILS') or '').split(',') if e.strip()}
+    if email and email.lower() in admin_emails:
+        try:
+            db_module.set_user_admin(user_id, True)
+        except Exception:
+            logger.exception('ADMIN_EMAILS promotion failed for %s', email)
+
+
 def get_current_user_from_request():
     """Return current user dict or None. Checks cookie first, then legacy Flask session.
 
@@ -2128,6 +2142,7 @@ def login():
             user_id = int(user['id'])
             session['user_id'] = user_id
             token = _start_jet_session(user_id)
+            _maybe_promote_admin(user_id, email)
             flash('Successfully logged in!', 'success')
             next_page = request.args.get('next') or url_for('dashboard')
             resp = redirect(next_page)
@@ -2161,6 +2176,7 @@ def register():
                 user_id_int = cast(int, user_id)
                 session['user_id'] = user_id_int
                 token = _start_jet_session(user_id_int)
+                _maybe_promote_admin(user_id_int, email)
                 flash('Account created successfully!', 'success')
                 resp = redirect(url_for('dashboard'))
                 _set_jet_session_cookie(resp, token)
@@ -2184,6 +2200,154 @@ def logout():
     resp = redirect(url_for('home'))
     _clear_jet_session_cookie(resp)
     return resp
+
+
+# =============================================================================
+# Google OAuth login ("Continue with Google").
+# Active only when GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET are set.
+# Creates (or links by email) a normal user account, then issues the same
+# jet_session cookie as password login.
+# =============================================================================
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
+_google_oauth = None
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    try:
+        from authlib.integrations.flask_client import OAuth  # type: ignore[import-not-found]
+        _oauth_registry = OAuth(app)
+        _google_oauth = _oauth_registry.register(
+            name='google',
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+            client_kwargs={'scope': 'openid email profile'},
+        )
+    except ImportError:
+        logger.warning("Authlib not installed; Google login disabled. Add 'Authlib' to requirements.txt.")
+app.jinja_env.globals.update(google_login_enabled=bool(_google_oauth))
+
+
+@app.route('/auth/google')
+def auth_google():
+    """Kick off the Google OAuth flow."""
+    if not _google_oauth:
+        flash('Google login is not configured yet.', 'error')
+        return redirect(url_for('login'))
+    redirect_uri = url_for('auth_google_callback', _external=True, _scheme='https' if _PRODUCTION else 'http')
+    return _google_oauth.authorize_redirect(redirect_uri)
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    """Google redirects here. Find-or-create the user, then start a session."""
+    if not _google_oauth:
+        return redirect(url_for('login'))
+    try:
+        token = _google_oauth.authorize_access_token()
+        info = token.get('userinfo') or {}
+        email = (info.get('email') or '').strip().lower()
+        if not email:
+            flash('Google did not return an email address.', 'error')
+            return redirect(url_for('login'))
+        user = get_user_by_email(email)
+        if user:
+            user_id = int(user['id'])
+        else:
+            # New account via Google: random password (they can set one via reset later)
+            user_id = cast(int, create_user(
+                email, secrets.token_hex(32),
+                info.get('given_name'), info.get('family_name'),
+            ))
+        session['user_id'] = user_id
+        jet_token = _start_jet_session(user_id)
+        _maybe_promote_admin(user_id, email)
+        flash('Signed in with Google!', 'success')
+        resp = redirect(url_for('dashboard'))
+        _set_jet_session_cookie(resp, jet_token)
+        return resp
+    except Exception:
+        logger.exception('Google OAuth callback failed')
+        flash('Google sign-in failed. Please try again or use email/password.', 'error')
+        return redirect(url_for('login'))
+
+
+# =============================================================================
+# Password reset (forgot password) flow.
+# Email provider configured via email_service.py (Resend or SMTP).
+# =============================================================================
+import email_service as _email  # type: ignore[import-not-found]  # local module
+
+RESET_TOKEN_HOURS = 2
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Request a password reset link by email."""
+    sent = False
+    if request.method == 'POST':
+        if _auth_rate_limited():
+            flash('Too many requests. Please wait a minute and try again.', 'error')
+            return render_template('auth/forgot_password.html', sent=False)
+        email = (request.form.get('email') or '').strip().lower()
+        user = get_user_by_email(email) if email else None
+        # Always claim success so the form can't be used to probe which emails exist.
+        sent = True
+        if user:
+            token = secrets.token_urlsafe(48)
+            db_module.create_password_reset_token(
+                int(user['id']), token,
+                datetime.utcnow() + timedelta(hours=RESET_TOKEN_HOURS),
+            )
+            reset_url = url_for('reset_password', token=token, _external=True,
+                                _scheme='https' if _PRODUCTION else 'http')
+            ok = _email.send_email(
+                email,
+                'Reset your JetSchool password',
+                f'<p>Click the link below to reset your password. It expires in {RESET_TOKEN_HOURS} hours.</p>'
+                f'<p><a href="{reset_url}">{reset_url}</a></p>'
+                f'<p>If you did not request this, you can ignore this email.</p>',
+                text=f'Reset your password (expires in {RESET_TOKEN_HOURS}h): {reset_url}',
+            )
+            if not ok and not _email.is_configured():
+                logger.warning('Password reset link (email not configured): %s', reset_url)
+    return render_template('auth/forgot_password.html', sent=sent)
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Set a new password using a valid reset token."""
+    row = db_module.get_valid_reset_token(token)
+    if not row:
+        flash('This reset link is invalid or has expired. Please request a new one.', 'error')
+        return redirect(url_for('forgot_password'))
+    if request.method == 'POST':
+        pw = request.form.get('password') or ''
+        confirm = request.form.get('confirm_password') or ''
+        if len(pw) < 8:
+            flash('Password must be at least 8 characters.', 'error')
+        elif pw != confirm:
+            flash('Passwords do not match.', 'error')
+        else:
+            uid = db_module.use_reset_token_and_set_password(token, generate_password_hash(pw))
+            if uid:
+                flash('Password updated. Please log in.', 'success')
+                return redirect(url_for('login'))
+            flash('Could not reset password. The link may have already been used.', 'error')
+            return redirect(url_for('forgot_password'))
+    return render_template('auth/reset_password.html', token=token)
+
+
+# =============================================================================
+# Legal pages (required for Google OAuth consent screen approval).
+# =============================================================================
+@app.route('/privacy')
+def privacy():
+    return render_template('legal/privacy.html')
+
+
+@app.route('/terms')
+def terms():
+    return render_template('legal/terms.html')
 
 
 # =============================================================================
@@ -2257,6 +2421,7 @@ def api_auth_signup():
     user_id = cast(int, user_id)
     session['user_id'] = user_id
     token = _start_jet_session(user_id)
+    _maybe_promote_admin(user_id, email)
     user = get_user_by_id(user_id)
     resp = jsonify({'ok': True, 'user': _user_public_dict(user)})
     _set_jet_session_cookie(resp, token)
@@ -2279,6 +2444,7 @@ def api_auth_login():
     user_id = int(user['id'])
     session['user_id'] = user_id
     token = _start_jet_session(user_id)
+    _maybe_promote_admin(user_id, email)
     resp = jsonify({'ok': True, 'user': _user_public_dict(user)})
     _set_jet_session_cookie(resp, token)
     return resp, 200
@@ -4577,6 +4743,9 @@ def api_listings_create():
     if pricing_plan not in valid_plans:
         return jsonify({'error': 'invalid_pricing_plan'}), 400
 
+    # Payment-gated flow: listing starts 'unpaid' when Stripe payment is required,
+    # otherwise it goes straight to 'pending' (admin review).
+    initial_status = 'unpaid' if _payment_required() else 'pending'
     try:
         listing_id = db_module.create_user_listing(
             data['profile_id'], title, year_value,
@@ -4587,8 +4756,14 @@ def api_listings_create():
             data.get('manufacturer', profile.get('manufacturer', 'Unknown')),
             pricing_plan,
             user_id=user['id'],
+            status=initial_status,
         )
-        return jsonify({'ok': True, 'id': listing_id}), 201
+        return jsonify({
+            'ok': True,
+            'id': listing_id,
+            'status': initial_status,
+            'payment_required': initial_status == 'unpaid',
+        }), 201
     except Exception:
         logger.exception('api_listings_create failed')
         return jsonify({'error': 'server_error'}), 500
@@ -4614,6 +4789,129 @@ def api_listings_patch(listing_id: int):
     if not db_module.update_user_listing_fields(listing_id, data):
         return jsonify({'error': 'no_changes'}), 400
     return jsonify({'ok': True}), 200
+
+
+# =============================================================================
+# Stripe payments for listings.
+# Toggle: REQUIRE_PAYMENT_FOR_LISTINGS=true makes new listings start 'unpaid'
+# and require checkout before admin review. Default false so the site works
+# end-to-end before Stripe is fully configured.
+# =============================================================================
+LISTING_PRICES_CENTS = {'monthly': 5000, 'six_month': 15000}  # $50 / $150
+
+
+def _stripe_configured() -> bool:
+    key = os.environ.get('STRIPE_SECRET_KEY', '')
+    return key.startswith('sk_') and 'sk_test_...' not in key
+
+
+def _payment_required() -> bool:
+    """Payment gating only applies when explicitly enabled AND Stripe is configured."""
+    flag = (os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS') or 'false').lower() in ('1', 'true', 'yes')
+    return flag and _stripe_configured()
+
+
+@app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
+@require_auth
+def api_listing_checkout(listing_id: int):
+    """Create a Stripe Checkout session for a listing fee. Returns {url} to redirect to.
+
+    If payment is not required (flag off or Stripe unconfigured) returns
+    {skip: true} so the frontend can continue straight to the dashboard.
+    """
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    if not _payment_required():
+        return jsonify({'skip': True, 'message': 'Payment not required'}), 200
+    if row.get('payment_status') == 'paid':
+        return jsonify({'skip': True, 'message': 'Already paid'}), 200
+
+    plan = row.get('pricing_plan') or 'monthly'
+    amount = LISTING_PRICES_CENTS.get(plan, LISTING_PRICES_CENTS['monthly'])
+    base = request.host_url.rstrip('/')
+    try:
+        checkout = stripe.checkout.Session.create(
+            mode='payment',
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': amount,
+                    'product_data': {
+                        'name': f"JetSchool listing fee — {row.get('title') or ('Listing #' + str(listing_id))}",
+                        'description': f"{plan.replace('_', ' ')} plan",
+                    },
+                },
+                'quantity': 1,
+            }],
+            metadata={'listing_id': str(listing_id), 'user_id': str(user['id'])},
+            customer_email=user.get('email'),
+            success_url=f'{base}/dashboard?paid=1',
+            cancel_url=f'{base}/dashboard?paid=0',
+        )
+        db_module.set_listing_payment_session(listing_id, checkout.id)
+        return jsonify({'url': checkout.url}), 200
+    except Exception as e:
+        logger.exception('Stripe checkout creation failed')
+        return jsonify({'error': 'stripe_error', 'message': str(e)}), 500
+
+
+@app.route('/api/stripe/webhook', methods=['POST'])
+def api_stripe_webhook():
+    """Stripe webhook: marks listings paid when checkout completes.
+
+    Configure in Stripe dashboard → Webhooks → endpoint:
+      https://jetschoolusa.com/api/stripe/webhook
+    listening for `checkout.session.completed`.
+    Set STRIPE_WEBHOOK_SECRET in Railway to the signing secret.
+    """
+    payload = request.get_data()
+    sig = request.headers.get('Stripe-Signature', '')
+    secret = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+    try:
+        if secret:
+            event = stripe.Webhook.construct_event(payload, sig, secret)  # type: ignore[attr-defined]
+        else:
+            # No signing secret configured: refuse in production (spoofable).
+            if db_module.is_production():
+                logger.error('Stripe webhook received but STRIPE_WEBHOOK_SECRET is not set')
+                return jsonify({'error': 'webhook_secret_not_configured'}), 500
+            event = json.loads(payload)
+    except Exception:
+        logger.exception('Stripe webhook signature verification failed')
+        return jsonify({'error': 'invalid_signature'}), 400
+
+    event_type = event.get('type') if isinstance(event, dict) else event.type
+    if event_type == 'checkout.session.completed':
+        sess = event['data']['object'] if isinstance(event, dict) else event.data.object
+        session_id = sess.get('id') if isinstance(sess, dict) else sess.id
+        listing_id = db_module.mark_listing_paid_by_session(session_id)
+        if listing_id:
+            logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
+        else:
+            logger.warning('Stripe webhook: no listing found for session %s', session_id)
+    return jsonify({'received': True}), 200
+
+
+@app.route('/api/listings/<int:listing_id>/mine', methods=['GET'])
+@require_auth
+def api_listing_mine(listing_id: int):
+    """Owner/admin: fetch a listing in ANY status (for the edit form)."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    out = dict(row)
+    out['created_at'] = str(out.get('created_at')) if out.get('created_at') else None
+    out['updated_at'] = str(out.get('updated_at')) if out.get('updated_at') else None
+    out['media'] = db_module.list_listing_media(listing_id)
+    return jsonify({'listing': out}), 200
 
 
 # =============================================================================
