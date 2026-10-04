@@ -606,36 +606,22 @@
             </button>
         </form>
 
+        {% if google_login_enabled %}
         <div class="social-login">
             <div class="social-divider">
                 <span>Or continue with</span>
             </div>
             <div class="social-buttons">
-                {% if google_login_enabled %}
                 <a href="{{ url_for('auth_google') }}" class="social-btn">
                     <i class="fab fa-google"></i>
                     Google
                 </a>
-                {% else %}
-                <a href="#" class="social-btn" onclick="showComingSoon('Google'); return false;">
-                    <i class="fab fa-google"></i>
-                    Google
-                </a>
-                {% endif %}
             </div>
         </div>
+        {% endif %}
 
         <div class="auth-footer">
             <p>Don't have an account? <a href="{{ url_for('register') }}">Create one now</a></p>
-
-            <div class="pro-upgrade">
-                <p style="margin-bottom: 10px;">
-                    <small>Want premium features?</small>
-                </p>
-                <a href="{{ url_for('pricing') }}">
-                    View Features<span class="pro-badge">Features</span>
-                </a>
-            </div>
         </div>
     </div>
 </div>
@@ -753,32 +739,5 @@
         });
     });
 
-    // Utility functions
-    function showForgotPassword() {
-        // TODO: Implement forgot password modal
-        alert('Forgot password functionality coming soon! Please contact support for now.');
-    }
-
-    function showComingSoon(provider) {
-        alert(`${provider} login integration coming soon!`);
-    }
-
-    // Auto-fill demo (remove in production)
-    function fillDemo() {
-        document.getElementById('email').value = 'demo@jetfinder.com';
-        document.getElementById('password').value = 'demo123';
-    }
-
-    // Add demo button for testing (remove in production)
-    document.addEventListener('DOMContentLoaded', function () {
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            const demoBtn = document.createElement('button');
-            demoBtn.textContent = 'Fill Demo';
-            demoBtn.className = 'social-btn';
-            demoBtn.style.marginTop = '10px';
-            demoBtn.onclick = fillDemo;
-            document.querySelector('.social-login').appendChild(demoBtn);
-        }
-    });
 </script>
 {% endblock %}

@@ -3989,15 +3989,15 @@
 </div>
 
 <!-- Aircraft Listings Section -->
-{% if filtered_aircraft %}
 <div class="row mt-5">
     <div class="col-12">
         <div id="goalFinder" class="mb-4 p-3" style="background: rgba(18,19,24,0.92); border: 1px solid rgba(240,85,69,0.45); border-radius: 12px;">
-            <h5 class="text-white mb-1">Find your aircraft</h5>
-            <p class="text-white-50 mb-3" style="font-size: 0.95rem;">These rankings use the full aircraft spreadsheet. Pick a reason, or drag the sliders to mix what matters to you.</p>
+            <h5 class="text-white mb-1">Compare the market</h5>
+            <p class="text-white-50 mb-3" style="font-size: 0.95rem;">Check every trait you care about and whether you want it high or low. The whole spreadsheet is ranked on that combination. Cost numbers use your trip length, number of trips, and years of ownership.</p>
             <div class="d-flex flex-wrap gap-2 mb-3" id="goalButtons"></div>
-            <div class="row g-2" id="goalSliders"></div>
-            <p class="mb-0 mt-2 text-white" id="goalSummary" style="font-size: 0.9rem;"></p>
+            <div class="row g-2" id="goalMetrics"></div>
+            <p class="mb-2 mt-2 text-white" id="goalSummary" style="font-size: 0.9rem;"></p>
+            <div id="marketCompare" style="overflow-x: auto;"></div>
         </div>
 
         <!-- Sorting Controls -->
@@ -4084,7 +4084,6 @@
         </div>
     </div>
 </div>
-{% endif %}
 </div>
 
 <!-- Create Listing Modal -->
@@ -4242,8 +4241,12 @@
                             <button class="btn btn-outline-secondary" id="backToProfileSelection">
                                 <i class="fas fa-arrow-left me-2"></i>Back to Profile Selection
                             </button>
+                            <div class="text-end me-3">
+                                <div style="color:#888; text-decoration: line-through;">$70</div>
+                                <strong>$49</strong> <span style="background:#F05545; color:#fff; font-size:0.75rem; padding:2px 6px;">30% off</span>
+                            </div>
                             <button class="btn btn-success" id="createListingBtn">
-                                <i class="fas fa-check me-2"></i>Create Listing
+                                <i class="fas fa-check me-2"></i>Submit listing — $49
                             </button>
                         </div>
                     </div>
@@ -4631,172 +4634,214 @@
         }
     }
 
-    const GOAL_PRESETS = {
-        trip: { label: 'Speed, range & cabin', weights: { speed: 8, range: 8, cabin: 8 } },
-        value: { label: 'Best value', weights: { value: 9, speed: 5, range: 5, cabin: 4 } },
-        efficient: { label: 'Most efficient', weights: { efficiency: 9, range: 5, hourly: 6 } },
-        nicest: { label: 'Nicest cabin', weights: { cabin: 9, baggage: 6, passengers: 5, cabin_height: 4 } },
-        coolest: { label: 'Coolest', weights: { speed: 8, altitude: 7, year: 6, range: 4 } },
-        runway: { label: 'Short runway', weights: { short_runway: 9, speed: 3, range: 3 } },
-        room: { label: 'Most room', weights: { passengers: 8, cabin: 8, baggage: 5 } },
-        price: { label: 'Lowest price', weights: { cheap: 10, value: 3 } }
-    };
-    const GOAL_SLIDERS = [
-        ['speed', 'Speed'],
-        ['range', 'Range'],
-        ['cabin', 'Cabin size'],
-        ['value', 'Value for money'],
-        ['efficiency', 'Efficiency'],
-        ['hourly', 'Low hourly cost'],
-        ['passengers', 'Passenger count'],
-        ['baggage', 'Baggage'],
-        ['altitude', 'Altitude'],
-        ['year', 'Newer aircraft'],
-        ['short_runway', 'Short runway'],
-        ['cheap', 'Low purchase price'],
-        ['cabin_height', 'Cabin height']
+    const COMPARE_METRICS = [
+        { key: 'wingspan', label: 'Wingspan', want: 'low', unit: ' ft' },
+        { key: 'speed', label: 'Speed', want: 'high', unit: ' kts' },
+        { key: 'multi_year', label: 'Multi-year total cost', want: 'low', money: true },
+        { key: 'range', label: 'Range', want: 'high', unit: ' nm' },
+        { key: 'cabin', label: 'Cabin size', want: 'high', unit: ' cu ft' },
+        { key: 'price', label: 'Purchase price', want: 'low', money: true },
+        { key: 'hourly', label: 'Hourly cost', want: 'low', money: true },
+        { key: 'annual', label: 'Annual cost', want: 'low', money: true },
+        { key: 'passengers', label: 'Passengers', want: 'high', unit: '' },
+        { key: 'runway', label: 'Runway needed', want: 'low', unit: ' ft' },
+        { key: 'altitude', label: 'Altitude', want: 'high', unit: ' ft' },
+        { key: 'baggage', label: 'Baggage', want: 'high', unit: ' cu ft' },
+        { key: 'year', label: 'Newer year', want: 'high', unit: '' },
+        { key: 'length', label: 'Aircraft length', want: 'low', unit: ' ft' },
+        { key: 'height', label: 'Aircraft height', want: 'low', unit: ' ft' },
+        { key: 'cabin_height', label: 'Cabin height', want: 'high', unit: ' ft' },
+        { key: 'trip_time', label: 'Trip time', want: 'low', unit: ' hrs' }
     ];
+    const COMPARE_PRESETS = {
+        example: { label: 'Short wings, fastest, lowest ownership cost', picks: { wingspan: 'low', speed: 'high', multi_year: 'low' } },
+        trip: { label: 'Speed, range and cabin', picks: { speed: 'high', range: 'high', cabin: 'high' } },
+        value: { label: 'Best value', picks: { price: 'low', speed: 'high', range: 'high', cabin: 'high' } },
+        efficient: { label: 'Most efficient', picks: { hourly: 'low', annual: 'low', range: 'high' } },
+        nicest: { label: 'Nicest cabin', picks: { cabin: 'high', cabin_height: 'high', baggage: 'high', passengers: 'high' } },
+        coolest: { label: 'Coolest', picks: { speed: 'high', altitude: 'high', year: 'high', range: 'high' } },
+        runway: { label: 'Short runway', picks: { runway: 'low', wingspan: 'low', length: 'low' } }
+    };
     window.__goalActive = true;
-    let activeGoalKey = 'trip';
 
-    function goalMetric(ac, key) {
-        const n = (v) => Number(v) || 0;
+    function dynamicMetricsFor(ac, cache) {
+        if (cache.has(ac)) return cache.get(ac);
+        let metrics = {};
+        try {
+            metrics = calculateDynamicMetrics(ac, getUserInputs()) || {};
+        } catch (err) {
+            metrics = {};
+        }
+        cache.set(ac, metrics);
+        return metrics;
+    }
+
+    function compareRaw(ac, key, cache) {
+        const n = function (v) {
+            const x = Number(v);
+            if (!Number.isFinite(x) || x === 0) return null;
+            return x;
+        };
+        const dyn = dynamicMetricsFor(ac, cache);
+        if (key === 'wingspan') return n(ac.wingspan);
         if (key === 'speed') return n(ac.speed);
         if (key === 'range') return n(ac.range);
         if (key === 'cabin') return n(ac.cabin_volume);
-        if (key === 'baggage') return n(ac.baggage_volume);
+        if (key === 'multi_year') return n(dyn.multiYearTotalCost || ac.multi_year_total_cost);
+        if (key === 'price') return n(ac.price);
+        if (key === 'hourly') return n(dyn.totalHourlyCost || ac.total_hourly_cost);
+        if (key === 'annual') return n(dyn.annualBudget || ac.annual_budget);
         if (key === 'passengers') return n(ac.passengers);
+        if (key === 'runway') return n(ac.runway_length);
         if (key === 'altitude') return n(ac.max_altitude);
-        if (key === 'year') return n(ac.year);
+        if (key === 'baggage') return n(ac.baggage_volume);
+        if (key === 'year') return n(ac.year || ac.lowest_year);
+        if (key === 'length') return n(ac.aircraft_length);
+        if (key === 'height') return n(ac.aircraft_height);
         if (key === 'cabin_height') return n(ac.cabin_height);
-        if (key === 'value') {
-            const price = n(ac.price);
-            if (price <= 0) return 0;
-            return (n(ac.speed) + n(ac.range) / 2 + n(ac.cabin_volume)) / (price / 1000000);
-        }
-        if (key === 'efficiency') {
-            const hourly = n(ac.total_hourly_cost);
-            if (hourly > 0) return n(ac.range) / hourly;
-            const price = n(ac.price);
-            return price > 0 ? n(ac.range) / (price / 1000000) : n(ac.range);
-        }
-        if (key === 'hourly') {
-            const hourly = n(ac.total_hourly_cost);
-            return hourly > 0 ? 1 / hourly : 0;
-        }
-        if (key === 'short_runway') {
-            const runway = n(ac.runway_length);
-            return runway > 0 ? 1 / runway : 0;
-        }
-        if (key === 'cheap') {
-            const price = n(ac.price);
-            return price > 0 ? 1 / price : 0;
-        }
+        if (key === 'trip_time') return n(dyn.averageTripTime || ac.average_trip_time);
         return 0;
     }
 
-    function readGoalWeights() {
-        const weights = {};
-        document.querySelectorAll('[data-goal-slider]').forEach(function (input) {
-            const value = Number(input.value) || 0;
-            if (value > 0) weights[input.getAttribute('data-goal-slider')] = value;
+    function selectedCompares() {
+        const chosen = [];
+        COMPARE_METRICS.forEach(function (metric) {
+            const box = document.querySelector('[data-compare-key="' + metric.key + '"]');
+            if (!box || !box.checked) return;
+            const dirEl = document.querySelector('[data-compare-dir="' + metric.key + '"]');
+            chosen.push({ key: metric.key, label: metric.label, dir: dirEl ? dirEl.value : metric.want, money: metric.money, unit: metric.unit || '' });
         });
-        return weights;
+        return chosen;
+    }
+
+    function formatCompareValue(metric, value) {
+        if (!value) return '—';
+        if (metric.money) return '$' + Math.round(value).toLocaleString();
+        const rounded = metric.unit === ' hrs' ? value.toFixed(1) : Math.round(value).toLocaleString();
+        return rounded + (metric.unit || '');
+    }
+
+    function renderMarketTable(list, chosen, cache) {
+        const mount = document.getElementById('marketCompare');
+        const summary = document.getElementById('goalSummary');
+        if (!mount) return;
+        if (!window.__goalActive || !chosen.length) {
+            mount.innerHTML = '';
+            if (summary && !window.__goalActive) {
+                summary.textContent = 'Using the single-column sort. Check the traits above to compare a combination across the market.';
+            }
+            return;
+        }
+        if (summary) {
+            summary.textContent = 'Ranking ' + list.length + ' aircraft by ' + chosen.map(function (m) {
+                return (m.dir === 'low' ? 'lowest ' : 'highest ') + m.label.toLowerCase();
+            }).join(', ') + '.';
+        }
+        const top = list.slice(0, 8);
+        let html = '<table class="table table-sm table-dark mb-0" style="font-size:0.85rem;"><thead><tr><th>#</th><th>Aircraft</th><th>Match</th>';
+        chosen.forEach(function (m) { html += '<th>' + m.label + '</th>'; });
+        html += '</tr></thead><tbody>';
+        top.forEach(function (ac, i) {
+            html += '<tr><td>' + (i + 1) + '</td><td>' + (ac.manufacturer ? ac.manufacturer + ' ' : '') + (ac.aircraft_name || ac.name || '') + (ac.is_user_listing ? ' (for sale)' : '') + '</td><td>' + (ac.match_score || 0) + '%</td>';
+            chosen.forEach(function (m) {
+                html += '<td>' + formatCompareValue(m, compareRaw(ac, m.key, cache)) + '</td>';
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        mount.innerHTML = html;
     }
 
     function rankAircraftByGoal(list) {
-        const weights = readGoalWeights();
-        const keys = Object.keys(weights);
-        if (!keys.length) return;
+        const chosen = selectedCompares();
+        const cache = new Map();
+        if (!chosen.length) {
+            list.forEach(function (ac) { ac.match_score = null; });
+            renderMarketTable(list, [], cache);
+            return;
+        }
         const stats = {};
-        keys.forEach(function (key) {
+        chosen.forEach(function (metric) {
             let min = Infinity;
             let max = -Infinity;
             list.forEach(function (ac) {
-                const raw = goalMetric(ac, key);
+                const raw = compareRaw(ac, metric.key, cache);
+                if (raw === null) return;
                 if (raw < min) min = raw;
                 if (raw > max) max = raw;
             });
             if (!Number.isFinite(min)) min = 0;
             if (!Number.isFinite(max) || max === min) max = min + 1;
-            stats[key] = { min: min, max: max };
+            stats[metric.key] = { min: min, max: max };
         });
         list.forEach(function (ac) {
             let score = 0;
-            let total = 0;
-            keys.forEach(function (key) {
-                const span = stats[key].max - stats[key].min;
-                const normalized = (goalMetric(ac, key) - stats[key].min) / span;
-                score += normalized * weights[key];
-                total += weights[key];
+            chosen.forEach(function (metric) {
+                const raw = compareRaw(ac, metric.key, cache);
+                if (raw !== null) {
+                    const span = stats[metric.key].max - stats[metric.key].min;
+                    const normalized = (raw - stats[metric.key].min) / span;
+                    score += metric.dir === 'low' ? (1 - normalized) : normalized;
+                }
             });
-            ac.match_score = total ? Math.round((score / total) * 100) : 0;
+            ac.match_score = Math.round((score / chosen.length) * 100);
         });
         list.sort(function (a, b) { return (b.match_score || 0) - (a.match_score || 0); });
+        renderMarketTable(list, chosen, cache);
     }
 
-    function setGoalSliders(weights) {
-        document.querySelectorAll('[data-goal-slider]').forEach(function (input) {
-            const key = input.getAttribute('data-goal-slider');
-            input.value = weights[key] || 0;
-            const label = document.querySelector('[data-goal-value="' + key + '"]');
-            if (label) label.textContent = input.value;
+    function applyComparePreset(picks) {
+        COMPARE_METRICS.forEach(function (metric) {
+            const box = document.querySelector('[data-compare-key="' + metric.key + '"]');
+            const dir = document.querySelector('[data-compare-dir="' + metric.key + '"]');
+            const on = Object.prototype.hasOwnProperty.call(picks, metric.key);
+            if (box) box.checked = on;
+            if (dir) dir.value = on ? picks[metric.key] : metric.want;
         });
+        window.__goalActive = true;
+        currentPage = 1;
+        updateAircraftDisplay();
     }
 
     function paintGoalButtons() {
-        document.querySelectorAll('[data-goal]').forEach(function (btn) {
-            const on = btn.getAttribute('data-goal') === activeGoalKey;
-            btn.style.background = on ? '#F05545' : 'transparent';
-            btn.style.color = on ? '#fff' : '#f4f4f4';
-        });
-        const summary = document.getElementById('goalSummary');
-        if (!summary) return;
-        if (!window.__goalActive) {
-            summary.textContent = 'Using the sort menu. Pick a reason above to rank by what you care about.';
-            return;
-        }
-        const preset = GOAL_PRESETS[activeGoalKey];
-        summary.textContent = (preset ? preset.label : 'Your mix') + ' — higher match % means it fits those priorities better. Aircraft for sale stay in the same ranking.';
+        if (!window.__goalActive) renderMarketTable([], [], new Map());
     }
 
     function initGoalFinder() {
         const buttons = document.getElementById('goalButtons');
-        const sliders = document.getElementById('goalSliders');
-        if (!buttons || !sliders) return;
-        buttons.innerHTML = Object.keys(GOAL_PRESETS).map(function (key) {
-            return '<button type="button" class="btn btn-sm" data-goal="' + key + '" style="border:1px solid #F05545; border-radius:999px;">' + GOAL_PRESETS[key].label + '</button>';
-        }).join('') + '<button type="button" class="btn btn-sm" data-goal="custom" style="border:1px solid #888; border-radius:999px;">My own mix</button>';
-        sliders.innerHTML = GOAL_SLIDERS.map(function (pair) {
-            return '<div class="col-6 col-md-4 col-lg-3">'
-                + '<label class="text-white-50" style="font-size:0.8rem;">' + pair[1] + ' <span data-goal-value="' + pair[0] + '">0</span></label>'
-                + '<input type="range" min="0" max="10" value="0" data-goal-slider="' + pair[0] + '" class="form-range">'
-                + '</div>';
+        const metrics = document.getElementById('goalMetrics');
+        if (!buttons || !metrics) return;
+        buttons.innerHTML = Object.keys(COMPARE_PRESETS).map(function (key) {
+            return '<button type="button" class="btn btn-sm" data-preset="' + key + '" style="border:1px solid #F05545; border-radius:999px; color:#fff;">' + COMPARE_PRESETS[key].label + '</button>';
         }).join('');
-        setGoalSliders(GOAL_PRESETS.trip.weights);
-        paintGoalButtons();
-        if (typeof updateAircraftDisplay === 'function') updateAircraftDisplay();
+        metrics.innerHTML = COMPARE_METRICS.map(function (metric) {
+            return '<div class="col-12 col-md-6 col-lg-4">'
+                + '<label class="d-flex align-items-center gap-2 text-white" style="font-size:0.9rem;">'
+                + '<input type="checkbox" data-compare-key="' + metric.key + '">'
+                + '<span style="flex:1;">' + metric.label + '</span>'
+                + '<select data-compare-dir="' + metric.key + '" class="form-select form-select-sm" style="max-width:130px; background:#1a1a1a; color:#fff; border-color:#555;">'
+                + '<option value="high"' + (metric.want === 'high' ? ' selected' : '') + '>Want highest</option>'
+                + '<option value="low"' + (metric.want === 'low' ? ' selected' : '') + '>Want lowest</option>'
+                + '</select></label></div>';
+        }).join('');
         buttons.addEventListener('click', function (event) {
-            const btn = event.target.closest('[data-goal]');
+            const btn = event.target.closest('[data-preset]');
             if (!btn) return;
-            activeGoalKey = btn.getAttribute('data-goal');
+            applyComparePreset(COMPARE_PRESETS[btn.getAttribute('data-preset')].picks);
+        });
+        metrics.addEventListener('change', function () {
             window.__goalActive = true;
-            if (GOAL_PRESETS[activeGoalKey]) setGoalSliders(GOAL_PRESETS[activeGoalKey].weights);
-            paintGoalButtons();
             currentPage = 1;
             updateAircraftDisplay();
         });
-        sliders.addEventListener('input', function (event) {
-            const input = event.target.closest('[data-goal-slider]');
-            if (!input) return;
-            const label = document.querySelector('[data-goal-value="' + input.getAttribute('data-goal-slider') + '"]');
-            if (label) label.textContent = input.value;
-            activeGoalKey = 'custom';
-            window.__goalActive = true;
-            paintGoalButtons();
-            currentPage = 1;
-            updateAircraftDisplay();
+        ['yearsOfOwnership', 'number-of-trips', 'avg-trip-length', 'jetAPrice', 'depreciationRate'].forEach(function (id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('change', function () {
+                if (window.__goalActive) updateAircraftDisplay();
+            });
         });
+        applyComparePreset(COMPARE_PRESETS.trip.picks);
     }
 
     // Helper functions for extracting data from parsed HTML cards

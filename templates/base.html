@@ -302,58 +302,10 @@
                                 <i class="fas fa-calculator me-2"></i>Jet Finder
                             </a>
                         </li>
-
-
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('charter_search') }}">
-                                <i class="fas fa-route me-2"></i>Charter Search
+                            <a class="dropdown-item" href="{{ url_for('home') }}#goalFinder">
+                                <i class="fas fa-balance-scale me-2"></i>Compare the market
                             </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('empty_legs') }}">
-                                <i class="fas fa-gem me-2"></i>Empty Leg Flights
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('parts_marketplace') }}">
-                                <i class="fas fa-tools me-2"></i>Parts Marketplace
-                            </a>
-                        </li>
-                        <li>
-                            <hr class="dropdown-divider">
-                        </li>
-                        <li>
-                            <h6 class="dropdown-header">
-                                <i class="fas fa-calculator me-2"></i>Analysis Tools
-                            </h6>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('aircraft_recommendations') }}">
-                                <i class="fas fa-robot me-2"></i>AI Recommendations
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('compare_aircraft') }}?ids=">
-                                <i class="fas fa-balance-scale me-2"></i>Compare
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('airplane_stock_market') }}">
-                                <i class="fas fa-chart-line me-2"></i>Airplane Stock Market
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('service_providers') }}">
-                                <i class="fas fa-tools me-2"></i>Service Providers
-                            </a>
-                        </li>
-                        <li>
-                            <hr class="dropdown-divider">
-                        </li>
-                        <li>
-                            <h6 class="dropdown-header">
-                                <i class="fas fa-plus me-2"></i>Marketplace
-                            </h6>
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('create_listing') }}">
@@ -361,16 +313,8 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('marketplace.saved_listings') }}">
-                                <i class="fas fa-heart me-2"></i>Saved Listings
-                            </a>
-                        </li>
-                        <li>
-                            <hr class="dropdown-divider">
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="#" onclick="showHelp()">
-                                <i class="fas fa-question-circle me-2"></i>Help & Guide
+                            <a class="dropdown-item" href="{{ url_for('pricing') }}">
+                                <i class="fas fa-tag me-2"></i>Listing price
                             </a>
                         </li>
                     </ul>
@@ -392,9 +336,6 @@
                 <div class="dropdown user-menu">
                     <a href="#" class="login-btn dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown"
                         aria-expanded="false">
-                        {% if current_user.is_pro_member %}
-                        <span class="pro-badge-nav">PRO</span>
-                        {% endif %}
                         <i class="fas fa-user"></i>
                         <span>{{ current_user.first_name }}</span>
                     </a>
@@ -420,20 +361,6 @@
                                 <i class="fas fa-list me-2"></i>My listings
                             </a>
                         </li>
-                        {% if current_user.is_pro_member %}
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('dashboard') }}">
-                                <i class="fas fa-crown me-2"></i>Pro Dashboard
-                            </a>
-                        </li>
-                        {% else %}
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('pricing') }}">
-                                <i class="fas fa-rocket me-2"></i>Upgrade to Pro
-                                <span class="upgrade-badge ms-2">$20/mo</span>
-                            </a>
-                        </li>
-                        {% endif %}
                         <li>
                             <hr class="dropdown-divider">
                         </li>
@@ -472,14 +399,6 @@
     <script>
         // Prevent "db is not defined" if any script or console references db (e.g. debug)
         window.db = window.db || {};
-        function showHelp() {
-            alert('Help & Guide coming soon! Contact support for immediate assistance.');
-        }
-
-        function showLogin() {
-            alert('Login functionality coming soon! Stay tuned for user accounts and personalized features.');
-        }
-
         // Close dropdowns when clicking outside
         document.addEventListener('click', function (event) {
             const dropdowns = document.querySelectorAll('.dropdown-menu.show');

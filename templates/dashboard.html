@@ -246,18 +246,11 @@
                 <span class="dash__card-link">Search airports <i class="fas fa-arrow-right"></i></span>
                 <p class="dash__badge">Database</p>
             </a>
-            <a href="{{ url_for('marketplace_search') }}" class="dash__card" style="text-decoration: none; color: inherit;">
-                <div class="dash__card-icon"><i class="fas fa-store"></i></div>
-                <h3 class="dash__card-title">Marketplace</h3>
-                <p class="dash__card-desc">Browse and search user listings. All listings are stored in the database.</p>
-                <span class="dash__card-link">View marketplace <i class="fas fa-arrow-right"></i></span>
-                <p class="dash__badge">Database</p>
-            </a>
-            <a href="{{ url_for('airplane_stock_market') }}" class="dash__card" style="text-decoration: none; color: inherit;">
-                <div class="dash__card-icon"><i class="fas fa-chart-line"></i></div>
-                <h3 class="dash__card-title">Market analytics</h3>
-                <p class="dash__card-desc">Track aircraft prices and market trends with live data.</p>
-                <span class="dash__card-link">View analytics <i class="fas fa-arrow-right"></i></span>
+            <a href="{{ url_for('home') }}#goalFinder" class="dash__card" style="text-decoration: none; color: inherit;">
+                <div class="dash__card-icon"><i class="fas fa-balance-scale"></i></div>
+                <h3 class="dash__card-title">Compare the market</h3>
+                <p class="dash__card-desc">Pick the traits you care about and rank every aircraft in the spreadsheet against that mix.</p>
+                <span class="dash__card-link">Compare aircraft <i class="fas fa-arrow-right"></i></span>
             </a>
         </div>
 
@@ -270,16 +263,6 @@
                 </div>
                 <span style="color: #8e8e93;">{{ subscription.subscription_type.replace('_', ' ')|title }}</span>
             </div>
-        </div>
-        {% endif %}
-
-        {% if not user.is_pro_member %}
-        <div class="dash__subscription">
-            <div>
-                <strong style="color: #fbbf24;">Unlock more</strong>
-                <p style="margin: 0.25rem 0 0 0; color: #8e8e93; font-size: 0.95rem;">Analytics, price tracking, premium features.</p>
-            </div>
-            <a href="{{ url_for('pricing') }}">View plans</a>
         </div>
         {% endif %}
 

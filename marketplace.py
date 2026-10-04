@@ -281,7 +281,8 @@ def recommend_aircraft(listings, criteria=None):
 @marketplace.route('/')
 @marketplace.route('/listings')
 def listings():
-    """Main marketplace listings page with filtering"""
+    """Old JSON marketplace. The live search is the homepage."""
+    return redirect(url_for('home'))
     # Get filter criteria from query parameters with defaults
     criteria = {
         'budget': request.args.get('budget', '10000000'),
@@ -379,7 +380,8 @@ def listings():
 
 @marketplace.route('/listing/<string:listing_id>')
 def listing_detail(listing_id):
-    """Individual listing detail page"""
+    """Old JSON listing page."""
+    return redirect(url_for('home'))
     listings = load_listings()
 
     # Find the listing by ID
@@ -401,7 +403,8 @@ def listing_detail(listing_id):
 
 @marketplace.route('/login', methods=['GET', 'POST'])
 def login():
-    """Login page"""
+    """Old JSON login. Real accounts live on /login."""
+    return redirect(url_for('login'))
     if request.method == 'POST':
         email = request.form.get('email', '')
         password = request.form.get('password', '')
@@ -421,7 +424,8 @@ def login():
 
 @marketplace.route('/register', methods=['GET', 'POST'])
 def register():
-    """Registration page"""
+    """Old JSON signup. Real accounts live on /register."""
+    return redirect(url_for('register'))
     if request.method == 'POST':
         # Get form data
         first_name = request.form.get('first_name', '')
@@ -473,7 +477,8 @@ def register():
 
 @marketplace.route('/logout')
 def logout():
-    """Logout user"""
+    """Old JSON logout."""
+    return redirect(url_for('logout'))
     session.pop('user_id', None)
     flash('You have been logged out', 'success')
     return redirect(url_for('marketplace.login'))
@@ -481,7 +486,8 @@ def logout():
 
 @marketplace.route('/dashboard')
 def dashboard():
-    """User dashboard"""
+    """Old JSON dashboard."""
+    return redirect(url_for('dashboard'))
     if not is_logged_in():
         flash('Please login to access your dashboard', 'danger')
         return redirect(url_for('marketplace.login'))
@@ -492,7 +498,8 @@ def dashboard():
 
 @marketplace.route('/my-listings')
 def my_listings():
-    """User's listings"""
+    """Old JSON listings."""
+    return redirect(url_for('my_listings'))
     if not is_logged_in():
         flash('Please login to access your listings', 'danger')
         return redirect(url_for('marketplace.login'))
@@ -514,75 +521,14 @@ def my_listings():
 
 @marketplace.route('/saved-listings')
 def saved_listings():
-    """User's saved/favorite listings"""
-    if not is_logged_in():
-        flash('Please login to access your saved listings', 'danger')
-        return redirect(url_for('marketplace.login'))
-
-    current_user = get_current_user()
-    if current_user is None:
-        flash('User not found', 'danger')
-        return redirect(url_for('marketplace.login'))
-
-    listings = load_listings()
-
-    # Get listings that are in the user's favorites
-    favorite_listings = [listing for listing in listings if listing['id'] in current_user.get('favorites', [])]
-
-    return render_template('marketplace/saved_listings.html',
-                           listings=favorite_listings,
-                           current_user=current_user)
+    """Saved aircraft live on the customer profile, not the old JSON marketplace."""
+    return redirect(url_for('dashboard'))
 
 
 @marketplace.route('/create-listing', methods=['GET', 'POST'])
 def create_listing():
-    """Create a new listing"""
-    if not is_logged_in():
-        flash('Please login to create a listing', 'danger')
-        return redirect(url_for('marketplace.login'))
-
-    current_user = get_current_user()
-    if current_user is None:
-        flash('User not found', 'danger')
-        return redirect(url_for('marketplace.login'))
-
-    # Check if user is a seller or both
-    if current_user['account_type'] not in ['seller', 'both']:
-        flash('You need a seller account to create listings', 'danger')
-        return redirect(url_for('marketplace.dashboard'))
-
-    if request.method == 'POST':
-        # Get form data and create listing
-        # This would be more complex in a real application
-        title = request.form.get('title', '')
-        category = request.form.get('category', '')
-        description = request.form.get('description', '')
-        price = request.form.get('price', '0')
-
-        if not all([title, category, description, price]):
-            flash('All required fields must be filled', 'danger')
-            return render_template('marketplace/create_listing.html', current_user=current_user)
-
-        new_listing = {
-            'id': str(uuid.uuid4()),
-            'title': title,
-            'category': category,
-            'description': description,
-            'price': float(price),
-            'seller_id': current_user['id'],
-            'seller_name': f"{current_user['first_name']} {current_user['last_name']}",
-            'created_at': datetime.now().isoformat(),
-            'status': 'active'
-        }
-
-        listings = load_listings()
-        listings.append(new_listing)
-        save_listings(listings)
-
-        flash('Listing created successfully!', 'success')
-        return redirect(url_for('marketplace.my_listings'))
-
-    return render_template('marketplace/create_listing.html', current_user=current_user)
+    """Old JSON listing form. The real form is /create-listing on the main app."""
+    return redirect(url_for('create_listing'))
 
 # API endpoints for favorites
 

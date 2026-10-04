@@ -69,7 +69,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 REQUIRE_PAYMENT_FOR_LISTINGS=true
 ```
 
-Flow once enabled: user submits listing → pays $50 (monthly) or $150 (6-month) via
+Flow once enabled: user submits listing → pays $49 (listed as 30% off $70) via
 Stripe Checkout → webhook marks it paid → it appears in your admin queue for approval.
 
 ---

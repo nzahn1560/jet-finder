@@ -269,29 +269,13 @@
     <div class="row">
         <div class="col-12 text-center mb-5">
             <h1 class="display-4 text-white mb-3">Create Listing</h1>
-            <p class="lead text-muted">List your aircraft, charter services, parts, or services on Jet Finder</p>
+            <p class="lead text-muted">List an aircraft for <span style="text-decoration: line-through;">$70</span> <strong class="text-white">$49</strong> — 30% off</p>
         </div>
     </div>
 
     <div class="row justify-content-center">
         <div class="col-lg-10">
             <div class="listing-form-container">
-
-                <!-- Listing Type Tabs -->
-                <div class="listing-type-tabs">
-                    <button class="listing-type-tab active" onclick="setListingType('aircraft')">
-                        <i class="fas fa-plane mb-2"></i><br>Aircraft Sale
-                    </button>
-                    <button class="listing-type-tab" onclick="setListingType('charter')">
-                        <i class="fas fa-route mb-2"></i><br>Charter Service
-                    </button>
-                    <button class="listing-type-tab" onclick="setListingType('parts')">
-                        <i class="fas fa-cog mb-2"></i><br>Parts & Components
-                    </button>
-                    <button class="listing-type-tab" onclick="setListingType('services')">
-                        <i class="fas fa-tools mb-2"></i><br>Maintenance Services
-                    </button>
-                </div>
 
                 <form id="listing-form" enctype="multipart/form-data">
                     <input type="hidden" id="listing-type" name="listing_type" value="aircraft">
@@ -425,191 +409,6 @@
 
                     </div>
 
-                    <!-- Charter-Specific Fields -->
-                    <div id="charter-fields" class="form-section hidden">
-                        <div class="section-title">
-                            <i class="fas fa-route"></i>Charter Service Details
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Aircraft Type *</label>
-                                <input type="text" class="form-control" name="charter_aircraft_type"
-                                    placeholder="e.g., Citation CJ3+">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Hourly Rate *</label>
-                                <input type="number" class="form-control" name="hourly_rate" placeholder="3200" min="0">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Base Location *</label>
-                                <input type="text" class="form-control" name="base_location"
-                                    placeholder="KVNY - Van Nuys">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Service Radius (miles)</label>
-                                <input type="number" class="form-control" name="service_radius" placeholder="500"
-                                    min="0">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Max Passengers</label>
-                                <input type="number" class="form-control" name="max_passengers" placeholder="6" min="1">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Crew Requirements</label>
-                                <select class="form-select" name="crew_requirements">
-                                    <option value="single_pilot">Single Pilot</option>
-                                    <option value="dual_pilot">Dual Pilot</option>
-                                    <option value="flight_attendant">Flight Attendant Available</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Minimum Flight Time</label>
-                                <input type="number" class="form-control" name="minimum_flight_time" placeholder="1.5"
-                                    step="0.5" min="0">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Parts-Specific Fields -->
-                    <div id="parts-fields" class="form-section hidden">
-                        <div class="section-title">
-                            <i class="fas fa-cog"></i>Parts & Components Details
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Part Number *</label>
-                                <input type="text" class="form-control" name="part_number"
-                                    placeholder="e.g., ENG001, AVI002">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Part Category *</label>
-                                <select class="form-select" name="part_category">
-                                    <option value="">Select category</option>
-                                    <option value="Engine">Engine Components</option>
-                                    <option value="Avionics">Avionics & Electronics</option>
-                                    <option value="Landing Gear">Landing Gear</option>
-                                    <option value="Interior">Interior Components</option>
-                                    <option value="Structure">Structural Parts</option>
-                                    <option value="Hydraulics">Hydraulics</option>
-                                    <option value="Electrical">Electrical</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Manufacturer</label>
-                                <input type="text" class="form-control" name="parts_manufacturer"
-                                    placeholder="e.g., Honeywell, Garmin, Pratt & Whitney">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Condition *</label>
-                                <select class="form-select" name="condition">
-                                    <option value="">Select condition</option>
-                                    <option value="new">New (0 hours)</option>
-                                    <option value="overhauled">Overhauled</option>
-                                    <option value="serviceable">Serviceable</option>
-                                    <option value="repair">As-Is/For Repair</option>
-                                </select>
-                            </div>
-                            <div class="col-md-12 mb-3">
-                                <label class="form-label">Compatible Aircraft Models</label>
-                                <input type="text" class="form-control" name="compatible_aircraft"
-                                    placeholder="e.g., Citation CJ3+, Citation Sovereign+, King Air 350i">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Weight (lbs)</label>
-                                <input type="number" class="form-control" name="weight" placeholder="25.5" step="0.1"
-                                    min="0">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Time Since Overhaul (hours)</label>
-                                <input type="number" class="form-control" name="tso_hours" placeholder="150" min="0">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Certification</label>
-                                <select class="form-select" name="certification">
-                                    <option value="">Select certification</option>
-                                    <option value="faa_pma">FAA PMA</option>
-                                    <option value="faa_tso">FAA TSO</option>
-                                    <option value="oem">OEM Certified</option>
-                                    <option value="daa">DER Approved Alternative</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Services-Specific Fields -->
-                    <div id="services-fields" class="form-section hidden">
-                        <div class="section-title">
-                            <i class="fas fa-tools"></i>Maintenance Services Details
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Service Type *</label>
-                                <select class="form-select" name="service_type">
-                                    <option value="">Select service type</option>
-                                    <option value="annual_inspection">Annual Inspection</option>
-                                    <option value="100_hour">100 Hour Inspection</option>
-                                    <option value="engine_overhaul">Engine Overhaul</option>
-                                    <option value="avionics_installation">Avionics Installation</option>
-                                    <option value="paint_refurbishment">Paint & Refurbishment</option>
-                                    <option value="interior_work">Interior Work</option>
-                                    <option value="pre_purchase">Pre-Purchase Inspection</option>
-                                    <option value="aog_repair">AOG Repair</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Hourly Rate *</label>
-                                <input type="number" class="form-control" name="service_hourly_rate" placeholder="185"
-                                    min="0">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Service Location *</label>
-                                <input type="text" class="form-control" name="service_location"
-                                    placeholder="Van Nuys, CA">
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Service Radius (miles)</label>
-                                <input type="number" class="form-control" name="service_area_radius" placeholder="100"
-                                    min="0">
-                            </div>
-                            <div class="col-md-12 mb-3">
-                                <label class="form-label">Aircraft Specialties</label>
-                                <input type="text" class="form-control" name="aircraft_specialties"
-                                    placeholder="e.g., Citation Series, King Air, Gulfstream">
-                            </div>
-                        </div>
-
-                        <!-- Service Certifications -->
-                        <div class="mb-3">
-                            <label class="form-label">Certifications & Authorizations</label>
-                            <div class="checkbox-group">
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="faa_part_145">
-                                    <span>FAA Part 145</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="easa_145">
-                                    <span>EASA 145</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="textron_authorized">
-                                    <span>Textron Authorized</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="gulfstream_authorized">
-                                    <span>Gulfstream Authorized</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="bombardier_authorized">
-                                    <span>Bombardier Authorized</span>
-                                </label>
-                                <label class="checkbox-item">
-                                    <input type="checkbox" name="certifications" value="is_bao">
-                                    <span>IS-BAO</span>
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Contact Information Section -->
                     <div class="form-section">
                         <div class="section-title">
@@ -641,7 +440,7 @@
                     <!-- Photos & Documents Section -->
                     <div class="form-section">
                         <div class="section-title">
-                            <i class="fas fa-camera"></i>Photos & Documents
+                            <i class="fas fa-camera"></i>Photos
                         </div>
                         <div class="file-upload-area" onclick="document.getElementById('photos').click()">
                             <i class="fas fa-cloud-upload-alt fa-3x mb-3" style="color: #F05545;"></i>
@@ -654,75 +453,19 @@
 
                         <div id="photosStatus" class="mt-2"></div>
                         <div id="photosList" class="mt-2"></div>
-
-                        <div class="file-upload-area mt-3" onclick="document.getElementById('documents').click()">
-                            <i class="fas fa-file-alt fa-2x mb-3" style="color: #F05545;"></i>
-                            <h6 class="text-white">Upload Documents</h6>
-                            <p class="text-muted">Logbooks, inspections, certifications (PDF only)</p>
-                            <input type="file" id="documents" name="documents" multiple accept=".pdf"
-                                style="display: none;">
-                        </div>
-                        <div id="documentsStatus" class="mt-2"></div>
-                        <div id="documentsList" class="mt-2"></div>
                     </div>
 
-                    <!-- Pricing Calculator -->
-                    <div class="pricing-calculator">
-                        <div class="section-title">
-                            <i class="fas fa-calculator"></i>Listing Fee Calculator
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <p class="text-white mb-2">
-                                    <strong>Base Listing Fee:</strong> $49.99 (30 days)<br>
-                                    <strong>Featured Listing:</strong> +$29.99 (appears first)<br>
-                                    <strong>Premium Photos:</strong> +$19.99 (professional editing)
-                                </p>
-                            </div>
-                            <div class="col-md-6 text-end">
-                                <div class="calculated-price" id="calculated-price">$49.99</div>
-                                <small class="text-muted">Total listing cost</small>
-                            </div>
-                        </div>
-
-                    </div>
-
-                    <!-- Payment Section -->
+                    <input type="hidden" name="pricing_plan" value="monthly">
                     <div class="form-section">
                         <div class="section-title">
-                            <i class="fas fa-credit-card"></i>Listing Plan
+                            <i class="fas fa-tag"></i>Listing fee
                         </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="plan-option w-100 p-3 border border-light-subtle rounded-0"
-                                    style="cursor:pointer;">
-                                    <input type="radio" name="pricing_plan" value="monthly"
-                                        class="form-check-input me-2" checked onchange="updatePrice()">
-                                    <strong>$50 / month</strong>
-                                    <div class="small text-muted">Billed monthly · Auto-renews</div>
-                                </label>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="plan-option w-100 p-3 border border-light-subtle rounded-0"
-                                    style="cursor:pointer;">
-                                    <input type="radio" name="pricing_plan" value="six_month"
-                                        class="form-check-input me-2" onchange="updatePrice()">
-                                    <strong>$150 / 6 months</strong>
-                                    <div class="small text-muted">Billed every 6 months · Auto-renews</div>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="alert alert-dark d-flex justify-content-between align-items-center mt-3">
-                            <span><i class="fas fa-receipt me-2"></i>Total Due Today</span>
-                            <strong id="calculated-price">$50.00</strong>
-                        </div>
-                        <p class="text-muted mb-0">
-                            <small>
-                                <i class="fas fa-shield-alt me-1"></i>
-                                Secure payment processing by Stripe (integration in progress). Your listing remains
-                                pending review until payment is confirmed.
-                            </small>
+                        <p class="text-white mb-1">
+                            <span style="text-decoration: line-through; color: #888; font-size: 1.2rem;">$70</span>
+                            <strong style="font-size: 2rem; margin-left: 0.5rem;">$49</strong>
+                            <span style="margin-left: 0.6rem; background: #F05545; color: #fff; padding: 0.2rem 0.55rem; font-size: 0.8rem; font-weight: 700;">30% OFF</span>
                         </p>
+                        <p class="text-muted mb-0">One price per listing. No featured upgrades, no extra photo packages.</p>
                     </div>
 
                     <!-- Form Actions -->
@@ -784,9 +527,8 @@
     }
 
     function updatePrice() {
-        const plan = document.querySelector('[name="pricing_plan"]:checked')?.value || 'monthly';
-        const total = plan === 'six_month' ? 150 : 50;
-        document.getElementById('calculated-price').textContent = '$' + total.toFixed(2);
+        const price = document.getElementById('calculated-price');
+        if (price) price.textContent = '$49.00';
     }
 
     function saveDraft() {
@@ -1056,9 +798,12 @@
             updateFileStatus('photos', e.target.files);
         });
 
-        document.getElementById('documents').addEventListener('change', function (e) {
-            updateFileStatus('documents', e.target.files);
-        });
+        const documentsInput = document.getElementById('documents');
+        if (documentsInput) {
+            documentsInput.addEventListener('change', function (e) {
+                updateFileStatus('documents', e.target.files);
+            });
+        }
     }
 
     function updateFileStatus(type, files) {

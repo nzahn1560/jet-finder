@@ -329,23 +329,23 @@ def per_use_required(service_type, price_per_use):
 # Specific decorators for each subscription type
 @app.route('/charter-search')
 def charter_search():
-    """Charter search page - now accessible to all users"""
-    return render_template('marketplace/charter_search.html')
+    """Unfinished charter product. Send people to the aircraft finder."""
+    return redirect(url_for('home'))
 
 @app.route('/empty-legs')
 def empty_legs():
-    """Empty leg flights page - now accessible to all users"""
-    return render_template('marketplace/empty_legs.html')
+    """Unfinished empty-leg product. Send people to the aircraft finder."""
+    return redirect(url_for('home'))
 
 @app.route('/parts-marketplace')
 def parts_marketplace():
-    """Parts marketplace page - now accessible to all users"""
-    return render_template('marketplace/parts.html')
+    """Unfinished parts product. Send people to the aircraft finder."""
+    return redirect(url_for('home'))
 
 @app.route('/service-providers')
 def service_providers():
-    """Service providers directory - now accessible to all users"""
-    return render_template('service_providers.html')
+    """Unfinished directory. Send people to the aircraft finder."""
+    return redirect(url_for('home'))
 
 # Pro subscription removed - legacy decorator removed
 
@@ -816,8 +816,8 @@ def aircraft_details(aircraft_id):
 
 @app.route('/marketplace-search')
 def marketplace_search():
-    """Marketplace search page"""
-    return render_template('marketplace/listings.html')
+    """Old JSON marketplace. The live search is the homepage."""
+    return redirect(url_for('home'))
 
 @app.route('/dashboard')
 @app.route('/profile')
@@ -829,8 +829,8 @@ def dashboard():
 
 @app.route('/airplane-stock-market')
 def airplane_stock_market():
-    """Main Airplane Stock Market page with enhanced scoring and price charts"""
-    return render_template('airplane_stock_market.html')
+    """Unfinished stock-market demo. Send people to the aircraft finder."""
+    return redirect(url_for('home'))
 
 @app.route('/api/stock-market-overview')
 def api_stock_market_overview():
@@ -2540,10 +2540,9 @@ def api_profile_saved():
 # Pro subscription removed - upgrade route removed
 
 @app.route('/priority-ranking')
-@login_required
 def priority_ranking():
-    """Priority ranking tool"""
-    return render_template('aircraft_recommendations.html')
+    """Unfinished ranking page. The home comparison tool does this job."""
+    return redirect(url_for('home') + '#goalFinder')
 
 @app.route('/pricing')
 def pricing():
@@ -2551,10 +2550,9 @@ def pricing():
     return render_template('pricing.html')
 
 @app.route('/aircraft-recommendations')
-@login_required
 def aircraft_recommendations():
-    """Aircraft recommendations page"""
-    return render_template('aircraft_recommendations.html')
+    """Unfinished AI page. The comparison tool on the home page does this job."""
+    return redirect(url_for('home') + '#goalFinder')
 
 # Pro dashboard removed
 
@@ -3659,8 +3657,8 @@ def api_aircraft_scoring():
 
 @app.route('/scoring-demo')
 def scoring_demo():
-    """Aircraft scoring system demonstration page"""
-    return render_template('aircraft_scoring_demo.html')
+    """Demo page. The live comparison is on the homepage."""
+    return redirect(url_for('home') + '#goalFinder')
 
 @app.route('/api/scoring-methodology')
 def api_scoring_methodology():
@@ -4317,8 +4315,8 @@ def api_get_aircraft_scores(aircraft_id):
 
 @app.route('/scoring-system')
 def scoring_system_demo():
-    """Demo page for the new scoring system"""
-    return render_template('scoring_system_demo.html')
+    """Demo page. The live comparison is on the homepage."""
+    return redirect(url_for('home') + '#goalFinder')
 
 @app.route('/api/scoring/demo-data', methods=['POST'])
 def api_demo_scoring_data():
@@ -4869,7 +4867,7 @@ def api_listings_patch(listing_id: int):
 # and require checkout before admin review. Default false so the site works
 # end-to-end before Stripe is fully configured.
 # =============================================================================
-LISTING_PRICES_CENTS = {'monthly': 5000, 'six_month': 15000}  # $50 / $150
+LISTING_PRICE_CENTS = 4900  # $49 per listing, marketed as 30% off $70. No upgrades.
 
 
 def _stripe_configured() -> bool:
@@ -4902,8 +4900,7 @@ def api_listing_checkout(listing_id: int):
     if row.get('payment_status') == 'paid':
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
 
-    plan = row.get('pricing_plan') or 'monthly'
-    amount = LISTING_PRICES_CENTS.get(plan, LISTING_PRICES_CENTS['monthly'])
+    amount = LISTING_PRICE_CENTS
     base = request.host_url.rstrip('/')
     try:
         checkout = stripe.checkout.Session.create(
@@ -4914,8 +4911,8 @@ def api_listing_checkout(listing_id: int):
                     'currency': 'usd',
                     'unit_amount': amount,
                     'product_data': {
-                        'name': f"JetSchool listing fee — {row.get('title') or ('Listing #' + str(listing_id))}",
-                        'description': f"{plan.replace('_', ' ')} plan",
+                        'name': f"JetSchool listing — {row.get('title') or ('Listing #' + str(listing_id))}",
+                        'description': '$49 listing fee (30% off $70). One price, no upgrades.',
                     },
                 },
                 'quantity': 1,
