@@ -31,6 +31,10 @@
     <div class="ap__inner">
         <h1 class="ap__title">Admin Portal</h1>
         <p class="ap__sub">New listings land here for approval. Approve one and it goes on the marketplace. Delete one and it comes off.</p>
+        <div id="admin-arrived" hidden style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
+            This listing was just submitted. Approve it and it shows up on the marketplace.
+        </div>
+        <div id="admin-note" hidden style="background:#14281a; color:#d8ffe4; border:1px solid #22c55e; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;"></div>
 
         <div class="ap__tabs">
             <button class="ap__tab active" data-tab="listings">Listings</button>
@@ -72,6 +76,12 @@ function esc(s) {
     });
 }
 
+const highlightId = new URLSearchParams(window.location.search).get('highlight');
+if (highlightId) {
+    const arrived = document.getElementById('admin-arrived');
+    if (arrived) arrived.hidden = false;
+}
+
 async function loadAdminListings() {
     const status = document.getElementById('status-filter').value;
     const target = document.getElementById('listings-list');
@@ -88,7 +98,7 @@ async function loadAdminListings() {
             const color = STATUS_COLORS[l.status] || '#8e8e93';
             const owner = l.owner ? (l.owner.email || (l.owner.first_name + ' ' + l.owner.last_name)) : 'unknown';
             return ''
-                + '<div class="ap__card" data-id="' + l.id + '">'
+                + '<div class="ap__card" data-id="' + l.id + '"' + (String(l.id) === String(highlightId) ? ' style="border-color:#3d6cb5;"' : '') + '>'
                 + '  <div class="ap__row">'
                 + '    <div class="ap__col" style="flex:1;min-width:220px;">'
                 + '      <strong>' + esc(l.title || l.name || 'Listing #' + l.id) + '</strong><br>'
@@ -130,7 +140,16 @@ async function loadAdminListings() {
                         body: body,
                     });
                 }
-                if (resp.ok) { loadAdminListings(); } else {
+                if (resp.ok) {
+                    if (act === 'approve') {
+                        const note = document.getElementById('admin-note');
+                        if (note) {
+                            note.hidden = false;
+                            note.innerHTML = 'Approved. It is on the marketplace now. <a href="/" style="color:#fff;">View it</a>';
+                        }
+                    }
+                    loadAdminListings();
+                } else {
                     const err = await resp.json().catch(function () { return {}; });
                     alert(err.message || err.error || 'Action failed');
                 }

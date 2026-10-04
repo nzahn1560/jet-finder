@@ -249,7 +249,7 @@
             <a href="{{ url_for('home') }}#goalFinder" class="dash__card" style="text-decoration: none; color: inherit;">
                 <div class="dash__card-icon"><i class="fas fa-balance-scale"></i></div>
                 <h3 class="dash__card-title">Compare the market</h3>
-                <p class="dash__card-desc">Pick the traits you care about and rank every aircraft in the spreadsheet against that mix.</p>
+                <p class="dash__card-desc">Pick the traits you care about and rank the approved listings against that mix.</p>
                 <span class="dash__card-link">Compare aircraft <i class="fas fa-arrow-right"></i></span>
             </a>
         </div>
@@ -267,8 +267,26 @@
         {% endif %}
 
         <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're selling</h2>
+        {% if request.args.get('submitted') %}
+        <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
+            {% if request.args.get('paid') == '0' %}
+            This listing is saved. Payment was not finished, so it is not in the approval queue yet. Use Pay $49 on the card below.
+            {% elif request.args.get('paid') == '1' %}
+            Payment received. This listing is waiting for approval. It appears on the marketplace after it is approved.
+            {% else %}
+            This listing is saved and waiting for approval. It appears on the marketplace only after an admin approves it.
+            {% endif %}
+            {% if user.is_admin %}
+            <a href="/admin?highlight={{ request.args.get('submitted') }}" style="color:#fff; margin-left:0.4rem;">Open the approval queue</a>
+            {% endif %}
+        </div>
+        {% elif request.args.get('updated') %}
+        <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
+            Changes saved. If this listing was already approved, it stays on the marketplace.
+        </div>
+        {% endif %}
         <div id="my-listings-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading your listings...</div>
-        <div id="my-listings" class="dash__grid"></div>
+        <div id="my-listings" class="dash__grid" data-admin="{{ 1 if user.is_admin else 0 }}"></div>
 
         <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're watching</h2>
         <p style="color:#8e8e93; font-family:'Rajdhani', sans-serif;">Models from search, and listings you saved because you might buy them.</p>
@@ -295,36 +313,71 @@
             return;
         }
         statusEl.textContent = listings.length + ' listing' + (listings.length === 1 ? '' : 's');
+        const isAdmin = listEl.getAttribute('data-admin') === '1';
+        const statusCopy = {
+            active: 'Live on the marketplace.',
+            pending: 'Waiting for approval. Not on the marketplace yet.',
+            unpaid: 'Saved. Pay the $49 fee to send it for approval.',
+            rejected: 'Not approved.',
+            deleted: 'Removed from the marketplace.',
+            archived: 'Archived.',
+            draft: 'Draft only.',
+        };
         const html = listings.map(function (l) {
             const statusColor = ({
                 active: '#22c55e', pending: '#fbbf24', unpaid: '#fbbf24',
                 rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
             })[l.status] || '#8e8e93';
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
-            const canEdit = l.status !== 'active' && l.status !== 'archived';
-            const canDelete = l.status !== 'active';
+            const canEdit = l.status !== 'active' && l.status !== 'archived' && l.status !== 'deleted';
+            const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
+            const copy = statusCopy[l.status] || 'Saved.';
             return '\n<div class="dash__card">\n'
                 + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  <strong>$' + (Number(l.price) || 0).toLocaleString() + '</strong> &middot; ' + escapeHtml(l.location || '') + '</p>\n'
-                + '  <span class="dash__badge" style="color:' + statusColor + ';">Status: ' + escapeHtml(l.status || 'unknown') + '</span>\n'
+                + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
                 + rej + '\n'
-                + '  <div style="margin-top:0.8rem; display:flex; gap:0.5rem;">'
+                + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
+                + (l.status === 'active' ? '<a class="dash__card-link" href="/">View on marketplace</a>' : '')
+                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49</button>' : '')
+                + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
-                + (canDelete ? ' <button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
+                + (canDelete ? '<button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
                 + '  </div>\n'
                 + '</div>';
         }).join('');
         listEl.innerHTML = html;
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Delete this listing?')) return;
+                if (!confirm('Delete this listing? It will leave the marketplace.')) return;
                 const id = btn.getAttribute('data-delete');
                 const resp = await fetch('/api/listings/' + id, { method: 'DELETE', credentials: 'include' });
-                if (resp.ok) { loadMyListings(); } else {
+                if (resp.ok) { window.location.href = '/dashboard'; } else {
                     const err = await resp.json().catch(function () { return {}; });
                     alert(err.message || err.error || 'Failed to delete');
                 }
+            });
+        });
+        listEl.querySelectorAll('[data-pay]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const id = btn.getAttribute('data-pay');
+                btn.disabled = true;
+                const resp = await fetch('/api/listings/' + id + '/checkout', { method: 'POST', credentials: 'include' });
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok && data.url) { window.location.href = data.url; return; }
+                if (resp.ok && data.skip) { window.location.href = '/dashboard?submitted=' + id; return; }
+                alert(data.message || 'Payment could not be started. The listing is still saved.');
+                btn.disabled = false;
+            });
+        });
+        listEl.querySelectorAll('[data-approve]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const id = btn.getAttribute('data-approve');
+                const resp = await fetch('/api/admin/listings/' + id + '/approve', { method: 'POST', credentials: 'include' });
+                if (resp.ok) { window.location.href = '/'; return; }
+                const err = await resp.json().catch(function () { return {}; });
+                alert(err.message || err.error || 'Could not approve this listing.');
             });
         });
     } catch (e) {

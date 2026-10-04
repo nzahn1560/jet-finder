@@ -277,9 +277,12 @@
         <div class="col-lg-10">
             <div class="listing-form-container">
 
-                <form id="listing-form" enctype="multipart/form-data">
+                <form id="listing-form" method="post" action="/create-listing" enctype="multipart/form-data" novalidate>
+                    <div id="listing-form-error" {% if not form_error %}hidden{% endif %} style="background:#3a1515; color:#ffd0d0; border:1px solid #ef4444; padding:0.9rem 1rem; margin-bottom:1.25rem;">
+                        {{ form_error or '' }}
+                    </div>
                     <input type="hidden" id="listing-type" name="listing_type" value="aircraft">
-                    <input type="hidden" id="selectedProfileId" name="profile_id" required>
+                    <input type="hidden" id="selectedProfileId" name="profile_id">
 
                     <!-- Performance Profile Selection - REQUIRED FIRST -->
                     <div id="aircraft-fields" class="form-section">
@@ -296,9 +299,9 @@
                             <!-- Profile Search and Filters -->
                             <div class="row mb-3">
                                 <div class="col-md-8 mb-3">
-                                    <label class="form-label">Search Profiles *</label>
+                                    <label class="form-label">Search profiles</label>
                                     <input type="text" class="form-control" id="profileSearchInput"
-                                        placeholder="Search by manufacturer or model..." required>
+                                        placeholder="Search by manufacturer or model...">
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label class="form-label">Manufacturer</label>
@@ -350,16 +353,16 @@
                                         profile.</small>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Serial Number *</label>
+                                    <label class="form-label">Serial Number</label>
                                     <input type="text" class="form-control" id="serialNumber" name="serial_number"
-                                        required placeholder="e.g., 5501">
+                                        placeholder="e.g., 5501">
                                 </div>
                             </div>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Price ($) *</label>
                                     <input type="number" class="form-control" id="price" name="price" required
-                                        placeholder="e.g., 5500000" min="0" step="1000">
+                                        placeholder="e.g., 5500000" min="1" step="any">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Engine Type *</label>
@@ -401,8 +404,8 @@
                                 </div>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Description *</label>
-                                <textarea class="form-control" id="description" name="description" rows="4" required
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control" id="description" name="description" rows="4"
                                     placeholder="Describe aircraft history, upgrades, maintenance, etc."></textarea>
                             </div>
                         </div>
@@ -416,18 +419,18 @@
                         </div>
                         <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Contact Name *</label>
-                                <input type="text" class="form-control" name="contact_name" required
+                                <label class="form-label">Contact Name</label>
+                                <input type="text" class="form-control" name="contact_name"
                                     placeholder="Your name or company representative">
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Phone Number *</label>
-                                <input type="tel" class="form-control" name="contact_phone" required
+                                <label class="form-label">Phone Number</label>
+                                <input type="tel" class="form-control" name="contact_phone"
                                     placeholder="(555) 123-4567">
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Email Address *</label>
-                                <input type="email" class="form-control" name="contact_email" required
+                                <label class="form-label">Email Address</label>
+                                <input type="email" class="form-control" name="contact_email"
                                     placeholder="your@email.com">
                             </div>
                             <div class="col-md-6 mb-3">
@@ -470,11 +473,12 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
+                        <p id="listing-next-step" class="text-white mb-3">Submit sends this aircraft for approval. It shows on your dashboard right away, and on the marketplace only after it is approved.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
                         <button type="submit" class="btn btn-primary btn-lg">
-                            <i class="fas fa-credit-card me-2"></i>Pay & Submit for Approval
+                            <i class="fas fa-check me-2"></i>Submit for approval
                         </button>
                     </div>
                 </form>
@@ -484,6 +488,7 @@
 </div>
 
 <script>
+    const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
     let currentListingType = 'aircraft';
 
     function setListingType(type) {
@@ -641,7 +646,11 @@
         e.preventDefault();
 
         if (currentListingType === 'aircraft' && !document.getElementById('selectedProfileId').value) {
-            alert('Please select a performance profile before submitting.');
+            const box = document.getElementById('listing-form-error');
+            if (box) {
+                box.hidden = false;
+                box.textContent = 'Click an aircraft in the list above, then submit again.';
+            }
             return;
         }
 
@@ -651,7 +660,12 @@
         submitBtn.disabled = true;
 
         const fail = (msg) => {
-            alert(msg);
+            const box = document.getElementById('listing-form-error');
+            if (box) {
+                box.hidden = false;
+                box.textContent = msg;
+                box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
             submitBtn.innerHTML = originalText;
             submitBtn.disabled = false;
         };
@@ -659,6 +673,7 @@
         try {
             const payload = buildListingPayload();
             let listingId = EDIT_LISTING_ID;
+            let paymentRequired = false;
 
             if (EDIT_LISTING_ID) {
                 const resp = await fetch(`/api/listings/${EDIT_LISTING_ID}`, {
@@ -677,16 +692,15 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload),
                 });
-                if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname); return; }
+                if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent('/create-listing'); return; }
                 const data = await resp.json().catch(() => ({}));
-                if (!resp.ok) {
-                    if (data.fields) return fail('Missing required fields: ' + data.fields.join(', '));
-                    return fail(data.message || data.error || 'Failed to create listing. Please try again.');
+                if (!resp.ok || !data.id) {
+                    return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, airport, and email, then try again.');
                 }
                 listingId = data.id;
+                paymentRequired = !!data.payment_required;
             }
 
-            // Upload photos (if any were selected)
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading photos...';
             const media = await uploadListingPhotos(listingId);
             if (media.errors && media.errors.length) {
@@ -697,10 +711,23 @@
 
             if (EDIT_LISTING_ID) {
                 window.location.href = '/dashboard?updated=1';
-            } else {
-                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Finishing up...';
-                await startCheckoutOrFinish(listingId);
+                return;
             }
+
+            if (paymentRequired) {
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
+                try {
+                    const pay = await fetch(`/api/listings/${listingId}/checkout`, { method: 'POST', credentials: 'include' });
+                    const payData = await pay.json().catch(() => ({}));
+                    if (pay.ok && payData.url) {
+                        window.location.href = payData.url;
+                        return;
+                    }
+                } catch (err) { /* listing is already saved */ }
+            }
+            window.location.href = LISTING_USER_IS_ADMIN
+                ? ('/admin?highlight=' + listingId)
+                : ('/dashboard?submitted=' + listingId);
         } catch (err) {
             console.error('Listing submission failed:', err);
             fail('Something went wrong submitting your listing. Please try again.');
@@ -1199,6 +1226,19 @@
         const yearField = document.getElementById('yearModel');
         if (yearField && (profile.year || profile.model_year)) {
             yearField.value = profile.year || profile.model_year;
+        }
+
+        const searchField = document.getElementById('profileSearchInput');
+        if (searchField && !searchField.value) {
+            searchField.value = `${getProfileManufacturer(profile)} ${getProfileName(profile)}`.trim();
+        }
+
+        const engineField = document.getElementById('engineType');
+        if (engineField && !engineField.value) {
+            const raw = (profile.engine_type || profile.category || '').toLowerCase();
+            if (raw.includes('piston')) engineField.value = 'Piston';
+            else if (raw.includes('turboprop') || raw.includes('turbo prop')) engineField.value = 'Turboprop';
+            else if (raw.includes('jet') || raw.includes('turbine') || raw.includes('turbo')) engineField.value = 'Turbine';
         }
     }
 

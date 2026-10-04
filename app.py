@@ -2572,10 +2572,23 @@ def aircraft_recommendations():
 
 # Pro dashboard removed
 
-@app.route('/create-listing')
+@app.route('/create-listing', methods=['GET', 'POST'])
 @login_required
 def create_listing():
-    """Create listing page (login required)."""
+    """Create listing page. A normal form post saves the listing even if page script fails."""
+    if request.method == 'POST':
+        user = get_current_user_from_request()
+        result, err = _create_listing_for_user(user, _listing_data_from_form(request.form, user))
+        if err:
+            payload, status = err
+            return render_template(
+                'create_listing.html',
+                form_error=payload.get('message') or 'Could not save the listing.',
+            ), status
+        listing_id = result['id']
+        if user and user.get('is_admin'):
+            return redirect(url_for('admin_index', highlight=listing_id))
+        return redirect(url_for('dashboard', submitted=listing_id))
     return render_template('create_listing.html')
 
 @app.route('/my-listings')
@@ -4648,6 +4661,24 @@ def _row_to_combined_listing(row, aircraft_map):
     created_at = row.get('created_at')
     updated_at = row.get('updated_at')
     profile = aircraft_map.get(profile_id)
+    if profile is None and profile_id is not None:
+        try:
+            profile = aircraft_map.get(int(profile_id))
+        except (TypeError, ValueError):
+            profile = None
+    if profile is None and profile_id is not None:
+        try:
+            want = int(profile_id)
+        except (TypeError, ValueError):
+            want = None
+        if want is not None:
+            for key, candidate in aircraft_map.items():
+                try:
+                    if int(key) == want:
+                        profile = candidate
+                        break
+                except (TypeError, ValueError):
+                    continue
     if not profile:
         return None
     profile_copy = dict(profile)
@@ -4831,65 +4862,125 @@ def api_listings_me():
         return jsonify({'error': 'server_error'}), 500
 
 
-@app.route('/api/listings', methods=['POST'])
-@require_auth
-def api_listings_create():
-    """Create a new listing owned by the current user. Default status='unpaid'."""
-    user = request.current_user  # type: ignore[attr-defined]
-    data = request.get_json(silent=True) or {}
+def _listing_data_from_form(form, user):
+    """Map the create-listing form onto the fields the listing saver expects."""
+    description = (form.get('description') or '').strip()
+    serial = (form.get('serial_number') or '').strip()
+    notes = []
+    if serial and 'Serial Number:' not in description:
+        notes.append('Serial Number: ' + serial)
+    contact_name = (form.get('contact_name') or '').strip()
+    contact_phone = (form.get('contact_phone') or '').strip()
+    if contact_name:
+        notes.append('Contact: ' + contact_name)
+    if contact_phone:
+        notes.append('Phone: ' + contact_phone)
+    if notes:
+        description = (description + '\n\n' + '\n'.join(notes)).strip()
+    email = (form.get('email') or form.get('contact_email') or (user or {}).get('email') or '').strip()
+    return {
+        'profile_id': form.get('profile_id'),
+        'title': (form.get('listing_name') or form.get('title') or '').strip(),
+        'price': form.get('price'),
+        'location': (form.get('location') or '').strip(),
+        'email': email,
+        'year': form.get('year_model') or form.get('year'),
+        'hours': form.get('total_time') if form.get('total_time') not in (None, '') else form.get('hours'),
+        'description': description,
+        'engine_type': form.get('engine_type'),
+        'manufacturer': form.get('manufacturer'),
+        'pricing_plan': form.get('pricing_plan') or 'monthly',
+    }
+
+
+def _create_listing_for_user(user, data):
+    """Save a listing for this account. Pending review, or unpaid when Stripe is required.
+
+    Returns (result_dict, None) or (None, (payload, status_code)).
+    """
+    if not user:
+        return None, ({'error': 'auth_required', 'message': 'Sign in before submitting a listing.'}, 401)
     required = ['profile_id', 'price', 'location', 'email', 'year', 'hours']
     missing = [f for f in required if data.get(f) in (None, '')]
     if missing:
-        return jsonify({'error': 'missing_fields', 'fields': missing}), 400
-
+        return None, ({
+            'error': 'missing_fields',
+            'fields': missing,
+            'message': 'Choose an aircraft, then enter the year, hours, price, airport, and email.',
+        }, 400)
     try:
         profile_id = int(data['profile_id'])
+        price = float(data['price'])
+        hours = int(data.get('hours') or 0)
+        year_value = int(data['year'])
     except (TypeError, ValueError):
-        return jsonify({'error': 'profile_not_found'}), 404
-    aircraft_data = get_unified_aircraft_data()
-    profile = next((a for a in aircraft_data if int(a.get('id') or 0) == profile_id), None)
+        return None, ({
+            'error': 'invalid_fields',
+            'message': 'Year, hours, and price need to be numbers, and an aircraft has to be selected.',
+        }, 400)
+    if price <= 0 or year_value < 1950 or hours < 0:
+        return None, ({
+            'error': 'invalid_fields',
+            'message': 'Enter a year from 1950 on, hours that are zero or more, and a price above zero.',
+        }, 400)
+    profile = None
+    for aircraft in get_unified_aircraft_data():
+        try:
+            if int(aircraft.get('id') or 0) == profile_id:
+                profile = aircraft
+                break
+        except (TypeError, ValueError):
+            continue
     if not profile:
-        return jsonify({'error': 'profile_not_found'}), 404
-
-    images_str = ','.join(data.get('images', [])) if data.get('images') else ''
-    documents_str = ','.join(data.get('documents', [])) if data.get('documents') else ''
-    title = data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}".strip()
-    year_value = data.get('year') or profile.get('year') or profile.get('lowest_year') or datetime.now().year
-    try:
-        year_value = int(year_value)
-    except (TypeError, ValueError):
-        year_value = datetime.now().year
-    valid_plans = {'monthly', 'six_month'}
-    pricing_plan = data.get('pricing_plan', 'monthly')
-    if pricing_plan not in valid_plans:
-        return jsonify({'error': 'invalid_pricing_plan'}), 400
-
-    # Payment-gated flow: listing starts 'unpaid' when Stripe payment is required,
-    # otherwise it goes straight to 'pending' (admin review).
+        return None, ({
+            'error': 'profile_not_found',
+            'message': 'That aircraft could not be found. Pick one from the list and submit again.',
+        }, 404)
+    title = (data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}").strip()
+    if not title:
+        title = profile.get('aircraft_name') or 'Aircraft listing'
+    pricing_plan = data.get('pricing_plan') or 'monthly'
+    if pricing_plan not in {'monthly', 'six_month'}:
+        pricing_plan = 'monthly'
     initial_status = 'unpaid' if _payment_required() else 'pending'
     try:
         listing_id = db_module.create_user_listing(
-            profile_id, title, year_value,
-            float(data['price']), int(data.get('hours', 0) or 0),
-            data['location'], data['email'],
-            data.get('description', ''), images_str, documents_str,
-            data.get('engine_type', profile.get('category', 'Unknown')),
-            data.get('manufacturer', profile.get('manufacturer', 'Unknown')),
+            profile_id, title, year_value, price, hours,
+            str(data['location']).strip(), str(data['email']).strip(),
+            data.get('description') or '', '', '',
+            data.get('engine_type') or profile.get('category') or 'Unknown',
+            data.get('manufacturer') or profile.get('manufacturer') or 'Unknown',
             pricing_plan,
             user_id=user['id'],
             status=initial_status,
         )
         if initial_status == 'pending':
             _notify_admins_new_listing(listing_id, title, data.get('email') or user.get('email'))
-        return jsonify({
+        return {
             'ok': True,
             'id': listing_id,
             'status': initial_status,
             'payment_required': initial_status == 'unpaid',
-        }), 201
+        }, None
     except Exception:
-        logger.exception('api_listings_create failed')
-        return jsonify({'error': 'server_error'}), 500
+        logger.exception('create listing failed')
+        return None, ({
+            'error': 'server_error',
+            'message': 'The listing could not be saved. Please try again.',
+        }, 500)
+
+
+@app.route('/api/listings', methods=['POST'])
+@require_auth
+def api_listings_create():
+    """Create a new listing owned by the current user."""
+    user = request.current_user  # type: ignore[attr-defined]
+    data = request.get_json(silent=True) or {}
+    result, err = _create_listing_for_user(user, data)
+    if err:
+        payload, status = err
+        return jsonify(payload), status
+    return jsonify(result), 201
 
 
 @app.route('/api/listings/<int:listing_id>', methods=['PATCH'])
@@ -4972,8 +5063,8 @@ def api_listing_checkout(listing_id: int):
             }],
             metadata={'listing_id': str(listing_id), 'user_id': str(user['id'])},
             customer_email=user.get('email'),
-            success_url=f'{base}/dashboard?paid=1',
-            cancel_url=f'{base}/dashboard?paid=0',
+            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}',
+            cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
         )
         db_module.set_listing_payment_session(listing_id, checkout.id)
         return jsonify({'url': checkout.url}), 200
