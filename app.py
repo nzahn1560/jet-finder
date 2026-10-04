@@ -4806,6 +4806,10 @@ def api_listings_create():
     documents_str = ','.join(data.get('documents', [])) if data.get('documents') else ''
     title = data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}".strip()
     year_value = data.get('year') or profile.get('year') or profile.get('lowest_year') or datetime.now().year
+    try:
+        year_value = int(year_value)
+    except (TypeError, ValueError):
+        year_value = datetime.now().year
     valid_plans = {'monthly', 'six_month'}
     pricing_plan = data.get('pricing_plan', 'monthly')
     if pricing_plan not in valid_plans:
