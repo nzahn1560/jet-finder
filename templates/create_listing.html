@@ -327,7 +327,7 @@
                             <!-- Performance Profiles Grid -->
                             <div class="performance-profiles-container mb-3">
                                 <div class="performance-profiles-grid" id="performanceProfilesGrid"
-                                    style="max-height: 300px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; background: rgba(0,0,0,0.2);">
+                                    style="max-height: 420px; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 15px; background: rgba(0,0,0,0.2);">
                                     <div class="text-center text-muted py-4">
                                         <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
                                         <p>Loading performance profiles...</p>
@@ -1774,81 +1774,5 @@
     // Expose filterProfiles to be callable from anywhere
     console.log('🌐 Global functions exposed: filterProfiles, setupProfileEventHandlers');
 
-    // Form submission handler
-    document.getElementById('listing-form').addEventListener('submit', async function (e) {
-        e.preventDefault();
-
-        // Validate performance profile is selected
-        if (!selectedProfile || !document.getElementById('selectedProfileId').value) {
-            alert('Please select a performance profile before submitting.');
-            document.getElementById('profileSearchInput').focus();
-            return;
-        }
-
-        const priceField = document.getElementById('price');
-        const engineTypeField = document.getElementById('engineType');
-        const manufacturerField = document.getElementById('manufacturerInput');
-        const locationField = document.getElementById('location');
-        const emailField = document.getElementById('email');
-        const descriptionField = document.getElementById('description');
-        const listingNameField = document.getElementById('listingName');
-        const serialNumberField = document.getElementById('serialNumber');
-        const totalTimeField = document.getElementById('totalTime');
-        const yearModelField = document.getElementById('yearModel');
-        const planSelection = document.querySelector('input[name="pricing_plan"]:checked');
-
-        const fallbackTitle = `${getProfileManufacturer(selectedProfile)} ${getProfileName(selectedProfile)}`.trim();
-        const listingData = {
-            profile_id: parseInt(document.getElementById('selectedProfileId').value),
-            price: parseFloat(priceField.value),
-            location: locationField.value,
-            email: emailField.value,
-            description: descriptionField.value,
-            engine_type: engineTypeField.value || selectedProfile.category || 'Unknown',
-            manufacturer: manufacturerField.value || getProfileManufacturer(selectedProfile) || '',
-            pricing_plan: planSelection ? planSelection.value : 'monthly',
-            title: (listingNameField?.value || fallbackTitle || 'Aircraft Listing').trim(),
-            serial_number: serialNumberField ? serialNumberField.value.trim() : '',
-            hours: totalTimeField ? parseFloat(totalTimeField.value) || 0 : 0,
-            year: yearModelField ? parseInt(yearModelField.value, 10) || new Date().getFullYear() : new Date().getFullYear(),
-            images: [], // TODO: Upload images to server and get URLs
-            documents: [] // TODO: Upload documents to server and get URLs
-        };
-
-        // Show loading state
-        const submitBtn = document.querySelector('button[type="submit"]');
-        const originalText = submitBtn.innerHTML;
-        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Submitting...';
-        submitBtn.disabled = true;
-
-        try {
-            // Submit listing
-            const response = await fetch('/api/user-listings', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(listingData)
-            });
-
-            const result = await response.json();
-
-            if (response.ok) {
-                // Success - show message and redirect
-                alert('Listing created successfully! It is now live on the site.');
-                window.location.href = '/my-listings';
-            } else {
-                throw new Error(result.error || 'Failed to create listing');
-            }
-
-        } catch (error) {
-            console.error('Error submitting listing:', error);
-            alert('Error creating listing: ' + error.message);
-        } finally {
-            // Restore button
-            submitBtn.innerHTML = originalText;
-            submitBtn.disabled = false;
-        }
-    });
 </script>
 {% endblock %}

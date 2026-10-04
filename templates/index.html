@@ -3992,6 +3992,14 @@
 {% if filtered_aircraft %}
 <div class="row mt-5">
     <div class="col-12">
+        <div id="goalFinder" class="mb-4 p-3" style="background: rgba(18,19,24,0.92); border: 1px solid rgba(240,85,69,0.45); border-radius: 12px;">
+            <h5 class="text-white mb-1">Find your aircraft</h5>
+            <p class="text-white-50 mb-3" style="font-size: 0.95rem;">These rankings use the full aircraft spreadsheet. Pick a reason, or drag the sliders to mix what matters to you.</p>
+            <div class="d-flex flex-wrap gap-2 mb-3" id="goalButtons"></div>
+            <div class="row g-2" id="goalSliders"></div>
+            <p class="mb-0 mt-2 text-white" id="goalSummary" style="font-size: 0.9rem;"></p>
+        </div>
+
         <!-- Sorting Controls -->
         <div class="sorting-controls mb-4">
             <div class="row align-items-center">
@@ -4082,7 +4090,7 @@
 <!-- Create Listing Modal -->
 <div class="modal fade" id="createListingModal" tabindex="-1" aria-labelledby="createListingModalLabel"
     aria-hidden="true">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content bg-dark text-light">
             <div class="modal-header border-secondary">
                 <h5 class="modal-title" id="createListingModalLabel">
@@ -4135,7 +4143,8 @@
 
                         <!-- Performance Profiles Grid -->
                         <div class="performance-profiles-container">
-                            <div class="performance-profiles-grid" id="performanceProfilesGrid">
+                            <div class="performance-profiles-grid" id="performanceProfilesGrid"
+                                style="max-height: 420px; overflow-y: auto; -webkit-overflow-scrolling: touch;">
                                 <!-- Performance profiles will be loaded here -->
                             </div>
                         </div>
@@ -4179,7 +4188,7 @@
                                     <div class="form-group mb-3">
                                         <label class="form-label">Year</label>
                                         <input type="number" class="form-control" id="listingYear" min="1950"
-                                            max="2025">
+                                            max="2035" required>
                                     </div>
                                 </div>
                             </div>
@@ -4561,54 +4570,233 @@
     let totalPages = 1;
 
     // Load approved user listings from server
+    function normalizeAircraftRecord(ac, isListing) {
+        const num = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : 0;
+        };
+        const name = ac.aircraft_name || ac.name || ac.title || ac.listing_title || 'Unknown Aircraft';
+        const cabin = num(ac.cabin_volume);
+        const runway = num(ac.runway_length);
+        const altitude = num(ac.max_altitude || ac.altitude);
+        const hourly = num(ac.total_hourly_cost);
+        return {
+            ...ac,
+            id: ac.listing_id || ac.id,
+            aircraft_name: name,
+            name: name,
+            listing_title: ac.listing_title || ac.title || name,
+            price: num(ac.price || ac.listing_price),
+            range: num(ac.range),
+            speed: num(ac.speed || ac.cruise_speed),
+            passengers: num(ac.passengers || ac.seats),
+            year: num(ac.year || ac.lowest_year),
+            cabin_volume: cabin,
+            cabinVolume: cabin,
+            baggage_volume: num(ac.baggage_volume),
+            runway_length: runway,
+            runwayLength: runway,
+            max_altitude: altitude,
+            altitude: altitude,
+            cabin_height: num(ac.cabin_height),
+            total_hourly_cost: hourly,
+            hourlyCost: hourly,
+            manufacturer: ac.manufacturer || '',
+            category: ac.category || ac.type || ac.engine_type || '',
+            image: ac.image || '/static/images/aircraft_placeholder.jpg',
+            is_user_listing: !!isListing
+        };
+    }
+
     async function loadAllAircraftData() {
-        console.log('📡 Loading approved aircraft listings from server...');
+        console.log('📡 Loading aircraft spreadsheet and approved listings...');
         try {
-            const response = await fetch('/api/user-listings', {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const listingData = await response.json();
-            if (!Array.isArray(listingData) || listingData.length === 0) {
-                console.warn('⚠️ No approved listings available yet');
-                allAircraftData = [];
-                filteredAircraftData = [];
-                return true;
-            }
-
-            allAircraftData = listingData.map((listing, index) => ({
-                ...listing,
-                id: listing.listing_id || listing.id || index + 1,
-                aircraft_name: listing.aircraft_name || listing.name || 'Unknown Aircraft',
-                name: listing.aircraft_name || listing.name || 'Unknown Aircraft',
-                price: listing.price || listing.listing_price || 0,
-                listing_title: listing.listing_title || listing.title,
-                listing_description: listing.listing_description || listing.description,
-                contact_email: listing.contact_email || listing.email,
-                location: listing.location || 'Contact for location',
-                engine_type: listing.engine_type || listing.category || '',
-                manufacturer: listing.manufacturer || '',
-                image: listing.image || '/static/images/aircraft_placeholder.jpg',
-                images: listing.images || [],
-                is_user_listing: true
-            }));
-
+            const [catalogResp, listingsResp] = await Promise.all([
+                fetch('/api/aircraft-data', { headers: { 'Accept': 'application/json' } }),
+                fetch('/api/user-listings', { headers: { 'Accept': 'application/json' } })
+            ]);
+            const catalog = catalogResp.ok ? await catalogResp.json() : [];
+            const listings = listingsResp.ok ? await listingsResp.json() : [];
+            const catalogRows = (Array.isArray(catalog) ? catalog : []).map(ac => normalizeAircraftRecord(ac, false));
+            const listingRows = (Array.isArray(listings) ? listings : []).map(ac => normalizeAircraftRecord(ac, true));
+            allAircraftData = [...listingRows, ...catalogRows];
             filteredAircraftData = [...allAircraftData];
-            console.log(`✅ Loaded ${allAircraftData.length} approved listings`);
-            return true;
+            console.log(`✅ Loaded ${catalogRows.length} spreadsheet aircraft and ${listingRows.length} listings`);
+            return allAircraftData.length > 0;
         } catch (error) {
-            console.error('❌ Error loading approved listings:', error);
+            console.error('❌ Error loading aircraft data:', error);
             allAircraftData = [];
             filteredAircraftData = [];
             return false;
         }
+    }
+
+    const GOAL_PRESETS = {
+        trip: { label: 'Speed, range & cabin', weights: { speed: 8, range: 8, cabin: 8 } },
+        value: { label: 'Best value', weights: { value: 9, speed: 5, range: 5, cabin: 4 } },
+        efficient: { label: 'Most efficient', weights: { efficiency: 9, range: 5, hourly: 6 } },
+        nicest: { label: 'Nicest cabin', weights: { cabin: 9, baggage: 6, passengers: 5, cabin_height: 4 } },
+        coolest: { label: 'Coolest', weights: { speed: 8, altitude: 7, year: 6, range: 4 } },
+        runway: { label: 'Short runway', weights: { short_runway: 9, speed: 3, range: 3 } },
+        room: { label: 'Most room', weights: { passengers: 8, cabin: 8, baggage: 5 } },
+        price: { label: 'Lowest price', weights: { cheap: 10, value: 3 } }
+    };
+    const GOAL_SLIDERS = [
+        ['speed', 'Speed'],
+        ['range', 'Range'],
+        ['cabin', 'Cabin size'],
+        ['value', 'Value for money'],
+        ['efficiency', 'Efficiency'],
+        ['hourly', 'Low hourly cost'],
+        ['passengers', 'Passenger count'],
+        ['baggage', 'Baggage'],
+        ['altitude', 'Altitude'],
+        ['year', 'Newer aircraft'],
+        ['short_runway', 'Short runway'],
+        ['cheap', 'Low purchase price'],
+        ['cabin_height', 'Cabin height']
+    ];
+    window.__goalActive = true;
+    let activeGoalKey = 'trip';
+
+    function goalMetric(ac, key) {
+        const n = (v) => Number(v) || 0;
+        if (key === 'speed') return n(ac.speed);
+        if (key === 'range') return n(ac.range);
+        if (key === 'cabin') return n(ac.cabin_volume);
+        if (key === 'baggage') return n(ac.baggage_volume);
+        if (key === 'passengers') return n(ac.passengers);
+        if (key === 'altitude') return n(ac.max_altitude);
+        if (key === 'year') return n(ac.year);
+        if (key === 'cabin_height') return n(ac.cabin_height);
+        if (key === 'value') {
+            const price = n(ac.price);
+            if (price <= 0) return 0;
+            return (n(ac.speed) + n(ac.range) / 2 + n(ac.cabin_volume)) / (price / 1000000);
+        }
+        if (key === 'efficiency') {
+            const hourly = n(ac.total_hourly_cost);
+            if (hourly > 0) return n(ac.range) / hourly;
+            const price = n(ac.price);
+            return price > 0 ? n(ac.range) / (price / 1000000) : n(ac.range);
+        }
+        if (key === 'hourly') {
+            const hourly = n(ac.total_hourly_cost);
+            return hourly > 0 ? 1 / hourly : 0;
+        }
+        if (key === 'short_runway') {
+            const runway = n(ac.runway_length);
+            return runway > 0 ? 1 / runway : 0;
+        }
+        if (key === 'cheap') {
+            const price = n(ac.price);
+            return price > 0 ? 1 / price : 0;
+        }
+        return 0;
+    }
+
+    function readGoalWeights() {
+        const weights = {};
+        document.querySelectorAll('[data-goal-slider]').forEach(function (input) {
+            const value = Number(input.value) || 0;
+            if (value > 0) weights[input.getAttribute('data-goal-slider')] = value;
+        });
+        return weights;
+    }
+
+    function rankAircraftByGoal(list) {
+        const weights = readGoalWeights();
+        const keys = Object.keys(weights);
+        if (!keys.length) return;
+        const stats = {};
+        keys.forEach(function (key) {
+            let min = Infinity;
+            let max = -Infinity;
+            list.forEach(function (ac) {
+                const raw = goalMetric(ac, key);
+                if (raw < min) min = raw;
+                if (raw > max) max = raw;
+            });
+            if (!Number.isFinite(min)) min = 0;
+            if (!Number.isFinite(max) || max === min) max = min + 1;
+            stats[key] = { min: min, max: max };
+        });
+        list.forEach(function (ac) {
+            let score = 0;
+            let total = 0;
+            keys.forEach(function (key) {
+                const span = stats[key].max - stats[key].min;
+                const normalized = (goalMetric(ac, key) - stats[key].min) / span;
+                score += normalized * weights[key];
+                total += weights[key];
+            });
+            ac.match_score = total ? Math.round((score / total) * 100) : 0;
+        });
+        list.sort(function (a, b) { return (b.match_score || 0) - (a.match_score || 0); });
+    }
+
+    function setGoalSliders(weights) {
+        document.querySelectorAll('[data-goal-slider]').forEach(function (input) {
+            const key = input.getAttribute('data-goal-slider');
+            input.value = weights[key] || 0;
+            const label = document.querySelector('[data-goal-value="' + key + '"]');
+            if (label) label.textContent = input.value;
+        });
+    }
+
+    function paintGoalButtons() {
+        document.querySelectorAll('[data-goal]').forEach(function (btn) {
+            const on = btn.getAttribute('data-goal') === activeGoalKey;
+            btn.style.background = on ? '#F05545' : 'transparent';
+            btn.style.color = on ? '#fff' : '#f4f4f4';
+        });
+        const summary = document.getElementById('goalSummary');
+        if (!summary) return;
+        if (!window.__goalActive) {
+            summary.textContent = 'Using the sort menu. Pick a reason above to rank by what you care about.';
+            return;
+        }
+        const preset = GOAL_PRESETS[activeGoalKey];
+        summary.textContent = (preset ? preset.label : 'Your mix') + ' — higher match % means it fits those priorities better. Aircraft for sale stay in the same ranking.';
+    }
+
+    function initGoalFinder() {
+        const buttons = document.getElementById('goalButtons');
+        const sliders = document.getElementById('goalSliders');
+        if (!buttons || !sliders) return;
+        buttons.innerHTML = Object.keys(GOAL_PRESETS).map(function (key) {
+            return '<button type="button" class="btn btn-sm" data-goal="' + key + '" style="border:1px solid #F05545; border-radius:999px;">' + GOAL_PRESETS[key].label + '</button>';
+        }).join('') + '<button type="button" class="btn btn-sm" data-goal="custom" style="border:1px solid #888; border-radius:999px;">My own mix</button>';
+        sliders.innerHTML = GOAL_SLIDERS.map(function (pair) {
+            return '<div class="col-6 col-md-4 col-lg-3">'
+                + '<label class="text-white-50" style="font-size:0.8rem;">' + pair[1] + ' <span data-goal-value="' + pair[0] + '">0</span></label>'
+                + '<input type="range" min="0" max="10" value="0" data-goal-slider="' + pair[0] + '" class="form-range">'
+                + '</div>';
+        }).join('');
+        setGoalSliders(GOAL_PRESETS.trip.weights);
+        paintGoalButtons();
+        if (typeof updateAircraftDisplay === 'function') updateAircraftDisplay();
+        buttons.addEventListener('click', function (event) {
+            const btn = event.target.closest('[data-goal]');
+            if (!btn) return;
+            activeGoalKey = btn.getAttribute('data-goal');
+            window.__goalActive = true;
+            if (GOAL_PRESETS[activeGoalKey]) setGoalSliders(GOAL_PRESETS[activeGoalKey].weights);
+            paintGoalButtons();
+            currentPage = 1;
+            updateAircraftDisplay();
+        });
+        sliders.addEventListener('input', function (event) {
+            const input = event.target.closest('[data-goal-slider]');
+            if (!input) return;
+            const label = document.querySelector('[data-goal-value="' + input.getAttribute('data-goal-slider') + '"]');
+            if (label) label.textContent = input.value;
+            activeGoalKey = 'custom';
+            window.__goalActive = true;
+            paintGoalButtons();
+            currentPage = 1;
+            updateAircraftDisplay();
+        });
     }
 
     // Helper functions for extracting data from parsed HTML cards
@@ -5099,6 +5287,9 @@
     // Update aircraft display based on filtered results with pagination
     function updateAircraftDisplay() {
         console.log('🔄 Updating aircraft display...');
+        if (window.__goalActive && filteredAircraftData.length) {
+            rankAircraftByGoal(filteredAircraftData);
+        }
         const aircraftGrid = document.getElementById('aircraftGrid');
         if (!aircraftGrid) return;
 
@@ -5117,8 +5308,8 @@
                 <div class="empty-state-card text-center w-100">
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
-                        <h4 class="mb-2">No approved listings yet</h4>
-                        <p class="text-muted mb-0">Check back soon—aircraft listings appear here once the owner approves them.</p>
+                        <h4 class="mb-2">No aircraft match</h4>
+                        <p class="text-muted mb-0">Loosen a filter, or move the sliders. The full spreadsheet is still loaded.</p>
                     </div>
                 </div>
             `;
@@ -5868,6 +6059,7 @@
                 
                 <div class="aircraft-content" style="padding: 20px;">
                     <h5 class="aircraft-name">${listingTitle}</h5>
+                    ${aircraft.match_score != null ? `<div style="display:inline-block; margin-bottom:8px; background:#F05545; color:#fff; font-weight:700; font-size:0.75rem; padding:3px 8px; border-radius:999px;">${aircraft.match_score}% match${aircraft.is_user_listing ? ' · For sale' : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 0.85rem;">
                         <i class="fas fa-map-marker-alt me-1"></i>${listingLocation} · 
                         <i class="fas fa-cog me-1"></i>${engineType}
@@ -6736,6 +6928,8 @@
     // Sort aircraft based on selected criteria
     function sortAircraft(sortBy) {
         console.log(`🔄 Sorting aircraft by: ${sortBy}`);
+        window.__goalActive = false;
+        if (typeof paintGoalButtons === 'function') paintGoalButtons();
 
         if (!sortBy || sortBy === '') return;
 
@@ -7217,10 +7411,160 @@
         updateAircraftDisplay();
 
         updateCompareUI();
+        initGoalFinder();
         initAircraftWatchlist();
+        initCreateListingModal();
 
         console.log('🔥 REAL-TIME FILTERING AND PAGINATION INITIALIZED');
     });
+
+    let homepageProfiles = [];
+    let homepageSelectedProfile = null;
+
+    function initCreateListingModal() {
+        const grid = document.getElementById('performanceProfilesGrid');
+        const search = document.getElementById('profileSearch');
+        const category = document.getElementById('profileCategoryFilter');
+        const passengers = document.getElementById('profilePassengerFilter');
+        const continueBtn = document.getElementById('continueToListingDetails');
+        const backBtn = document.getElementById('backToProfileSelection');
+        const createBtn = document.getElementById('createListingBtn');
+        if (!grid || !createBtn) return;
+
+        function renderProfiles(list) {
+            if (!list.length) {
+                grid.innerHTML = '<p class="text-white-50 p-3 mb-0">No performance profiles match that search.</p>';
+                return;
+            }
+            grid.innerHTML = list.slice(0, 80).map(function (p) {
+                const selected = homepageSelectedProfile && String(homepageSelectedProfile.id) === String(p.id);
+                return '<button type="button" data-profile-id="' + p.id + '" class="w-100 text-start mb-2 p-2" style="background:' + (selected ? 'rgba(240,85,69,0.25)' : 'rgba(255,255,255,0.04)') + '; color:#fff; border:1px solid ' + (selected ? '#F05545' : 'rgba(255,255,255,0.12)') + '; border-radius:8px;">'
+                    + '<strong>' + (p.manufacturer || '') + ' ' + (p.name || '') + '</strong><br>'
+                    + '<span style="color:#bbb; font-size:0.85rem;">' + (p.category || '') + ' · ' + (p.range || 0) + ' nm · ' + (p.speed || 0) + ' kts · ' + (p.passengers || 0) + ' seats</span>'
+                    + '</button>';
+            }).join('');
+        }
+
+        function filteredProfiles() {
+            const q = (search && search.value || '').trim().toLowerCase();
+            const cat = category ? category.value : '';
+            const pax = passengers ? passengers.value : '';
+            return homepageProfiles.filter(function (p) {
+                const hay = ((p.manufacturer || '') + ' ' + (p.name || '') + ' ' + (p.category || '')).toLowerCase();
+                if (q && !hay.includes(q)) return false;
+                if (cat && (p.category || '') !== cat) return false;
+                const seats = Number(p.passengers) || 0;
+                if (pax === '1-4' && (seats < 1 || seats > 4)) return false;
+                if (pax === '5-8' && (seats < 5 || seats > 8)) return false;
+                if (pax === '9+' && seats < 9) return false;
+                return true;
+            });
+        }
+
+        fetch('/api/performance-profiles').then(function (r) { return r.json(); }).then(function (rows) {
+            homepageProfiles = Array.isArray(rows) ? rows : [];
+            renderProfiles(homepageProfiles);
+        }).catch(function () {
+            grid.innerHTML = '<p class="text-danger p-3">Could not load the aircraft spreadsheet.</p>';
+        });
+
+        [search, category, passengers].forEach(function (el) {
+            if (el) el.addEventListener('input', function () { renderProfiles(filteredProfiles()); });
+            if (el && el.tagName === 'SELECT') el.addEventListener('change', function () { renderProfiles(filteredProfiles()); });
+        });
+
+        grid.addEventListener('click', function (event) {
+            const btn = event.target.closest('[data-profile-id]');
+            if (!btn) return;
+            homepageSelectedProfile = homepageProfiles.find(function (p) { return String(p.id) === btn.getAttribute('data-profile-id'); });
+            const preview = document.getElementById('selectedProfilePreview');
+            const details = document.getElementById('selectedProfileDetails');
+            if (preview) preview.classList.remove('d-none');
+            if (details && homepageSelectedProfile) {
+                details.innerHTML = '<strong>' + homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name + '</strong>'
+                    + '<div>Range ' + (homepageSelectedProfile.range || 0) + ' nm · Speed ' + (homepageSelectedProfile.speed || 0) + ' kts · Cabin ' + (homepageSelectedProfile.cabin_volume || 0) + ' cu ft</div>';
+            }
+            const title = document.getElementById('listingTitle');
+            if (title && homepageSelectedProfile && !title.value) {
+                title.value = (homepageSelectedProfile.manufacturer || '') + ' ' + (homepageSelectedProfile.name || '');
+            }
+            if (continueBtn) continueBtn.disabled = !homepageSelectedProfile;
+            renderProfiles(filteredProfiles());
+        });
+
+        if (continueBtn) continueBtn.addEventListener('click', function () {
+            document.getElementById('profileSelectionStep').classList.add('d-none');
+            document.getElementById('listingDetailsStep').classList.remove('d-none');
+        });
+        if (backBtn) backBtn.addEventListener('click', function () {
+            document.getElementById('listingDetailsStep').classList.add('d-none');
+            document.getElementById('profileSelectionStep').classList.remove('d-none');
+        });
+
+        createBtn.addEventListener('click', async function () {
+            if (!homepageSelectedProfile) {
+                alert('Select a performance profile from the aircraft spreadsheet first.');
+                return;
+            }
+            const year = parseInt(document.getElementById('listingYear').value, 10);
+            const hours = parseInt(document.getElementById('listingHours').value, 10);
+            const price = parseFloat(document.getElementById('listingPrice').value);
+            const location = (document.getElementById('listingLocation').value || '').trim();
+            const email = (document.getElementById('listingEmail').value || '').trim();
+            const description = (document.getElementById('listingDescription').value || '').trim();
+            const title = (document.getElementById('listingTitle').value || '').trim();
+            if (!year || year < 1950) { alert('Enter the aircraft year.'); return; }
+            if (!Number.isFinite(hours) || hours < 0) { alert('Enter total hours.'); return; }
+            if (!price || price <= 0) { alert('Enter a price.'); return; }
+            if (!location || !email) { alert('Location and contact email are required.'); return; }
+            createBtn.disabled = true;
+            const original = createBtn.innerHTML;
+            createBtn.innerHTML = 'Creating...';
+            try {
+                const resp = await fetch('/api/listings', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        profile_id: homepageSelectedProfile.id,
+                        title: title || (homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name),
+                        year: year,
+                        hours: hours,
+                        price: price,
+                        location: location,
+                        email: email,
+                        description: description + (description ? '\n\n' : '') + 'Performance profile: ' + homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name,
+                        manufacturer: homepageSelectedProfile.manufacturer,
+                        engine_type: homepageSelectedProfile.engine_type || homepageSelectedProfile.category,
+                        pricing_plan: 'monthly'
+                    })
+                });
+                if (resp.status === 401) {
+                    window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+                    return;
+                }
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok) {
+                    alert(data.message || data.error || 'Could not create the listing.');
+                    return;
+                }
+                const files = document.getElementById('listingImages').files;
+                if (files && files.length) {
+                    const fd = new FormData();
+                    Array.from(files).slice(0, 10).forEach(function (file) { fd.append('files', file); });
+                    await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
+                }
+                const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
+                const payData = await pay.json().catch(function () { return {}; });
+                window.location.href = (pay.ok && payData.url) ? payData.url : '/dashboard?submitted=1';
+            } catch (err) {
+                alert('Could not create the listing. Please try again.');
+            } finally {
+                createBtn.disabled = false;
+                createBtn.innerHTML = original;
+            }
+        });
+    }
 
     const savedAircraftKeys = new Set();
 

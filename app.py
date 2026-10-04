@@ -4788,20 +4788,24 @@ def api_listings_create():
     """Create a new listing owned by the current user. Default status='unpaid'."""
     user = request.current_user  # type: ignore[attr-defined]
     data = request.get_json(silent=True) or {}
-    required = ['profile_id', 'price', 'location', 'email']
+    required = ['profile_id', 'price', 'location', 'email', 'year', 'hours']
     missing = [f for f in required if data.get(f) in (None, '')]
     if missing:
         return jsonify({'error': 'missing_fields', 'fields': missing}), 400
 
+    try:
+        profile_id = int(data['profile_id'])
+    except (TypeError, ValueError):
+        return jsonify({'error': 'profile_not_found'}), 404
     aircraft_data = get_unified_aircraft_data()
-    profile = next((a for a in aircraft_data if a.get('id') == data['profile_id']), None)
+    profile = next((a for a in aircraft_data if int(a.get('id') or 0) == profile_id), None)
     if not profile:
         return jsonify({'error': 'profile_not_found'}), 404
 
     images_str = ','.join(data.get('images', [])) if data.get('images') else ''
     documents_str = ','.join(data.get('documents', [])) if data.get('documents') else ''
     title = data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}".strip()
-    year_value = data.get('year') or profile.get('year') or datetime.now().year
+    year_value = data.get('year') or profile.get('year') or profile.get('lowest_year') or datetime.now().year
     valid_plans = {'monthly', 'six_month'}
     pricing_plan = data.get('pricing_plan', 'monthly')
     if pricing_plan not in valid_plans:
@@ -4812,7 +4816,7 @@ def api_listings_create():
     initial_status = 'unpaid' if _payment_required() else 'pending'
     try:
         listing_id = db_module.create_user_listing(
-            data['profile_id'], title, year_value,
+            profile_id, title, year_value,
             float(data['price']), int(data.get('hours', 0) or 0),
             data['location'], data['email'],
             data.get('description', ''), images_str, documents_str,
