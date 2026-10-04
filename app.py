@@ -260,7 +260,7 @@ def _no_cache_auth_endpoints(response):
     """Force no-cache for any auth/dashboard/admin/API path so Cloudflare/browsers never serve stale data."""
     path = request.path or ''
     if (path.startswith('/api/') or path.startswith('/admin') or path in (
-        '/login', '/logout', '/register', '/dashboard', '/my-listings', '/create-listing'
+        '/login', '/logout', '/register', '/dashboard', '/profile', '/my-listings', '/create-listing'
     )):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
@@ -820,9 +820,10 @@ def marketplace_search():
     return render_template('marketplace/listings.html')
 
 @app.route('/dashboard')
+@app.route('/profile')
 @login_required
 def dashboard():
-    """User dashboard (login required)."""
+    """Customer profile: aircraft they sell, and aircraft they are watching."""
     user = get_current_user_info()
     return render_template('dashboard.html', user=user, subscription=user.get('subscription') if user else None)
 
@@ -2113,14 +2114,16 @@ def categorize_aircraft(aircraft):
         return 'Heavy Jet'
 
 def get_current_user_info():
-    """Get current user information for templates"""
-    if 'user_id' in session:
-        user = get_user_by_id(session['user_id'])
-        if user:
-            subscription = get_user_subscription(user['id'])
-            user['subscription'] = subscription
-            return user
-    return None
+    """Get current user information for templates (cookie session, then Flask session)."""
+    user = get_current_user_from_request()
+    if not user:
+        return None
+    for key in ('created_at', 'updated_at'):
+        val = user.get(key)
+        if val is not None and not isinstance(val, str):
+            user[key] = val.isoformat() if hasattr(val, 'isoformat') else str(val)
+    user['subscription'] = get_user_subscription(user['id'])
+    return user
 
 # Setup Jinja globals now that get_current_user_info is defined
 def setup_jinja_globals():
@@ -2472,6 +2475,67 @@ def api_auth_me():
     if not user:
         return jsonify({'error': 'not_logged_in'}), 401
     return jsonify({'user': _user_public_dict(user)}), 200
+
+
+@app.route('/api/profile', methods=['GET', 'PATCH'])
+@require_auth
+def api_profile():
+    """Customer profile. GET returns the account. PATCH updates name, role, location, phone."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if request.method == 'PATCH':
+        data = request.get_json(silent=True) or {}
+        db_module.update_user_profile(user['id'], data)
+        user = get_user_by_id(user['id']) or user
+    return jsonify({'user': _user_public_dict(user)}), 200
+
+
+def _saved_snapshot_from_request(data: dict) -> dict:
+    price = data.get('price')
+    try:
+        price = float(price) if price not in (None, '') else None
+    except (TypeError, ValueError):
+        price = None
+    return {
+        'title': data.get('title') or data.get('name'),
+        'manufacturer': data.get('manufacturer'),
+        'price': price,
+        'location': data.get('location'),
+        'image_url': data.get('image_url') or data.get('image'),
+    }
+
+
+@app.route('/api/profile/saved', methods=['GET', 'POST', 'DELETE'])
+@require_auth
+def api_profile_saved():
+    """Aircraft this customer is watching (catalog models or listings for sale)."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if request.method == 'GET':
+        saved = db_module.list_saved_aircraft(user['id'])
+        return jsonify({
+            'saved': saved,
+            'keys': [f"{row['kind']}:{row['target_id']}" for row in saved],
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    kind = (data.get('kind') or request.args.get('kind') or 'catalog').strip().lower()
+    target_id = data.get('target_id') or data.get('listing_id') or request.args.get('target_id')
+    if request.method == 'DELETE':
+        saved_id = data.get('id') or request.args.get('id')
+        ok = db_module.remove_saved_aircraft(
+            user['id'],
+            kind=kind,
+            target_id=target_id,
+            saved_id=int(saved_id) if str(saved_id or '').isdigit() else None,
+        )
+        return jsonify({'ok': ok}), 200
+    try:
+        saved_id = db_module.save_aircraft_for_user(
+            user['id'], kind, target_id, _saved_snapshot_from_request(data)
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({'ok': True, 'id': saved_id, 'kind': kind, 'target_id': str(target_id)}), 201
+
 
 # Pro subscription removed - upgrade route removed
 

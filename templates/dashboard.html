@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Jet Finder{% endblock %}
+{% block title %}Your profile - Jet Finder{% endblock %}
 
 {% block additional_css %}
 <style>
@@ -208,12 +208,26 @@
             </div>
             <div class="dash__actions">
                 <a href="{{ url_for('create_listing') }}" class="dash__btn dash__btn--primary">
-                    <i class="fas fa-plus"></i> Create listing
+                    <i class="fas fa-plus"></i> List an aircraft for sale
                 </a>
-                <a href="{{ url_for('my_listings') }}" class="dash__btn dash__btn--secondary">
-                    <i class="fas fa-list"></i> My listings
+                <a href="{{ url_for('home') }}" class="dash__btn dash__btn--secondary">
+                    <i class="fas fa-bookmark"></i> Find aircraft to watch
                 </a>
             </div>
+            <form id="profile-form" style="margin-top:1.5rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem;">
+                <input class="form-control" name="first_name" placeholder="First name" value="{{ user.first_name or '' }}">
+                <input class="form-control" name="last_name" placeholder="Last name" value="{{ user.last_name or '' }}">
+                <input class="form-control" name="company" placeholder="Company" value="{{ user.company or '' }}">
+                <input class="form-control" name="phone" placeholder="Phone" value="{{ user.phone or '' }}">
+                <input class="form-control" name="profile_location" placeholder="City or airport" value="{{ user.profile_location or '' }}">
+                <select class="form-select" name="profile_role">
+                    {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'other'] %}
+                    <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|title }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="dash__btn dash__btn--primary" style="border:0; cursor:pointer;">Save profile</button>
+                <span id="profile-save-status" style="align-self:center; color:#8e8e93;"></span>
+            </form>
         </header>
 
         <h2 class="dash__section-title">Quick actions</h2>
@@ -269,9 +283,14 @@
         </div>
         {% endif %}
 
-        <h2 class="dash__section-title" style="margin-top: 3rem;">My listings</h2>
+        <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're selling</h2>
         <div id="my-listings-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading your listings...</div>
         <div id="my-listings" class="dash__grid"></div>
+
+        <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're watching</h2>
+        <p style="color:#8e8e93; font-family:'Rajdhani', sans-serif;">Models from search, and listings you saved because you might buy them.</p>
+        <div id="saved-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading saved aircraft...</div>
+        <div id="saved-aircraft" class="dash__grid"></div>
     </div>
 </div>
 
@@ -333,6 +352,68 @@
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
         });
+    }
+})();
+
+document.getElementById('profile-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const status = document.getElementById('profile-save-status');
+    const body = {};
+    new FormData(this).forEach(function (value, key) { body[key] = value; });
+    status.textContent = 'Saving...';
+    const resp = await fetch('/api/profile', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (resp.status === 401) { window.location.href = '/login?next=/profile'; return; }
+    status.textContent = resp.ok ? 'Profile saved.' : 'Could not save profile.';
+    if (resp.ok) setTimeout(function () { window.location.reload(); }, 400);
+});
+
+(async function loadSavedAircraft() {
+    const listEl = document.getElementById('saved-aircraft');
+    const statusEl = document.getElementById('saved-status');
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    try {
+        const r = await fetch('/api/profile/saved', { credentials: 'include', cache: 'no-store' });
+        if (r.status === 401) { window.location.href = '/login?next=/profile'; return; }
+        if (!r.ok) throw new Error('failed');
+        const saved = (await r.json()).saved || [];
+        if (!saved.length) {
+            statusEl.textContent = 'Nothing saved yet. On the aircraft search page, use "Watch this aircraft".';
+            return;
+        }
+        statusEl.textContent = saved.length + ' saved aircraft';
+        listEl.innerHTML = saved.map(function (a) {
+            const kindLabel = a.kind === 'listing' ? 'For sale' : 'Model';
+            const price = Number(a.price) ? '$' + Number(a.price).toLocaleString() : 'Price on request';
+            return '<div class="dash__card">'
+                + '<h3 class="dash__card-title">' + escapeHtml(a.title || 'Aircraft') + '</h3>'
+                + '<p class="dash__card-desc">' + escapeHtml(a.manufacturer || '') + (a.location ? ' · ' + escapeHtml(a.location) : '') + '<br><strong>' + price + '</strong></p>'
+                + '<span class="dash__badge">' + kindLabel + '</span>'
+                + '<div style="margin-top:0.8rem;"><button class="dash__card-link" data-unsave="' + a.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Remove</button></div>'
+                + '</div>';
+        }).join('');
+        listEl.querySelectorAll('[data-unsave]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const resp = await fetch('/api/profile/saved', {
+                    method: 'DELETE',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: Number(btn.getAttribute('data-unsave')) }),
+                });
+                if (resp.ok) loadSavedAircraft();
+            });
+        });
+    } catch (err) {
+        statusEl.textContent = 'Could not load saved aircraft.';
+        console.error(err);
     }
 })();
 </script>

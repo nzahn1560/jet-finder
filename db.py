@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
@@ -173,6 +173,31 @@ class UserListing(Base):
     pricing_plan = Column(String(50), default='monthly')
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class SavedAircraft(Base):
+    """Aircraft a customer is watching: a catalog model, or a specific listing for sale.
+
+    Stored in Postgres so a profile survives deploys and works on Railway.
+    target_id is a string so it can hold a catalog id or a marketplace listing id.
+    """
+    __tablename__ = 'saved_aircraft'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'kind', 'target_id', name='uq_saved_aircraft_user_target'),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    kind = Column(String(20), nullable=False)  # catalog | listing
+    target_id = Column(String(64), nullable=False)
+    title = Column(String(255))
+    manufacturer = Column(String(200))
+    price = Column(Float)
+    location = Column(String(255))
+    image_url = Column(String(500))
+    created_at = Column(DateTime, server_default=func.now())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -581,7 +606,7 @@ def get_database_status():
         out['connection_error'] = str(e)
         return out
     # Collect row counts for main tables (same names as model __tablename__)
-    tables = ['users', 'user_sessions', 'user_listings', 'listing_media', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
+    tables = ['users', 'user_sessions', 'user_listings', 'listing_media', 'saved_aircraft', 'user_subscriptions', 'per_use_purchases', 'airports', 'aircraft_profiles',
               'service_providers', 'buyer_preferences', 'performance_profiles']
     for table in tables:
         try:
@@ -622,6 +647,128 @@ def create_user(email, password_hash, first_name=None, last_name=None, company=N
         s.add(u)
         s.flush()
         return u.id
+
+
+_PROFILE_ROLES = {'broker', 'buyer', 'seller', 'mechanic', 'other'}
+
+
+def update_user_profile(user_id, fields):
+    """Update the public profile fields a customer can edit themselves."""
+    allowed = {'first_name', 'last_name', 'company', 'phone', 'profile_role', 'profile_location'}
+    safe = {}
+    for key, value in (fields or {}).items():
+        if key not in allowed:
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+        safe[key] = value or None
+    if 'profile_role' in safe:
+        role = (safe['profile_role'] or 'other').lower()
+        safe['profile_role'] = role if role in _PROFILE_ROLES else 'other'
+    if not safe:
+        return False
+    with get_session() as s:
+        n = s.query(User).filter(User.id == user_id).update(safe, synchronize_session=False)
+        return n > 0
+
+
+def save_aircraft_for_user(user_id, kind, target_id, snapshot=None):
+    """Remember an aircraft on the customer's profile. Idempotent.
+
+    kind is 'catalog' (a model in the search database) or 'listing'
+    (a specific aircraft for sale). Returns the saved row id.
+    """
+    kind = (kind or '').strip().lower()
+    if kind not in ('catalog', 'listing'):
+        raise ValueError('invalid_kind')
+    target_id = str(target_id or '').strip()
+    if not target_id:
+        raise ValueError('missing_target')
+    snap = snapshot or {}
+    with get_session() as s:
+        existing = (
+            s.query(SavedAircraft)
+            .filter(
+                SavedAircraft.user_id == user_id,
+                SavedAircraft.kind == kind,
+                SavedAircraft.target_id == target_id,
+            )
+            .first()
+        )
+        if existing:
+            return int(existing.id)  # type: ignore[arg-type]
+        row = SavedAircraft(
+            user_id=user_id,
+            kind=kind,
+            target_id=target_id,
+            title=(snap.get('title') or '')[:255] or None,
+            manufacturer=(snap.get('manufacturer') or '')[:200] or None,
+            price=snap.get('price'),
+            location=(snap.get('location') or '')[:255] or None,
+            image_url=(snap.get('image_url') or '')[:500] or None,
+        )
+        s.add(row)
+        s.flush()
+        return int(row.id)  # type: ignore[arg-type]
+
+
+def remove_saved_aircraft(user_id, kind=None, target_id=None, saved_id=None):
+    """Remove one saved aircraft. Match by row id, or by kind + target_id."""
+    with get_session() as s:
+        q = s.query(SavedAircraft).filter(SavedAircraft.user_id == user_id)
+        if saved_id:
+            q = q.filter(SavedAircraft.id == saved_id)
+        elif kind and target_id is not None:
+            q = q.filter(SavedAircraft.kind == kind, SavedAircraft.target_id == str(target_id))
+        else:
+            return False
+        return q.delete(synchronize_session=False) > 0
+
+
+def list_saved_aircraft(user_id):
+    """Saved aircraft for a profile, refreshed from the live catalog or listing when possible."""
+    with get_session() as s:
+        rows = (
+            s.query(SavedAircraft)
+            .filter(SavedAircraft.user_id == user_id)
+            .order_by(SavedAircraft.created_at.desc())
+            .all()
+        )
+        out = []
+        for r in rows:
+            created = getattr(r, 'created_at', None)
+            item = {
+                'id': r.id,
+                'kind': r.kind,
+                'target_id': r.target_id,
+                'title': r.title,
+                'manufacturer': r.manufacturer,
+                'price': r.price,
+                'location': r.location,
+                'image_url': r.image_url,
+                'created_at': created.isoformat() if created is not None else None,
+            }
+            target = str(r.target_id or '')
+            if r.kind == 'catalog' and target.isdigit():
+                prof = s.query(AircraftProfile).filter(AircraftProfile.id == int(target)).first()
+                if prof is not None:
+                    data = prof.to_dict()
+                    item['title'] = data.get('aircraft_name') or data.get('name') or item['title']
+                    item['manufacturer'] = data.get('manufacturer') or item['manufacturer']
+                    if data.get('price') not in (None, ''):
+                        item['price'] = data.get('price')
+                    item['range'] = data.get('range')
+                    item['speed'] = data.get('speed')
+            elif r.kind == 'listing' and target.isdigit():
+                listing = s.query(UserListing).filter(UserListing.id == int(target)).first()
+                if listing is not None:
+                    item['title'] = getattr(listing, 'title', None) or item['title']
+                    item['price'] = getattr(listing, 'price', None)
+                    item['location'] = getattr(listing, 'location', None)
+                    item['manufacturer'] = getattr(listing, 'manufacturer', None)
+                    item['status'] = getattr(listing, 'status', None)
+            out.append(item)
+        return out
 
 
 # --- Session/token helpers (jet_session cookie) ---

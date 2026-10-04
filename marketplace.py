@@ -587,57 +587,67 @@ def create_listing():
 # API endpoints for favorites
 
 
+def _postgres_user_id():
+    """Logged-in Railway/Postgres user. Cookie first, then an integer Flask session id."""
+    import db as db_module
+    token = request.cookies.get('jet_session')
+    if token:
+        user = db_module.get_user_by_session_token(token)
+        if user:
+            return int(user['id'])
+    uid = session.get('user_id')
+    if isinstance(uid, int) or (isinstance(uid, str) and str(uid).isdigit()):
+        return int(uid)
+    return None
+
+
+def _listing_snapshot(listing_id):
+    """Title/price snapshot so a saved marketplace listing still shows on the profile."""
+    for listing in load_listings():
+        if str(listing.get('id')) == str(listing_id):
+            images = listing.get('images') or []
+            return {
+                'title': listing.get('title'),
+                'manufacturer': listing.get('manufacturer'),
+                'price': listing.get('price'),
+                'location': listing.get('location'),
+                'image_url': images[0] if images else None,
+            }
+    return {}
+
+
 @marketplace.route('/api/favorites/add', methods=['POST'])
 def add_favorite():
-    """Add a listing to user's favorites"""
-    if not is_logged_in():
+    """Save a listing onto the customer's Postgres profile (works on Railway)."""
+    import db as db_module
+    user_id = _postgres_user_id()
+    if not user_id:
         return jsonify({'success': False, 'message': 'Authentication required'}), 401
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     listing_id = data.get('listing_id')
-
     if not listing_id:
         return jsonify({'success': False, 'message': 'Listing ID is required'}), 400
 
-    users = load_users()
-    for i, user in enumerate(users):
-        if user['id'] == session['user_id']:
-            if 'favorites' not in user:
-                user['favorites'] = []
-
-            if listing_id not in user['favorites']:
-                user['favorites'].append(listing_id)
-                save_users(users)
-                return jsonify({'success': True, 'message': 'Added to favorites'})
-            else:
-                return jsonify({'success': False, 'message': 'Already in favorites'})
-
-    return jsonify({'success': False, 'message': 'User not found'}), 404
+    db_module.save_aircraft_for_user(user_id, 'listing', listing_id, _listing_snapshot(listing_id))
+    return jsonify({'success': True, 'message': 'Added to favorites'})
 
 
 @marketplace.route('/api/favorites/remove', methods=['POST'])
 def remove_favorite():
-    """Remove a listing from user's favorites"""
-    if not is_logged_in():
+    """Remove a saved listing from the customer's Postgres profile."""
+    import db as db_module
+    user_id = _postgres_user_id()
+    if not user_id:
         return jsonify({'success': False, 'message': 'Authentication required'}), 401
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     listing_id = data.get('listing_id')
-
     if not listing_id:
         return jsonify({'success': False, 'message': 'Listing ID is required'}), 400
 
-    users = load_users()
-    for i, user in enumerate(users):
-        if user['id'] == session['user_id']:
-            if 'favorites' in user and listing_id in user['favorites']:
-                user['favorites'].remove(listing_id)
-                save_users(users)
-                return jsonify({'success': True, 'message': 'Removed from favorites'})
-            else:
-                return jsonify({'success': False, 'message': 'Not in favorites'})
-
-    return jsonify({'success': False, 'message': 'User not found'}), 404
+    db_module.remove_saved_aircraft(user_id, kind='listing', target_id=listing_id)
+    return jsonify({'success': True, 'message': 'Removed from favorites'})
 
 # API endpoint for recommendation
 
