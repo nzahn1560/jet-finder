@@ -255,6 +255,39 @@ def require_admin(f):
     return wrapper
 
 
+@app.before_request
+def _protect_aircraft_spreadsheet():
+    """The aircraft spreadsheet stays on the server. Public visitors only see approved listings."""
+    path = request.path or ''
+    low = path.lower()
+    if low.endswith(('.csv', '.xlsx', '.xls')) or 'aircraft_data' in low or 'aircraft data' in low:
+        return jsonify({'error': 'not_found'}), 404
+    protected = (
+        path == '/api/aircraft'
+        or path.startswith('/api/aircraft-data')
+        or path.startswith('/api/aircraft-detail')
+        or path.startswith('/api/aircraft/')
+        or path.startswith('/api/available-columns')
+        or path.startswith('/api/market-insights')
+        or path.startswith('/api/calculate-aircraft')
+        or path.startswith('/api/calculate-priority-ranking')
+        or path.startswith('/api/aircraft-scoring')
+        or path.startswith('/api/ai-recommendations')
+        or path.startswith('/api/diagnostic')
+        or path.startswith('/api/scoring')
+        or path.startswith('/api/test-scoring')
+        or path.startswith('/api/scenario-analysis')
+        or path.startswith('/api/stock-market')
+        or path.startswith('/admin/populate-profiles')
+    )
+    if not protected:
+        return None
+    user = get_current_user_from_request()
+    if user and user.get('is_admin'):
+        return None
+    return jsonify({'error': 'not_found'}), 404
+
+
 @app.after_request
 def _no_cache_auth_endpoints(response):
     """Force no-cache for any auth/dashboard/admin/API path so Cloudflare/browsers never serve stale data."""
@@ -761,25 +794,19 @@ def aircraft_listings():
 
 @app.route('/compare')
 def compare_aircraft():
-    """Dedicated comparison page for selected aircraft IDs from CSV data.
-    Usage: /compare?ids=1,2,3
-    """
+    """Side-by-side view of approved marketplace listings. Usage: /compare?ids=1,2,3"""
     ids_param = request.args.get('ids', '').strip()
     if not ids_param:
         flash('No aircraft selected for comparison.', 'info')
         return redirect(url_for('home'))
     try:
-        raw_ids = [i for i in ids_param.replace(' ', '').split(',') if i]
-        ids = []
-        for rid in raw_ids:
-            # marketplace listings may be 'listing_...' – skip for this compare
-            if rid.isdigit():
-                ids.append(int(rid))
-        selected = [ac for ac in get_unified_aircraft_data() if ac.get('id') in ids]
+        ids = [int(i) for i in ids_param.replace(' ', '').split(',') if i.isdigit()]
+        by_id = {row.get('id'): row for row in _active_market_listings()}
+        selected = [by_id[i] for i in ids if i in by_id]
     except Exception:
         selected = []
     if not selected:
-        flash('Could not find selected aircraft to compare.', 'warning')
+        flash('Could not find selected listings to compare.', 'warning')
         return redirect(url_for('home'))
 
     # Metrics to render in comparison table
@@ -800,19 +827,8 @@ def compare_aircraft():
 
 @app.route('/aircraft-detail/<int:aircraft_id>')
 def aircraft_details(aircraft_id):
-    """Aircraft detail page"""
-    # Find aircraft in our data
-    aircraft = None
-    for a in AIRCRAFT_DATA:
-        if a.get('id') == aircraft_id:
-            aircraft = a
-            break
-    
-    if not aircraft:
-        flash('Aircraft not found', 'error')
-        return redirect(url_for('aircraft_listings'))
-    
-    return render_template('aircraft_detail.html', aircraft=aircraft)
+    """Old catalog detail page. The marketplace is the homepage."""
+    return redirect(url_for('home'))
 
 @app.route('/marketplace-search')
 def marketplace_search():
@@ -4528,16 +4544,74 @@ def get_match_explanation(listing, preferences):
     return "; ".join(explanations) if explanations else "No specific preferences to match"
 
 # New API endpoints for performance profiles and user listings
+_PUBLIC_LISTING_KEYS = (
+    'id', 'listing_id', 'is_user_listing', 'aircraft_name', 'name', 'title', 'listing_title',
+    'manufacturer', 'category', 'engine_type', 'model',
+    'price', 'listing_price', 'year', 'hours', 'location',
+    'description', 'listing_description', 'image', 'images',
+    'wingspan', 'speed', 'range', 'passengers',
+    'cabin_volume', 'baggage_volume', 'runway_length', 'max_altitude', 'altitude',
+    'aircraft_length', 'aircraft_height', 'cabin_height',
+    'total_hourly_cost', 'total_fixed_cost', 'total_variable_cost',
+    'annual_budget', 'multi_year_total_cost',
+    'email', 'contact_email', 'date_range', 'lowest_year', 'highest_year', 'status',
+)
+
+
+def _public_market_listing(combined):
+    """Fields a buyer needs to compare one approved listing. Not the raw spreadsheet row."""
+    out = {key: combined.get(key) for key in _PUBLIC_LISTING_KEYS}
+    out['is_user_listing'] = True
+    out['id'] = combined.get('listing_id') or combined.get('id')
+    return out
+
+
+def _active_market_listings():
+    rows = db_module.get_active_user_listings()
+    aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
+    listings = []
+    for row in rows:
+        combined = _row_to_combined_listing(row, aircraft_map)
+        if combined:
+            listings.append(_public_market_listing(combined))
+    return listings
+
+
+def _notify_admins_new_listing(listing_id, title, seller_email):
+    """Email every ADMIN_EMAILS address that a listing is waiting for approval."""
+    import email_service as email_mod
+    addresses = [e.strip() for e in (os.environ.get('ADMIN_EMAILS') or '').split(',') if e.strip()]
+    link = request.host_url.rstrip('/') + '/admin'
+    subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
+    text = (
+        f'A listing is waiting for your approval on JetSchool.\n\n'
+        f'{title or "Listing"} #{listing_id}\n'
+        f'Seller: {seller_email or "unknown"}\n\n'
+        f'Open the admin page to approve or delete it:\n{link}\n'
+    )
+    html = (
+        f'<p>A listing is waiting for your approval on JetSchool.</p>'
+        f'<p><strong>{title or "Listing"}</strong> (#{listing_id})<br>Seller: {seller_email or "unknown"}</p>'
+        f'<p><a href="{link}">Approve or delete it</a></p>'
+    )
+    if not addresses:
+        logger.info('Listing %s is pending approval. Set ADMIN_EMAILS to get these by email.', listing_id)
+        return
+    for addr in addresses:
+        try:
+            email_mod.send_email(addr, subject, html, text)
+        except Exception:
+            logger.exception('Could not email admin %s about listing %s', addr, listing_id)
+
+
 @app.route('/api/performance-profiles')
+@require_auth
 def api_performance_profiles():
-    """API endpoint to get all performance profiles (formerly aircraft data)"""
+    """Logged-in sellers pick a profile by name. Cost columns stay on the server."""
     try:
-        aircraft_data = get_unified_aircraft_data()
-        
-        # Transform aircraft data into performance profiles
         profiles = []
-        for aircraft in aircraft_data:
-            profile = {
+        for aircraft in get_unified_aircraft_data():
+            profiles.append({
                 'id': aircraft.get('id'),
                 'name': aircraft.get('aircraft_name', 'Unknown Aircraft'),
                 'manufacturer': aircraft.get('manufacturer', 'Unknown'),
@@ -4546,23 +4620,8 @@ def api_performance_profiles():
                 'speed': aircraft.get('speed', 0),
                 'passengers': aircraft.get('passengers', 0),
                 'max_altitude': aircraft.get('max_altitude', 0),
-                'cabin_volume': aircraft.get('cabin_volume', 0),
-                'baggage_volume': aircraft.get('baggage_volume', 0),
                 'engine_type': aircraft.get('engine_type') or aircraft.get('category'),
-                'runway_length': aircraft.get('runway_length', 0),
-                'fuel_capacity': aircraft.get('fuel_capacity', 0),
-                'empty_weight': aircraft.get('empty_weight', 0),
-                'max_weight': aircraft.get('max_weight', 0),
-                'image': aircraft.get('image', '/static/images/aircraft_placeholder.jpg'),
-                # Performance metrics for reference
-                'best_speed_dollar': aircraft.get('best_speed_dollar', 0),
-                'best_range_dollar': aircraft.get('best_range_dollar', 0),
-                'best_performance_dollar': aircraft.get('best_performance_dollar', 0),
-                'best_efficiency_dollar': aircraft.get('best_efficiency_dollar', 0),
-                'best_all_around_dollar': aircraft.get('best_all_around_dollar', 0)
-            }
-            profiles.append(profile)
-        
+            })
         return jsonify(profiles)
     except Exception as e:
         print(f"Error loading performance profiles: {e}")
@@ -4630,18 +4689,10 @@ def _row_to_combined_listing(row, aircraft_map):
 
 @app.route('/api/user-listings')
 def api_user_listings():
-    """API endpoint to get user-created listings (from Postgres/SQLite via db layer)."""
+    """Approved marketplace listings only. The aircraft spreadsheet is not included."""
     try:
-        rows = db_module.get_active_user_listings()
-        aircraft_data = get_unified_aircraft_data()
-        aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
-        listings = []
-        for row in rows:
-            combined = _row_to_combined_listing(row, aircraft_map)
-            if combined:
-                listings.append(combined)
-        return jsonify(listings)
-    except Exception as e:
+        return jsonify(_active_market_listings())
+    except Exception:
         logger.exception("Error loading user listings")
         return jsonify([]), 500
 
@@ -4828,6 +4879,8 @@ def api_listings_create():
             user_id=user['id'],
             status=initial_status,
         )
+        if initial_status == 'pending':
+            _notify_admins_new_listing(listing_id, title, data.get('email') or user.get('email'))
         return jsonify({
             'ok': True,
             'id': listing_id,
@@ -4961,6 +5014,9 @@ def api_stripe_webhook():
         listing_id = db_module.mark_listing_paid_by_session(session_id)
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
+            row = db_module.get_listing_with_owner(listing_id)
+            if row and row.get('status') == 'pending':
+                _notify_admins_new_listing(listing_id, row.get('title'), row.get('email'))
         else:
             logger.warning('Stripe webhook: no listing found for session %s', session_id)
     return jsonify({'received': True}), 200
@@ -5336,8 +5392,10 @@ def api_admin_listings():
                 'title': row.get('title'),
                 'year': row.get('year'),
                 'price': row.get('price'),
+                'hours': row.get('hours'),
                 'location': row.get('location'),
                 'email': row.get('email'),
+                'description': row.get('description'),
                 'status': row.get('status'),
                 'payment_status': row.get('payment_status'),
                 'rejection_reason': row.get('rejection_reason'),
@@ -5369,42 +5427,24 @@ def api_admin_users():
         return jsonify({'error': 'server_error'}), 500
 
 
+@app.route('/api/admin/listings/<int:listing_id>', methods=['DELETE'])
+@require_admin
+def admin_delete_listing(listing_id):
+    """Admin: remove a listing from the marketplace."""
+    existing = db_module.get_listing_with_owner(listing_id)
+    if not existing:
+        return jsonify({'error': 'not_found'}), 404
+    if not db_module.delete_user_listing_soft(listing_id):
+        return jsonify({'error': 'server_error'}), 500
+    return jsonify({'ok': True, 'status': 'deleted'}), 200
+
+
 @app.route('/admin/listings')
 @require_admin
 def admin_listings():
-    """Admin page to approve/reject pending listings (from db layer)."""
-    rows = db_module.get_pending_user_listings()
-    aircraft_data = get_unified_aircraft_data()
-    aircraft_map = {aircraft.get('id'): aircraft for aircraft in aircraft_data}
-    pending_listings = []
-    for row in rows:
-        profile = aircraft_map.get(row['profile_id'])
-        if not profile:
-            continue
-        images = row.get('images') or ''
-        documents = row.get('documents') or ''
-        pending_listings.append({
-            'id': row['id'],
-            'profile_id': row['profile_id'],
-            'title': row.get('title'),
-            'year': row.get('year'),
-            'price': row.get('price'),
-            'hours': row.get('hours', 0),
-            'location': row.get('location'),
-            'email': row.get('email'),
-            'description': row.get('description'),
-            'images': [x.strip() for x in images.split(',') if x.strip()] if images else [],
-            'documents': [x.strip() for x in documents.split(',') if x.strip()] if documents else [],
-            'status': row.get('status'),
-            'payment_status': row.get('payment_status'),
-            'pricing_plan': row.get('pricing_plan') or 'monthly',
-            'engine_type': row.get('engine_type') or profile.get('engine_type') or profile.get('category', 'Unknown'),
-            'created_at': row.get('created_at'),
-            'manufacturer': row.get('manufacturer') or profile.get('manufacturer', 'Unknown'),
-            'model': profile.get('aircraft_name', 'Unknown'),
-            'category': profile.get('category', 'Unknown')
-        })
-    return render_template('admin/listings.html', pending_listings=pending_listings)
+    """One admin screen. The queue lives at /admin."""
+    return redirect(url_for('admin_index'))
+
 
 @app.route('/api/admin/listings/<int:listing_id>/approve', methods=['POST'])
 @require_admin

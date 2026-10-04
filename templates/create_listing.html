@@ -960,7 +960,8 @@
             const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
             const response = await fetch('/api/performance-profiles', {
-                signal: controller.signal
+                signal: controller.signal,
+                credentials: 'include'
             });
 
             clearTimeout(timeoutId);

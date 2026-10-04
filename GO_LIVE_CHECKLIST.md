@@ -14,8 +14,10 @@ In **Railway → your service → Variables**, add:
 ADMIN_EMAILS=youremail@example.com
 ```
 
-Log out and log back in on the site. You are now an admin and can open
-`https://jetschoolusa.com/admin` to approve/reject listings.
+Log out and log back in on the site. The menu gains **Approve listings**.
+Open it on the site (`https://jetschoolusa.com/admin`) to approve, reject, or
+delete a listing. Approved listings show on the marketplace. New listings also
+email that address when mail is set up (step 6).
 
 ---
 
@@ -129,7 +131,8 @@ After redeploying with the variables above:
 - Email/password + Google signup/login/logout, 30-day sessions
 - Customer dashboard with listing status + edit/delete
 - Listing creation wired to the real API, photo upload to R2, edit mode (`/create-listing?edit=<id>`)
-- Admin portal: approve/reject listings, view users
+- Admin portal on the site: approve, reject, or delete listings; view users
+- The aircraft spreadsheet is not public. The marketplace shows approved listings only
 - Stripe checkout + webhook (dormant until step 4)
 - Password reset flow (dormant email until step 6)
 - Privacy + Terms pages (`/privacy`, `/terms`)

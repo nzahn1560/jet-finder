@@ -284,6 +284,7 @@
 
     <!-- Uniform Header -->
     <header class="main-header">
+        {% set current_user = get_current_user_info() %}
         <div class="header-container">
             <!-- Hamburger Menu (Left) -->
             <div class="hamburger-menu">
@@ -303,20 +304,17 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('home') }}#goalFinder">
-                                <i class="fas fa-balance-scale me-2"></i>Compare the market
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('create_listing') }}">
                                 <i class="fas fa-plus-circle me-2"></i>Create Listing
                             </a>
                         </li>
+                        {% if current_user and current_user.is_admin %}
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('pricing') }}">
-                                <i class="fas fa-tag me-2"></i>Listing price
+                            <a class="dropdown-item" href="{{ url_for('admin_index') }}">
+                                <i class="fas fa-user-shield me-2"></i>Admin
                             </a>
                         </li>
+                        {% endif %}
                     </ul>
                 </div>
             </div>
@@ -331,7 +329,6 @@
 
             <!-- User Menu / Login (Right) -->
             <div class="login-container">
-                {% set current_user = get_current_user_info() %}
                 {% if current_user %}
                 <div class="dropdown user-menu">
                     <a href="#" class="login-btn dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown"
@@ -361,6 +358,13 @@
                                 <i class="fas fa-list me-2"></i>My listings
                             </a>
                         </li>
+                        {% if current_user.is_admin %}
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('admin_index') }}">
+                                <i class="fas fa-user-shield me-2"></i>Approve listings
+                            </a>
+                        </li>
+                        {% endif %}
                         <li>
                             <hr class="dropdown-divider">
                         </li>

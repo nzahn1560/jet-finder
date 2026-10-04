@@ -1312,9 +1312,9 @@
     }
 
     .compare-count {
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        color: #f0f2f5;
+        background: #1a1a1a;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        color: #ffffff;
         font-weight: 600;
         padding: 0.35rem 0.7rem;
         letter-spacing: 0.4px;
@@ -3949,7 +3949,7 @@
                 </div>
             </div>
             <div class="card-body">
-                <div id="compareEmptyState" class="compare-empty text-center text-white-50 py-4">
+                <div id="compareEmptyState" class="compare-empty text-center py-4" style="color:#e6e6e6;">
                     <i class="fas fa-balance-scale fa-2x mb-3"></i>
                     <p class="mb-1">Use the “Add to Compare” button on any aircraft card to build your shortlist.</p>
                     <small>Selections persist while you filter or paginate.</small>
@@ -3993,7 +3993,7 @@
     <div class="col-12">
         <div id="goalFinder" class="mb-4 p-3" style="background: rgba(18,19,24,0.92); border: 1px solid rgba(240,85,69,0.45); border-radius: 12px;">
             <h5 class="text-white mb-1">Compare the market</h5>
-            <p class="text-white-50 mb-3" style="font-size: 0.95rem;">Check every trait you care about and whether you want it high or low. The whole spreadsheet is ranked on that combination. Cost numbers use your trip length, number of trips, and years of ownership.</p>
+            <p class="mb-3" style="font-size: 0.95rem; color: #d0d0d0;">Check every trait you care about and whether you want it high or low. Approved listings are ranked on that combination, in the same cards below. Cost numbers use your trip length, number of trips, and years of ownership.</p>
             <div class="d-flex flex-wrap gap-2 mb-3" id="goalButtons"></div>
             <div class="row g-2" id="goalMetrics"></div>
             <p class="mb-2 mt-2 text-white" id="goalSummary" style="font-size: 0.9rem;"></p>
@@ -4612,22 +4612,15 @@
     }
 
     async function loadAllAircraftData() {
-        console.log('📡 Loading aircraft spreadsheet and approved listings...');
         try {
-            const [catalogResp, listingsResp] = await Promise.all([
-                fetch('/api/aircraft-data', { headers: { 'Accept': 'application/json' } }),
-                fetch('/api/user-listings', { headers: { 'Accept': 'application/json' } })
-            ]);
-            const catalog = catalogResp.ok ? await catalogResp.json() : [];
+            const listingsResp = await fetch('/api/user-listings', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
             const listings = listingsResp.ok ? await listingsResp.json() : [];
-            const catalogRows = (Array.isArray(catalog) ? catalog : []).map(ac => normalizeAircraftRecord(ac, false));
             const listingRows = (Array.isArray(listings) ? listings : []).map(ac => normalizeAircraftRecord(ac, true));
-            allAircraftData = [...listingRows, ...catalogRows];
+            allAircraftData = listingRows;
             filteredAircraftData = [...allAircraftData];
-            console.log(`✅ Loaded ${catalogRows.length} spreadsheet aircraft and ${listingRows.length} listings`);
             return allAircraftData.length > 0;
         } catch (error) {
-            console.error('❌ Error loading aircraft data:', error);
+            console.error('Error loading listings:', error);
             allAircraftData = [];
             filteredAircraftData = [];
             return false;
@@ -4733,23 +4726,11 @@
             return;
         }
         if (summary) {
-            summary.textContent = 'Ranking ' + list.length + ' aircraft by ' + chosen.map(function (m) {
+            summary.textContent = 'Ranking ' + list.length + ' listing' + (list.length === 1 ? '' : 's') + ' by ' + chosen.map(function (m) {
                 return (m.dir === 'low' ? 'lowest ' : 'highest ') + m.label.toLowerCase();
             }).join(', ') + '.';
         }
-        const top = list.slice(0, 8);
-        let html = '<table class="table table-sm table-dark mb-0" style="font-size:0.85rem;"><thead><tr><th>#</th><th>Aircraft</th><th>Match</th>';
-        chosen.forEach(function (m) { html += '<th>' + m.label + '</th>'; });
-        html += '</tr></thead><tbody>';
-        top.forEach(function (ac, i) {
-            html += '<tr><td>' + (i + 1) + '</td><td>' + (ac.manufacturer ? ac.manufacturer + ' ' : '') + (ac.aircraft_name || ac.name || '') + (ac.is_user_listing ? ' (for sale)' : '') + '</td><td>' + (ac.match_score || 0) + '%</td>';
-            chosen.forEach(function (m) {
-                html += '<td>' + formatCompareValue(m, compareRaw(ac, m.key, cache)) + '</td>';
-            });
-            html += '</tr>';
-        });
-        html += '</tbody></table>';
-        mount.innerHTML = html;
+        mount.innerHTML = '';
     }
 
     function rankAircraftByGoal(list) {
@@ -5353,8 +5334,8 @@
                 <div class="empty-state-card text-center w-100">
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
-                        <h4 class="mb-2">No aircraft match</h4>
-                        <p class="text-muted mb-0">Loosen a filter, or move the sliders. The full spreadsheet is still loaded.</p>
+                        <h4 class="mb-2" style="color:#f4f4f4;">No listings yet</h4>
+                        <p class="mb-0" style="color:#d0d0d0;">Approved aircraft for sale show up here. Nothing is on the marketplace right now.</p>
                     </div>
                 </div>
             `;
@@ -7506,11 +7487,17 @@
             });
         }
 
-        fetch('/api/performance-profiles').then(function (r) { return r.json(); }).then(function (rows) {
+        fetch('/api/performance-profiles', { credentials: 'include' }).then(function (r) {
+            if (r.status === 401) {
+                grid.innerHTML = '<p class="p-3" style="color:#f4f4f4;">Sign in to choose a performance profile for your listing.</p>';
+                return [];
+            }
+            return r.json();
+        }).then(function (rows) {
             homepageProfiles = Array.isArray(rows) ? rows : [];
-            renderProfiles(homepageProfiles);
+            if (homepageProfiles.length) renderProfiles(homepageProfiles);
         }).catch(function () {
-            grid.innerHTML = '<p class="text-danger p-3">Could not load the aircraft spreadsheet.</p>';
+            grid.innerHTML = '<p class="p-3" style="color:#ffb4b4;">Could not load performance profiles.</p>';
         });
 
         [search, category, passengers].forEach(function (el) {

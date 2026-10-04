@@ -30,7 +30,7 @@
 <div class="ap">
     <div class="ap__inner">
         <h1 class="ap__title">Admin Portal</h1>
-        <p class="ap__sub">Approve listings, manage users, view platform activity.</p>
+        <p class="ap__sub">New listings land here for approval. Approve one and it goes on the marketplace. Delete one and it comes off.</p>
 
         <div class="ap__tabs">
             <button class="ap__tab active" data-tab="listings">Listings</button>
@@ -45,6 +45,7 @@
                     <option value="active">Active (approved)</option>
                     <option value="rejected">Rejected</option>
                     <option value="archived">Archived</option>
+                    <option value="deleted">Deleted</option>
                     <option value="">All</option>
                 </select>
                 <button class="ap__btn ap__btn--secondary" id="refresh-listings">Refresh</button>
@@ -92,32 +93,43 @@ async function loadAdminListings() {
                 + '    <div class="ap__col" style="flex:1;min-width:220px;">'
                 + '      <strong>' + esc(l.title || l.name || 'Listing #' + l.id) + '</strong><br>'
                 + '      ' + esc(l.manufacturer || '') + ' &middot; ' + esc(l.category || '') + '<br>'
-                + '      $' + (Number(l.price) || 0).toLocaleString() + ' &middot; ' + esc(l.location || '') + '<br>'
-                + '      <span style="color:#8e8e93;font-size:0.85rem;">Owner: ' + esc(owner) + '</span>'
+                + '      $' + (Number(l.price) || 0).toLocaleString()
+                + ' &middot; ' + esc(l.year || 'year n/a')
+                + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
+                + ' &middot; ' + esc(l.location || '') + '<br>'
+                + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + '</span>'
+                + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
                 + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(l.status) + '</span></div>'
-                + '    <div class="ap__col" style="display:flex;gap:0.5rem;">'
+                + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
                 + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '">Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '">Reject</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
                 + '    </div>'
                 + '  </div>'
-                + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ef4444;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
+                + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
                 + '</div>';
         }).join('');
         target.querySelectorAll('button[data-act]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
                 const id = btn.getAttribute('data-id');
                 const act = btn.getAttribute('data-act');
-                let body = undefined;
-                if (act === 'reject') {
-                    const reason = prompt('Reason for rejection?') || '';
-                    body = JSON.stringify({ reason: reason });
+                let resp;
+                if (act === 'delete') {
+                    if (!confirm('Delete this listing? It will leave the marketplace.')) return;
+                    resp = await fetch('/api/admin/listings/' + id, { method: 'DELETE', credentials: 'include' });
+                } else {
+                    let body = undefined;
+                    if (act === 'reject') {
+                        const reason = prompt('Reason for rejection?') || '';
+                        body = JSON.stringify({ reason: reason });
+                    }
+                    resp = await fetch('/api/admin/listings/' + id + '/' + act, {
+                        method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: body,
+                    });
                 }
-                const resp = await fetch('/api/admin/listings/' + id + '/' + act, {
-                    method: 'POST', credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: body,
-                });
                 if (resp.ok) { loadAdminListings(); } else {
                     const err = await resp.json().catch(function () { return {}; });
                     alert(err.message || err.error || 'Action failed');
