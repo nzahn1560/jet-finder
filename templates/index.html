@@ -623,10 +623,22 @@
         border-left: 3px solid #F05545;
     }
 
-    /* Map container */
+    /* Map container. The angled card clip cuts the corner off the map. */
+    .map-card {
+        clip-path: none;
+        overflow: hidden;
+    }
+
     #map {
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        transition: border-color 0.3s;
+        border: 0;
+        background: #1a1a1a;
+        height: 500px;
+        width: 100%;
+    }
+
+    #map img.leaflet-tile {
+        max-width: none !important;
+        max-height: none !important;
     }
 
     #map:hover {
@@ -3693,20 +3705,18 @@
     <!-- Map Container -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card bg-black border border-secondary">
+            <div class="card bg-black border border-secondary map-card">
                 <div class="card-header">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h4 class="mb-0">
-                            Range Map
-                            <span class="aircraft-count-display ms-3">
-                                <span class="aircraft-count-label">Aircraft Remaining</span>
-                                <span class="aircraft-count-value" id="range-aircraft-remaining">0</span>
-                            </span>
-                        </h4>
-                    </div>
-                    <div class="card-body p-0">
-                        <div id="map" style="height: 500px; border-radius: 0 0 8px 8px;"></div>
-                    </div>
+                    <h4 class="mb-0">
+                        Range Map
+                        <span class="aircraft-count-display ms-3">
+                            <span class="aircraft-count-label">Aircraft Remaining</span>
+                            <span class="aircraft-count-value" id="range-aircraft-remaining">0</span>
+                        </span>
+                    </h4>
+                </div>
+                <div class="card-body p-0">
+                    <div id="map" style="height: 500px;"></div>
                 </div>
             </div>
         </div>
@@ -4486,7 +4496,7 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=2"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 

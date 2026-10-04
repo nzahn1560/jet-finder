@@ -79,18 +79,12 @@ const handleMapMoveEnd = debounce(function () {
 function initMap() {
     console.log('Initializing map...');
 
-    // Create map centered on Pacific Ocean to show both sides of date line
+    // United States first. One tile layer. The old CARTO layers now return "API KEY REQUIRED".
     map = L.map('map', {
-        center: [30, 0], // Center on the equator
-        zoom: 2,
-        // Enable standard wrapping behavior
+        center: [39.5, -98.35],
+        zoom: 4,
         worldCopyJump: true,
-        // Allow continuous navigation
-        maxBounds: null,
-        // Remove bounds restrictions
-        maxBoundsViscosity: 0,
-        // Critical: enable continuous world wrapping
-        continuousWorld: true
+        minZoom: 2
     });
 
     // Expose map to window
@@ -102,48 +96,18 @@ function initMap() {
     map.getPane('rangeCirclePane').style.zIndex = 200; // Base range circle behind
     map.getPane('aircraftCirclePane').style.zIndex = 400;
 
-    // Add dark basemap with proper wrapping configuration
-    const darkBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-        // Enable continuous world wrapping
-        continuousWorld: true,
-        // Critical: This must be false to enable wrapping
-        noWrap: false,
-        // Extend the bounds beyond normal limits to ensure full coverage
-        bounds: [[-90, -540], [90, 540]]
+    const esriAttr = 'Tiles &copy; Esri';
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: esriAttr,
+        maxZoom: 16
+    }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 16,
+        pane: 'overlayPane'
     }).addTo(map);
 
-    // Add a second tile layer offset by 360 degrees to create seamless wrapping effect
-    const wrappedDarkBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        subdomains: 'abcd',
-        maxZoom: 19,
-        // Enable continuous world wrapping
-        continuousWorld: true,
-        noWrap: false,
-        // Shift this layer by 360 degrees
-        bounds: [[-90, -180 - 360], [90, 180 - 360]]
-    }).addTo(map);
-
-    // Add another tile layer offset in the opposite direction
-    const wrappedDarkBase2 = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        subdomains: 'abcd',
-        maxZoom: 19,
-        // Enable continuous world wrapping
-        continuousWorld: true,
-        noWrap: false,
-        // Shift this layer by 360 degrees in the opposite direction
-        bounds: [[-90, -180 + 360], [90, 180 + 360]]
-    }).addTo(map);
-
-    // Configure the map to handle panning across the date line
-    map.on('moveend', function () {
-        // Normalize the center longitude when panning
-        const center = map.getCenter();
-        // No need to force center adjustments - let Leaflet handle it naturally
+    map.whenReady(function () {
+        map.invalidateSize();
     });
 
     // Add scale control
