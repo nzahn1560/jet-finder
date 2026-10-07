@@ -757,19 +757,19 @@
     .aircraft-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 3rem;
-        padding: 2rem;
+        gap: 1.25rem;
+        padding: 0;
         width: 100%;
         margin: 0 auto;
-        justify-items: center;
-        align-items: start;
+        justify-items: stretch;
+        align-items: stretch;
     }
 
     /* Clean Container Layout */
     .aircraft-listings-container {
-        max-width: 1400px;
+        max-width: 100%;
         margin: 0 auto;
-        padding: 0 2rem;
+        padding: 0;
         width: 100%;
         box-sizing: border-box;
     }
@@ -783,7 +783,7 @@
         flex-direction: column;
         min-height: 520px;
         width: 100%;
-        max-width: 350px;
+        max-width: none;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
@@ -1703,19 +1703,19 @@
     /* Responsive Grid Adjustments */
     @media (max-width: 1200px) {
         .aircraft-listings-container {
-            max-width: 1200px;
-            padding: 0 1rem;
+            max-width: 100%;
+            padding: 0;
         }
 
         .aircraft-grid {
             grid-template-columns: repeat(3, 1fr);
-            gap: 2.5rem;
-            padding: 1.5rem;
-            justify-items: center;
+            gap: 1.25rem;
+            padding: 0;
+            justify-items: stretch;
         }
 
         .aircraft-card {
-            max-width: 320px;
+            max-width: none;
             min-height: 500px;
         }
 
@@ -3352,8 +3352,9 @@
 
     /* Standardized Spacing System */
     .container {
-        padding-left: 1.5rem;
-        padding-right: 1.5rem;
+        max-width: 1200px;
+        padding-left: 20px;
+        padding-right: 20px;
     }
 
     .container .row {
@@ -3421,7 +3422,8 @@
 
     /* Consistent Listings Container */
     .aircraft-listings-container {
-        padding: 0 1.5rem;
+        padding: 0;
+        max-width: 100%;
     }
 
     /* Standardized Button Spacing */
@@ -3722,8 +3724,7 @@
         </div>
 
         <!-- Unified Aircraft Selection Inputs -->
-        <div class="row">
-            <div class="col-12">
+        <div class="col-12">
                 <div class="card bg-black border border-secondary">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h4 class="mb-0">Aircraft Selection Parameters</h4>
@@ -3932,10 +3933,10 @@
                         </div>
                     </div>
                 </div>
-            </div>
         </div>
 
         <!-- Compare Section -->
+        <div class="col-12">
         <div class="compare-section card bg-dark border-secondary mb-4" id="compareSection">
             <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-3"
                 style="background: linear-gradient(135deg, rgba(240, 85, 69, 0.85), rgba(52, 58, 64, 0.95)); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
@@ -3992,11 +3993,7 @@
             </div>
         </div>
     </div>
-
-</div>
-</div>
-</div>
-</div>
+        </div>
 
 <!-- Aircraft Listings Section -->
 <div class="row mt-5">

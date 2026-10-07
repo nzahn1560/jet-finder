@@ -7,9 +7,9 @@
     .dash {
         min-height: 100vh;
         background: linear-gradient(160deg, #0a0a0a 0%, #111 40%, #0d0d0d 100%);
-        padding: 2rem 1.5rem 4rem;
+        padding: 2rem 0 4rem;
     }
-    .dash__inner { max-width: 1100px; margin: 0 auto; }
+    .dash__inner { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
     .dash__hero {
         background: linear-gradient(145deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.4) 100%);
         border: 1px solid rgba(240, 85, 69, 0.25);
@@ -103,7 +103,7 @@
     }
     .dash__grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 1.25rem;
     }
     .dash__card {
@@ -183,9 +183,13 @@
         font-size: 0.9rem;
     }
     .dash__subscription a:hover { color: #fff; background: rgba(251, 191, 36, 0.4); text-decoration: none; }
+    @media (max-width: 992px) {
+        .dash__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 768px) {
-        .dash { padding: 1.25rem 1rem 3rem; }
+        .dash { padding: 1.25rem 0 3rem; }
         .dash__hero { padding: 1.75rem 1.25rem; }
+        .dash__grid { grid-template-columns: 1fr; }
     }
 </style>
 {% endblock %}

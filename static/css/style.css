@@ -125,13 +125,19 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Button styles */
+.container {
+    max-width: 1200px;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
 .btn {
     border-radius: 0;
     text-transform: uppercase;
     font-weight: 600;
     letter-spacing: 1px;
     transition: all var(--animation-speed);
-    clip-path: polygon(0 0, 100% 0, 100% 85%, 95% 100%, 0 100%);
+    clip-path: none;
     padding: 0.5rem 1.5rem;
 }
 
@@ -160,7 +166,7 @@ h1, h2, h3, h4, h5, h6 {
     border-radius: 0;
     overflow: hidden;
     transition: all var(--animation-speed);
-    clip-path: polygon(0 0, 100% 0, 100% 95%, 95% 100%, 0 100%);
+    clip-path: none;
     backdrop-filter: blur(10px);
 }
 
@@ -224,7 +230,7 @@ input[type="number"] {
     display: inline-flex;
     align-items: center;
     font-size: 0.875rem;
-    clip-path: polygon(0 0, 100% 0, 100% 70%, 95% 100%, 0 100%);
+    clip-path: none;
     transition: all var(--animation-speed);
 }
 
@@ -724,7 +730,7 @@ input[type="number"] {
 #map {
     border: 1px solid var(--jet-gray-medium);
     border-radius: 0;
-    clip-path: polygon(0 0, 100% 0, 100% 95%, 95% 100%, 0 100%);
+    clip-path: none;
     transition: all var(--animation-speed);
 }
 
