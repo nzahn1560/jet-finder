@@ -62,6 +62,7 @@ app.register_blueprint(marketplace)
 
 # Database: PostgreSQL (Railway) or SQLite (local) via db module
 import db as db_module
+import sections as sections_module
 
 def init_db():
     """Create users, user_listings, user_subscriptions, per_use_purchases tables (Postgres or SQLite)."""
@@ -293,7 +294,8 @@ def _no_cache_auth_endpoints(response):
     """Force no-cache for any auth/dashboard/admin/API path so Cloudflare/browsers never serve stale data."""
     path = request.path or ''
     if (path.startswith('/api/') or path.startswith('/admin') or path in (
-        '/login', '/logout', '/register', '/dashboard', '/profile', '/my-listings', '/create-listing'
+        '/login', '/logout', '/register', '/dashboard', '/profile', '/my-listings', '/create-listing',
+        '/charter', '/charter-search', '/mechanics', '/service-providers', '/brokers', '/off-market',
     )):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
@@ -360,10 +362,11 @@ def per_use_required(service_type, price_per_use):
     return decorator
 
 # Specific decorators for each subscription type
+@app.route('/charter')
 @app.route('/charter-search')
 def charter_search():
-    """Unfinished charter product. Send people to the aircraft finder."""
-    return redirect(url_for('home'))
+    """Charter estimates from the aircraft already on the site."""
+    return render_template('charter.html')
 
 @app.route('/empty-legs')
 def empty_legs():
@@ -375,10 +378,214 @@ def parts_marketplace():
     """Unfinished parts product. Send people to the aircraft finder."""
     return redirect(url_for('home'))
 
-@app.route('/service-providers')
+def _mechanic_directory(query):
+    """Shops plus mechanic profiles that have not published a shop."""
+    cards = []
+    seen_ids = set()
+    for service_type in ('mechanic', 'maintenance'):
+        for shop in db_module.search_service_providers(service_type=service_type, location=query or None, limit=100):
+            if shop.get('id') in seen_ids:
+                continue
+            seen_ids.add(shop.get('id'))
+            shop['display_name'] = shop.get('business_name')
+            cards.append(shop)
+    needle = (query or '').strip().lower()
+    shop_users = {shop.get('user_id') for shop in cards}
+    for person in db_module.list_users_by_role('mechanic'):
+        if person.get('id') in shop_users:
+            continue
+        location = person.get('profile_location') or ''
+        blob = ' '.join(filter(None, [
+            person.get('company'), person.get('first_name'), person.get('last_name'), location,
+        ])).lower()
+        if needle and needle not in blob:
+            continue
+        name = ' '.join(filter(None, [person.get('first_name'), person.get('last_name')])) or person.get('company') or 'Mechanic'
+        cards.append({
+            'id': person.get('id'),
+            'user_id': person.get('id'),
+            'business_name': person.get('company') or name,
+            'display_name': name,
+            'city': location,
+            'state': '',
+            'description': '',
+            'phone': person.get('phone'),
+            'email': person.get('email'),
+            'website': None,
+            'service_subcategory': 'Mechanic',
+            'latitude': None,
+            'longitude': None,
+            'profile_location': location,
+        })
+    return cards
+
+
+def _directory_map_points(cards):
+    points = []
+    for card in cards:
+        lat = card.get('latitude')
+        lon = card.get('longitude')
+        place = card.get('profile_location') or ', '.join(part for part in [card.get('city'), card.get('state')] if part)
+        if lat is None or lon is None:
+            airport = sections_module.resolve_place(place, sections_module.us_country_hint(card.get('state')))
+            if airport:
+                lat = airport.get('lat')
+                lon = airport.get('lon')
+        if lat is None or lon is None:
+            continue
+        points.append({
+            'lat': lat,
+            'lon': lon,
+            'label': card.get('business_name') or card.get('display_name') or 'Mechanic',
+            'place': place,
+        })
+    return points
+
+
+@app.route('/mechanics', methods=['GET', 'POST'])
+@app.route('/service-providers', methods=['GET', 'POST'])
 def service_providers():
-    """Unfinished directory. Send people to the aircraft finder."""
-    return redirect(url_for('home'))
+    """Mechanic directory. A signed-in user can publish a shop."""
+    form_error = None
+    if request.method == 'POST':
+        user = get_current_user_from_request()
+        if not user:
+            return redirect(url_for('login', next=url_for('service_providers')))
+        business = (request.form.get('business_name') or '').strip()
+        city = (request.form.get('city') or '').strip()
+        state = (request.form.get('state') or '').strip()
+        phone = (request.form.get('phone') or '').strip()
+        email = (request.form.get('email') or '').strip()
+        if not all([business, city, state, phone, email]) or '@' not in email:
+            form_error = 'Business name, city, state, phone, and a real email are required.'
+        else:
+            airport = sections_module.resolve_place(city, sections_module.us_country_hint(state))
+            db_module.create_service_provider(user['id'], {
+                'business_name': business,
+                'service_type': 'mechanic',
+                'service_subcategory': (request.form.get('specialty') or '').strip() or None,
+                'description': (request.form.get('description') or '').strip() or None,
+                'city': city,
+                'state': state,
+                'phone': phone,
+                'email': email,
+                'latitude': airport.get('lat') if airport else None,
+                'longitude': airport.get('lon') if airport else None,
+            })
+            return redirect(url_for('service_providers', listed=1))
+    query = (request.args.get('q') or '').strip()
+    shops = _mechanic_directory(query)
+    return render_template(
+        'mechanics.html',
+        shops=shops,
+        query=query,
+        map_points=_directory_map_points(shops),
+        form_error=form_error,
+        form_ok=request.args.get('listed') == '1',
+    )
+
+
+@app.route('/brokers')
+def brokers_page():
+    """Map of accounts whose profile role is broker."""
+    people = sections_module.place_on_map(db_module.list_users_by_role('broker'))
+    brokers = []
+    map_points = []
+    for person in people:
+        name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part)
+        person['display_name'] = name or person.get('company') or 'Broker'
+        person['place'] = person.get('airport_city') or person.get('profile_location') or ''
+        brokers.append(person)
+        if person.get('lat') is not None and person.get('lon') is not None:
+            map_points.append({
+                'lat': person['lat'],
+                'lon': person['lon'],
+                'display_name': person['display_name'],
+                'company': person.get('company') or '',
+                'place': person.get('place') or '',
+            })
+    return render_template('brokers.html', brokers=brokers, map_points=map_points)
+
+
+@app.route('/off-market')
+@require_auth
+def off_market_page():
+    """Approved listings the seller kept off the public marketplace."""
+    rows = db_module.get_off_market_listings()
+    aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
+    listings = []
+    for row in rows:
+        combined = _row_to_combined_listing(row, aircraft_map) or {}
+        listings.append({
+            'id': row.get('id'),
+            'title': combined.get('title') or row.get('title') or 'Aircraft',
+            'price': row.get('price'),
+            'year': row.get('year'),
+            'hours': row.get('hours'),
+            'location': row.get('location') or '',
+            'manufacturer': row.get('manufacturer') or combined.get('manufacturer') or '',
+            'description': row.get('description') or '',
+            'email': row.get('email') or '',
+        })
+    return render_template('off_market.html', listings=listings)
+
+
+@app.route('/api/charter/estimate', methods=['POST'])
+def api_charter_estimate():
+    """Estimate a charter from stored aircraft performance. Not a live booking."""
+    data = request.get_json(silent=True) or {}
+    try:
+        passengers = int(data.get('passengers') or 1)
+    except (TypeError, ValueError):
+        passengers = 1
+    passengers = max(1, min(passengers, 19))
+    result = sections_module.estimate_charter(
+        data.get('departure_airport') or data.get('departure') or '',
+        data.get('arrival_airport') or data.get('arrival') or '',
+        passengers,
+        get_unified_aircraft_data(),
+    )
+    return jsonify(result), (200 if result.get('ok') else 400)
+
+
+@app.route('/api/charter/inquiry', methods=['POST'])
+def api_charter_inquiry():
+    """Save a charter request. Mail goes out only when an email provider is configured."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip()
+    departure = (data.get('departure_airport') or '').strip()
+    arrival = (data.get('arrival_airport') or '').strip()
+    if not name or '@' not in email or not departure or not arrival:
+        return jsonify({'error': 'Name, email, and both airports are required.'}), 400
+    try:
+        passengers = int(data.get('passengers') or 1)
+    except (TypeError, ValueError):
+        passengers = 1
+    price = data.get('estimated_price')
+    try:
+        price = float(price) if price not in (None, '') else None
+    except (TypeError, ValueError):
+        price = None
+    user = get_current_user_from_request()
+    inquiry_id = db_module.create_charter_inquiry({
+        'user_id': user['id'] if user else None,
+        'name': name,
+        'email': email,
+        'phone': data.get('phone'),
+        'departure_airport': departure,
+        'arrival_airport': arrival,
+        'departure_date': data.get('departure_date'),
+        'passengers': passengers,
+        'aircraft_name': data.get('aircraft_name'),
+        'estimated_price': price,
+    })
+    _notify_admins_charter(inquiry_id, name, email, departure, arrival, data.get('aircraft_name'))
+    return jsonify({
+        'ok': True,
+        'id': inquiry_id,
+        'message': 'Request saved. A coordinator will follow up.',
+    }), 201
 
 # Pro subscription removed - legacy decorator removed
 
@@ -4584,22 +4791,52 @@ def _active_market_listings():
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
     listings = []
     for row in rows:
+        if sections_module.normalize_market(row.get('market')) == 'off_market':
+            continue
         combined = _row_to_combined_listing(row, aircraft_map)
         if combined:
             listings.append(_public_market_listing(combined))
     return listings
 
 
-def _notify_admins_new_listing(listing_id, title, seller_email):
+def _admin_addresses():
+    return [e.strip() for e in (os.environ.get('ADMIN_EMAILS') or '').split(',') if e.strip()]
+
+
+def _notify_admins_charter(inquiry_id, name, email, departure, arrival, aircraft_name):
+    """Tell admins a charter request was saved. Silent when mail is not configured."""
+    import email_service as email_mod
+    addresses = _admin_addresses()
+    if not addresses:
+        logger.info('Charter inquiry %s saved from %s. Set ADMIN_EMAILS to be notified.', inquiry_id, email)
+        return
+    subject = f'Charter request: {departure} to {arrival}'
+    text = (
+        f'{name} ({email}) asked about a charter.\n\n'
+        f'{departure} to {arrival}\n'
+        f'Aircraft: {aircraft_name or "not chosen"}\n'
+        f'Request #{inquiry_id}\n'
+    )
+    html = f'<p>{text.replace(chr(10), "<br>")}</p>'
+    for addr in addresses:
+        try:
+            email_mod.send_email(addr, subject, html, text)
+        except Exception:
+            logger.exception('Could not email admin %s about charter %s', addr, inquiry_id)
+
+
+def _notify_admins_new_listing(listing_id, title, seller_email, market='public'):
     """Email every ADMIN_EMAILS address that a listing is waiting for approval."""
     import email_service as email_mod
-    addresses = [e.strip() for e in (os.environ.get('ADMIN_EMAILS') or '').split(',') if e.strip()]
+    addresses = _admin_addresses()
     link = request.host_url.rstrip('/') + '/admin'
+    where = 'off market' if market == 'off_market' else 'the public marketplace'
     subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
     text = (
         f'A listing is waiting for your approval on JetSchool.\n\n'
         f'{title or "Listing"} #{listing_id}\n'
-        f'Seller: {seller_email or "unknown"}\n\n'
+        f'Seller: {seller_email or "unknown"}\n'
+        f'After approval it goes to {where}.\n\n'
         f'Open the admin page to approve or delete it:\n{link}\n'
     )
     html = (
@@ -4706,6 +4943,7 @@ def _row_to_combined_listing(row, aircraft_map):
         'engine_type': resolved_engine_type,
         'manufacturer': resolved_manufacturer,
         'pricing_plan': pricing_plan,
+        'market': sections_module.normalize_market(row.get('market')),
         'status': status,
         'payment_status': payment_status,
         'images': image_list,
@@ -4775,6 +5013,7 @@ def api_create_user_listing():
             data.get('manufacturer', profile.get('manufacturer', 'Unknown')),
             pricing_plan,
             user_id=user_id,
+            market=sections_module.normalize_market(data.get('market')),
         )
         
         new_listing = {
@@ -4838,6 +5077,7 @@ def api_listings_me():
                 'price': row.get('price'),
                 'hours': row.get('hours', 0),
                 'location': row.get('location'),
+                'market': sections_module.normalize_market(row.get('market')),
                 'status': row.get('status'),
                 'payment_status': row.get('payment_status'),
                 'pricing_plan': row.get('pricing_plan'),
@@ -4890,6 +5130,7 @@ def _listing_data_from_form(form, user):
         'engine_type': form.get('engine_type'),
         'manufacturer': form.get('manufacturer'),
         'pricing_plan': form.get('pricing_plan') or 'monthly',
+        'market': sections_module.normalize_market(form.get('market')),
     }
 
 
@@ -4953,9 +5194,13 @@ def _create_listing_for_user(user, data):
             pricing_plan,
             user_id=user['id'],
             status=initial_status,
+            market=sections_module.normalize_market(data.get('market')),
         )
         if initial_status == 'pending':
-            _notify_admins_new_listing(listing_id, title, data.get('email') or user.get('email'))
+            _notify_admins_new_listing(
+                listing_id, title, data.get('email') or user.get('email'),
+                market=sections_module.normalize_market(data.get('market')),
+            )
         return {
             'ok': True,
             'id': listing_id,
@@ -5107,7 +5352,10 @@ def api_stripe_webhook():
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
             row = db_module.get_listing_with_owner(listing_id)
             if row and row.get('status') == 'pending':
-                _notify_admins_new_listing(listing_id, row.get('title'), row.get('email'))
+                _notify_admins_new_listing(
+                    listing_id, row.get('title'), row.get('email'),
+                    market=sections_module.normalize_market(row.get('market')),
+                )
         else:
             logger.warning('Stripe webhook: no listing found for session %s', session_id)
     return jsonify({'received': True}), 200
@@ -5488,6 +5736,7 @@ def api_admin_listings():
                 'email': row.get('email'),
                 'description': row.get('description'),
                 'status': row.get('status'),
+                'market': sections_module.normalize_market(row.get('market')),
                 'payment_status': row.get('payment_status'),
                 'rejection_reason': row.get('rejection_reason'),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,

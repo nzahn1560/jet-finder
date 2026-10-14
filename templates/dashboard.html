@@ -335,7 +335,12 @@
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
             const canEdit = l.status !== 'active' && l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
-            const copy = statusCopy[l.status] || 'Saved.';
+            const offMarket = (l.market || 'public') === 'off_market';
+            const copy = offMarket && l.status === 'active'
+                ? 'Live on the off-market page. Not on the public marketplace.'
+                : (offMarket && l.status === 'pending'
+                    ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
+                    : (statusCopy[l.status] || 'Saved.'));
             return '\n<div class="dash__card">\n'
                 + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
@@ -343,7 +348,7 @@
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
                 + rej + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
-                + (l.status === 'active' ? '<a class="dash__card-link" href="/">View on marketplace</a>' : '')
+                + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
                 + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Broker Map - Jet Finder{% endblock %}
+{% block additional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+{% endblock %}
+
+{% block content %}
+<div class="section-page">
+    <h1>Broker map</h1>
+    <p class="section-lead">Brokers appear here after they set their profile role to Broker and their location to an airport code or city.</p>
+
+    <div id="broker-map" class="section-map"></div>
+
+    {% if brokers %}
+    <div class="section-grid">
+        {% for broker in brokers %}
+        <article class="section-card">
+            <h2>{{ broker.display_name }}</h2>
+            {% if broker.company %}<p>{{ broker.company }}</p>{% endif %}
+            <p class="section-meta">
+                {% if broker.airport_city %}{{ broker.airport_city }}{% if broker.airport_code %} ({{ broker.airport_code }}){% endif %}
+                {% elif broker.profile_location %}{{ broker.profile_location }} — location not matched to an airport
+                {% else %}No location on the profile yet{% endif %}
+            </p>
+            {% if broker.phone %}<p>Phone: {{ broker.phone }}</p>{% endif %}
+            {% if broker.email %}<p>Email: <a href="mailto:{{ broker.email }}">{{ broker.email }}</a></p>{% endif %}
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-empty">No brokers have published a profile yet. On your profile, choose the Broker role and add a location such as KTEB or Dallas.</div>
+    {% endif %}
+
+    <p class="section-note mt-3">
+        {% if current_user %}
+        <a href="{{ url_for('dashboard') }}">Update your profile</a> to show up on this map.
+        {% else %}
+        <a href="{{ url_for('register') }}">Create an account</a> and set the role to Broker.
+        {% endif %}
+    </p>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+(function () {
+    function esc(value) {
+        return String(value || '').replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    const brokers = {{ map_points|tojson }};
+    const map = L.map('broker-map').setView([39.8, -98.6], 4);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 16
+    }).addTo(map);
+    const bounds = [];
+    brokers.forEach(function (broker) {
+        if (broker.lat == null || broker.lon == null) return;
+        const marker = L.circleMarker([broker.lat, broker.lon], {
+            radius: 8, color: '#F05545', fillColor: '#F05545', fillOpacity: 0.9
+        }).addTo(map);
+        marker.bindPopup('<strong>' + esc(broker.display_name) + '</strong><br>' + esc(broker.company || '') + '<br>' + esc(broker.place || ''));
+        bounds.push([broker.lat, broker.lon]);
+    });
+    if (bounds.length) {
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+    }
+    setTimeout(function () { map.invalidateSize(); }, 200);
+})();
+</script>
+{% endblock %}

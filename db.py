@@ -171,8 +171,31 @@ class UserListing(Base):
     engine_type = Column(String(100))
     manufacturer = Column(String(200))
     pricing_plan = Column(String(50), default='monthly')
+    # public = marketplace. off_market = signed-in buyers only, never the public search.
+    market = Column(String(20), default='public', nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class CharterInquiry(Base):
+    """A charter estimate request. Stored so a coordinator can follow up."""
+    __tablename__ = 'charter_inquiries'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(50))
+    departure_airport = Column(String(10), nullable=False)
+    arrival_airport = Column(String(10), nullable=False)
+    departure_date = Column(String(40))
+    passengers = Column(Integer, default=1)
+    aircraft_name = Column(String(255))
+    estimated_price = Column(Float)
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -536,6 +559,7 @@ def init_db():
                 'engine_type TEXT',
                 'manufacturer TEXT',
                 'pricing_plan TEXT DEFAULT \'monthly\'',
+                'market TEXT DEFAULT \'public\'',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN {col_def}'))
@@ -567,6 +591,14 @@ def init_db():
                 except Exception:
                     conn.rollback()
                     pass
+            try:
+                conn.execute(text(
+                    "ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS market VARCHAR(20) DEFAULT 'public'"
+                ))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                pass
 
 
 @contextmanager
@@ -873,6 +905,51 @@ def use_reset_token_and_set_password(token, new_password_hash):
         return uid
 
 
+def list_users_by_role(role, limit=500):
+    """Public directory fields for one profile role (broker, mechanic, and so on)."""
+    with get_session() as s:
+        rows = (
+            s.query(User)
+            .filter(User.profile_role == role, User.is_suspended == False)  # noqa: E712
+            .order_by(User.company.asc(), User.last_name.asc())
+            .limit(limit)
+            .all()
+        )
+        out = []
+        for u in rows:
+            out.append({
+                'id': u.id,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'company': u.company,
+                'phone': u.phone,
+                'email': u.email,
+                'profile_location': u.profile_location,
+            })
+        return out
+
+
+def create_charter_inquiry(data):
+    """Save a charter request. Returns the new row id."""
+    with get_session() as s:
+        row = CharterInquiry(
+            user_id=data.get('user_id'),
+            name=(data.get('name') or '').strip(),
+            email=(data.get('email') or '').strip(),
+            phone=(data.get('phone') or '').strip() or None,
+            departure_airport=(data.get('departure_airport') or '').strip().upper(),
+            arrival_airport=(data.get('arrival_airport') or '').strip().upper(),
+            departure_date=(data.get('departure_date') or '').strip() or None,
+            passengers=int(data.get('passengers') or 1),
+            aircraft_name=(data.get('aircraft_name') or '').strip() or None,
+            estimated_price=data.get('estimated_price'),
+            notes=(data.get('notes') or '').strip() or None,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
 def list_all_users_basic(limit=500):
     """Admin: list users with basic account info, no sensitive fields."""
     with get_session() as s:
@@ -895,16 +972,43 @@ def list_all_users_basic(limit=500):
 
 
 # --- User listings helpers ---
+def _public_market_clause():
+    """Approved listings that belong on the public marketplace."""
+    from sqlalchemy import or_
+    return or_(
+        UserListing.market.is_(None),
+        UserListing.market == '',
+        UserListing.market == 'public',
+    )
+
+
 def get_active_user_listings():
-    """Return all active user_listings as list of dicts (for /api/user-listings)."""
+    """Approved public listings. Off-market aircraft stay off this list."""
     with get_session() as s:
-        rows = s.query(UserListing).filter(UserListing.status == 'active').order_by(UserListing.created_at.desc()).all()
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.status == 'active', _public_market_clause())
+            .order_by(UserListing.created_at.desc())
+            .all()
+        )
+        return [row.to_dict() for row in rows]
+
+
+def get_off_market_listings():
+    """Approved listings that are visible only on the off-market page."""
+    with get_session() as s:
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.status == 'active', UserListing.market == 'off_market')
+            .order_by(UserListing.created_at.desc())
+            .all()
+        )
         return [row.to_dict() for row in rows]
 
 
 def create_user_listing(profile_id, title, year, price, hours, location, email, description,
                         images_str, documents_str, engine_type, manufacturer, pricing_plan, user_id=None,
-                        status='pending'):
+                        status='pending', market='public'):
     """Create a listing. Default status='pending' (awaiting admin approval).
 
     Pass status='unpaid' when payment is required before review.
@@ -928,6 +1032,7 @@ def create_user_listing(profile_id, title, year, price, hours, location, email, 
             pricing_plan=pricing_plan or 'monthly',
             status=status or 'pending',
             payment_status='pending',
+            market='off_market' if market == 'off_market' else 'public',
         )
         s.add(row)
         s.flush()
@@ -988,7 +1093,7 @@ def delete_user_listing_soft(listing_id):
 def search_user_listings(search_query=None, category=None, min_price=None, max_price=None, min_year=None, max_year=None, location=None):
     """Return list of active listing dicts matching filters."""
     with get_session() as s:
-        q = s.query(UserListing).filter(UserListing.status == 'active')
+        q = s.query(UserListing).filter(UserListing.status == 'active', _public_market_clause())
         # Simple filters (expand as needed)
         if min_price is not None:
             q = q.filter(UserListing.price >= min_price)
@@ -1063,9 +1168,11 @@ def update_user_listing_fields(listing_id, fields):
     """
     allowed = {
         'title', 'year', 'price', 'hours', 'location', 'email', 'description',
-        'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan',
+        'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan', 'market',
     }
     safe = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if 'market' in safe:
+        safe['market'] = 'off_market' if safe['market'] == 'off_market' else 'public'
     if not safe:
         return False
     with get_session() as s:
@@ -1274,12 +1381,13 @@ def has_unused_service_provider_credit(user_id):
 # --- Service providers (Railway-compatible: no sqlite3) ---
 def create_service_provider(user_id, provider_data):
     with get_session() as s:
-        lat = lon = None
-        if provider_data.get('street_address') and provider_data.get('city') and provider_data.get('state'):
-            try:
-                lat, lon = 40.7128, -74.0060
-            except Exception:
-                pass
+        lat = provider_data.get('latitude')
+        lon = provider_data.get('longitude')
+        try:
+            lat = float(lat) if lat not in (None, '') else None
+            lon = float(lon) if lon not in (None, '') else None
+        except (TypeError, ValueError):
+            lat = lon = None
         sp = ServiceProvider(
             user_id=user_id,
             business_name=provider_data['business_name'],

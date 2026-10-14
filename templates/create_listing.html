@@ -12,6 +12,9 @@
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
+    .market-choice { display: flex; gap: 1.25rem; flex-wrap: wrap; color: #fff; }
+    .market-choice label { color: #fff; }
+
     .form-section {
         background: rgba(255, 255, 255, 0.02);
         border-radius: 12px;
@@ -404,6 +407,14 @@
                                 </div>
                             </div>
                             <div class="mb-3">
+                                <label class="form-label">Where should this listing appear?</label>
+                                <div class="market-choice">
+                                    <label><input type="radio" name="market" value="public" {% if request.args.get('market') != 'off_market' %}checked{% endif %}> Public marketplace</label>
+                                    <label><input type="radio" name="market" value="off_market" {% if request.args.get('market') == 'off_market' %}checked{% endif %}> Off market</label>
+                                </div>
+                                <small class="text-muted">Off-market aircraft stay off the public marketplace. Signed-in buyers see them on the Off Market page after approval.</small>
+                            </div>
+                            <div class="mb-3">
                                 <label class="form-label">Description</label>
                                 <textarea class="form-control" id="description" name="description" rows="4"
                                     placeholder="Describe aircraft history, upgrades, maintenance, etc."></textarea>
@@ -473,7 +484,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">Submit sends this aircraft for approval. It shows on your dashboard right away, and on the marketplace only after it is approved.</p>
+                        <p id="listing-next-step" class="text-white mb-3">Submit sends this aircraft for approval. It shows on your dashboard right away, and on the marketplace only after it is approved. An off-market choice stays off the public marketplace.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -602,6 +613,7 @@
             engine_type: get('engine_type') || undefined,
             manufacturer: get('manufacturer') || undefined,
             pricing_plan: get('pricing_plan') || 'monthly',
+            market: get('market') === 'off_market' ? 'off_market' : 'public',
         };
     }
 
@@ -763,6 +775,8 @@
             setVal('yearModel', listing.year);
             setVal('email', listing.email);
             setVal('description', listing.description);
+            const marketRadio = document.querySelector(`[name="market"][value="${listing.market === 'off_market' ? 'off_market' : 'public'}"]`);
+            if (marketRadio) marketRadio.checked = true;
             const planRadio = document.querySelector(`[name="pricing_plan"][value="${listing.pricing_plan || 'monthly'}"]`);
             if (planRadio) { planRadio.checked = true; updatePrice(); }
             // Serial number lives inside the description in edit mode; relax the field.

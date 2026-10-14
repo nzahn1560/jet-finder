@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Off Market - Jet Finder{% endblock %}
+{% block additional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="section-page">
+    <h1>Off market</h1>
+    <p class="section-lead">Approved aircraft that the seller kept off the public marketplace. You can see them because you are signed in.</p>
+    <p class="section-note"><a href="{{ url_for('create_listing') }}?market=off_market">Submit an off-market listing</a>. It still waits for approval before it shows here.</p>
+
+    {% if listings %}
+    <div class="section-grid mt-3">
+        {% for item in listings %}
+        <article class="section-card">
+            <h2>{{ item.title }}</h2>
+            <p class="section-price">${{ '{:,.0f}'.format(item.price or 0) }}</p>
+            <p>{{ item.manufacturer or '' }}{% if item.year %} · {{ item.year }}{% endif %}{% if item.hours is not none %} · {{ '{:,.0f}'.format(item.hours) }} hrs{% endif %}</p>
+            <p class="section-meta">{{ item.location }}</p>
+            {% if item.description %}<p>{{ item.description }}</p>{% endif %}
+            {% if item.email %}<p>Contact: <a href="mailto:{{ item.email }}">{{ item.email }}</a></p>{% endif %}
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-empty mt-3">No off-market aircraft are approved right now.</div>
+    {% endif %}
+</div>
+{% endblock %}
