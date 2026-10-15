@@ -24,7 +24,12 @@ _US_STATES = {
 
 
 def normalize_market(value: Any) -> str:
-    return 'off_market' if str(value or '').strip().lower() == 'off_market' else 'public'
+    raw = str(value or '').strip().lower().replace('-', '_')
+    if raw in ('off_market', 'broker_only'):
+        return 'broker_only'
+    if raw == 'private':
+        return 'private'
+    return 'public'
 
 
 def _load_indexes() -> None:

@@ -3,12 +3,13 @@
 {% block title %}Charter - Jet Finder{% endblock %}
 {% block additional_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
 {% endblock %}
 
 {% block content %}
 <div class="section-page">
     <h1>Charter</h1>
-    <p class="section-lead">Enter a route and how many seats you need. Jet Finder estimates which aircraft can make the trip and what the flying time would cost.</p>
+    <p class="section-lead">Enter one trip. JetSchool estimates which aircraft types can fly it, then shows operator aircraft you can request. A request is not a confirmed booking.</p>
 
     <form id="charter-form" class="section-panel">
         <div class="row g-3">
@@ -37,6 +38,10 @@
 
     <p id="charter-summary" class="section-note" hidden></p>
     <div id="charter-results" class="section-grid"></div>
+    <h2 class="h4 text-white mt-4">Aircraft you can request</h2>
+    <p class="section-note">These are aircraft an operator has listed. If this list is empty, no operator has published availability.</p>
+    <div id="charter-map" class="section-map" hidden></div>
+    <div id="live-results" class="section-grid"></div>
 
     <form id="quote-form" class="section-panel" hidden>
         <h2 class="h5 text-white">Request this estimate</h2>
@@ -65,6 +70,7 @@
         </div>
     </form>
 </div>
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <script>
 (function () {
     const form = document.getElementById('charter-form');
@@ -136,7 +142,68 @@
         });
         quoteForm.hidden = false;
         quoteForm.dataset.aircraft = JSON.stringify(aircraft);
+        loadLive(body);
     });
+
+    let charterMap = null;
+    async function loadLive(body) {
+        const live = document.getElementById('live-results');
+        const mapEl = document.getElementById('charter-map');
+        live.innerHTML = '';
+        const params = new URLSearchParams({
+            departure: body.departure_airport,
+            arrival: body.arrival_airport,
+            date: body.departure_date || '',
+            passengers: String(body.passengers || 1),
+        });
+        const response = await fetch('/api/charter/available?' + params.toString());
+        const data = await response.json().catch(function () { return {}; });
+        mapEl.hidden = false;
+        if (!charterMap) {
+            charterMap = L.map('charter-map').setView([39.8, -98.6], 4);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri', maxZoom: 16
+            }).addTo(charterMap);
+        }
+        const bounds = [];
+        if (data.departure && data.departure.lat != null) {
+            L.circleMarker([data.departure.lat, data.departure.lon], { radius: 7, color: '#fff' }).addTo(charterMap).bindPopup(esc(data.departure.code));
+            bounds.push([data.departure.lat, data.departure.lon]);
+        }
+        if (data.arrival && data.arrival.lat != null) {
+            L.circleMarker([data.arrival.lat, data.arrival.lon], { radius: 7, color: '#fff' }).addTo(charterMap).bindPopup(esc(data.arrival.code));
+            bounds.push([data.arrival.lat, data.arrival.lon]);
+            if (data.departure && data.departure.lat != null) {
+                L.polyline([[data.departure.lat, data.departure.lon], [data.arrival.lat, data.arrival.lon]], { color: '#F05545' }).addTo(charterMap);
+            }
+        }
+        const fleet = data.aircraft || [];
+        if (!fleet.length) {
+            live.innerHTML = '<div class="section-empty">No operator aircraft are available for this trip yet.</div>';
+        }
+        fleet.forEach(function (item) {
+            const card = document.createElement('article');
+            card.className = 'section-card';
+            const price = item.estimated_total ? money(item.estimated_total) + ' estimate' : 'Quote on request';
+            card.innerHTML = '<h2>' + esc(item.name) + '</h2><p class="section-price">' + esc(price) + '</p>'
+                + '<p>Base ' + esc(item.base_airport || 'unlisted') + ' · ' + esc(item.seats || '?') + ' seats</p>'
+                + '<button class="section-btn" type="button">Request to book</button>';
+            card.querySelector('button').addEventListener('click', function () {
+                document.getElementById('quote-name').focus();
+                quoteForm.hidden = false;
+                quoteForm.dataset.liveId = String(item.id);
+                quoteForm.dataset.livePrice = item.estimated_total || '';
+            });
+            live.appendChild(card);
+            if (item.base && item.base.lat != null) {
+                L.circleMarker([item.base.lat, item.base.lon], { radius: 8, color: '#F05545', fillOpacity: 0.9 }).addTo(charterMap)
+                    .bindPopup(esc(item.name));
+                bounds.push([item.base.lat, item.base.lon]);
+            }
+        });
+        if (bounds.length) charterMap.fitBounds(bounds, { padding: [24, 24], maxZoom: 6 });
+        setTimeout(function () { charterMap.invalidateSize(); }, 200);
+    }
 
     quoteForm.addEventListener('submit', async function (event) {
         event.preventDefault();
@@ -144,6 +211,29 @@
         const picked = aircraft[Number(quoteSelect.value)] || {};
         const status = document.getElementById('quote-status');
         status.textContent = 'Saving…';
+        if (quoteForm.dataset.liveId) {
+            const booked = await fetch('/api/charter/book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    aircraft_id: Number(quoteForm.dataset.liveId),
+                    name: document.getElementById('quote-name').value,
+                    email: document.getElementById('quote-email').value,
+                    phone: document.getElementById('quote-phone').value,
+                    departure_airport: lastSearch.departure_airport,
+                    arrival_airport: lastSearch.arrival_airport,
+                    departure_date: lastSearch.departure_date,
+                    passengers: lastSearch.passengers,
+                    estimated_price: quoteForm.dataset.livePrice || null,
+                }),
+            });
+            const bookedData = await booked.json().catch(function () { return {}; });
+            status.textContent = booked.ok
+                ? (bookedData.message || 'Request sent. Not confirmed until the operator accepts.')
+                : (bookedData.error || 'Could not send the request.');
+            return;
+        }
         const response = await fetch('/api/charter/inquiry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

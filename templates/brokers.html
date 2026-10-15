@@ -19,6 +19,10 @@
         <article class="section-card">
             <h2>{{ broker.display_name }}</h2>
             {% if broker.company %}<p>{{ broker.company }}</p>{% endif %}
+            {% if broker.broker_verified %}<p class="section-meta">Verified broker</p>{% endif %}
+            {% if broker.broker_specialties %}<p>{{ broker.broker_specialties }}</p>{% endif %}
+            {% if broker.broker_bio %}<p class="section-meta">{{ broker.broker_bio }}</p>{% endif %}
+            {% if broker.broker_website %}<p><a href="{{ broker.broker_website }}" rel="noopener">Website</a></p>{% endif %}
             <p class="section-meta">
                 {% if broker.airport_city %}{{ broker.airport_city }}{% if broker.airport_code %} ({{ broker.airport_code }}){% endif %}
                 {% elif broker.profile_location %}{{ broker.profile_location }} — location not matched to an airport

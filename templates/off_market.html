@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Off Market - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 {% block additional_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
 {% endblock %}
@@ -8,7 +9,7 @@
 {% block content %}
 <div class="section-page">
     <h1>Off market</h1>
-    <p class="section-lead">Approved aircraft that the seller kept off the public marketplace. You can see them because you are signed in.</p>
+    <p class="section-lead">Broker-only inventory. These aircraft are not on the public marketplace, and this page is not available to buyer accounts.</p>
     <p class="section-note"><a href="{{ url_for('create_listing') }}?market=off_market">Submit an off-market listing</a>. It still waits for approval before it shows here.</p>
 
     {% if listings %}

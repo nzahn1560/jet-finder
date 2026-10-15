@@ -389,6 +389,26 @@
                                         required placeholder="e.g., Cessna, Bombardier">
                                 </div>
                                 <div class="col-md-6 mb-3">
+                                    <label class="form-label">Registration</label>
+                                    <input type="text" class="form-control" id="registration" name="registration" placeholder="N123JS">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Engine hours</label>
+                                    <input type="number" class="form-control" id="engineHours" name="engine_hours" min="0">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Avionics</label>
+                                    <input type="text" class="form-control" id="avionics" name="avionics" placeholder="G1000 NXi">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Paint year</label>
+                                    <input type="number" class="form-control" id="paintYear" name="paint_year" min="1950" max="2099">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label">Interior year</label>
+                                    <input type="number" class="form-control" id="interiorYear" name="interior_year" min="1950" max="2099">
+                                </div>
+                                <div class="col-md-6 mb-3">
                                     <label class="form-label">Location (Airport Code) *</label>
                                     <input type="text" class="form-control" id="location" name="location"
                                         placeholder="KVNY" required>
@@ -409,10 +429,11 @@
                             <div class="mb-3">
                                 <label class="form-label">Where should this listing appear?</label>
                                 <div class="market-choice">
-                                    <label><input type="radio" name="market" value="public" {% if request.args.get('market') != 'off_market' %}checked{% endif %}> Public marketplace</label>
-                                    <label><input type="radio" name="market" value="off_market" {% if request.args.get('market') == 'off_market' %}checked{% endif %}> Off market</label>
+                                    <label><input type="radio" name="market" value="public" {% if request.args.get('market') not in ['off_market', 'broker_only', 'private'] %}checked{% endif %}> Public marketplace</label>
+                                    <label><input type="radio" name="market" value="broker_only" {% if request.args.get('market') in ['off_market', 'broker_only'] %}checked{% endif %}> Broker only</label>
+                                    <label><input type="radio" name="market" value="private" {% if request.args.get('market') == 'private' %}checked{% endif %}> Private</label>
                                 </div>
-                                <small class="text-muted">Off-market aircraft stay off the public marketplace. Signed-in buyers see them on the Off Market page after approval.</small>
+                                <small class="text-muted">Broker-only aircraft stay off the public site and are visible to broker accounts after approval. Private listings stay with you and admin.</small>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
@@ -474,12 +495,8 @@
                         <div class="section-title">
                             <i class="fas fa-tag"></i>Listing fee
                         </div>
-                        <p class="text-white mb-1">
-                            <span style="text-decoration: line-through; color: #888; font-size: 1.2rem;">$70</span>
-                            <strong style="font-size: 2rem; margin-left: 0.5rem;">$49</strong>
-                            <span style="margin-left: 0.6rem; background: #F05545; color: #fff; padding: 0.2rem 0.55rem; font-size: 0.8rem; font-weight: 700;">30% OFF</span>
-                        </p>
-                        <p class="text-muted mb-0">One price per listing. No featured upgrades, no extra photo packages.</p>
+                        <p class="text-white mb-1" id="listing-price-box">Loading the current price…</p>
+                        <p class="text-muted mb-0" id="listing-price-note"></p>
                     </div>
 
                     <!-- Form Actions -->
@@ -500,6 +517,17 @@
 
 <script>
     const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
+    fetch('/api/pricing/listing').then(function (response) { return response.json(); }).then(function (price) {
+        const box = document.getElementById('listing-price-box');
+        const note = document.getElementById('listing-price-note');
+        if (!box || !price) return;
+        const current = '$' + Number(price.amount_dollars).toFixed(2);
+        const regular = '$' + Number(price.regular_dollars).toFixed(2);
+        box.innerHTML = price.promotional
+            ? '<span style="text-decoration:line-through;color:#888;font-size:1.2rem;">' + regular + '</span> <strong style="font-size:2rem;margin-left:0.5rem;">' + current + '</strong>'
+            : '<strong style="font-size:2rem;">' + current + '</strong>';
+        if (note) note.textContent = price.label || '';
+    }).catch(function () {});
     let currentListingType = 'aircraft';
 
     function setListingType(type) {
@@ -613,7 +641,16 @@
             engine_type: get('engine_type') || undefined,
             manufacturer: get('manufacturer') || undefined,
             pricing_plan: get('pricing_plan') || 'monthly',
-            market: get('market') === 'off_market' ? 'off_market' : 'public',
+            market: ['broker_only', 'private', 'off_market'].indexOf(get('market')) >= 0 ? (get('market') === 'off_market' ? 'broker_only' : get('market')) : 'public',
+            serial_number: get('serial_number') || undefined,
+            registration: get('registration') || undefined,
+            variant: get('variant') || undefined,
+            engine_hours: get('engine_hours') || undefined,
+            avionics: get('avionics') || undefined,
+            paint_year: get('paint_year') || undefined,
+            interior_year: get('interior_year') || undefined,
+            maintenance_status: get('maintenance_status') || undefined,
+            passenger_config: get('passenger_config') || undefined,
         };
     }
 
@@ -775,7 +812,8 @@
             setVal('yearModel', listing.year);
             setVal('email', listing.email);
             setVal('description', listing.description);
-            const marketRadio = document.querySelector(`[name="market"][value="${listing.market === 'off_market' ? 'off_market' : 'public'}"]`);
+            const marketValue = listing.market === 'off_market' ? 'broker_only' : (listing.market || 'public');
+            const marketRadio = document.querySelector(`[name="market"][value="${marketValue}"]`);
             if (marketRadio) marketRadio.checked = true;
             const planRadio = document.querySelector(`[name="pricing_plan"][value="${listing.pricing_plan || 'monthly'}"]`);
             if (planRadio) { planRadio.checked = true; updatePrice(); }

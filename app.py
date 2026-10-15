@@ -11,6 +11,7 @@ import pandas as pd
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from marketplace import marketplace, load_listings, recommend_aircraft, get_current_user
+import pricing as pricing_module
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import stripe
@@ -28,7 +29,9 @@ except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.secret_key = os.environ.get('SECRET_KEY') or 'dev-only-change-me'
+if os.environ.get('RAILWAY_ENVIRONMENT') and app.secret_key == 'dev-only-change-me':
+    logger.error('SECRET_KEY is not set. Set it in Railway variables before relying on Flask sessions.')
 
 app.config['UPLOAD_FOLDER'] = 'uploads'  # ephemeral only; long-term media lives in R2
 # Allow large uploads so listing videos can be sent to R2 in one request.
@@ -59,6 +62,8 @@ app.jinja_env.globals.update(stripe_publishable_key=STRIPE_PUBLISHABLE_KEY)
 
 # Register blueprints
 app.register_blueprint(marketplace)
+from product import product as product_blueprint
+app.register_blueprint(product_blueprint)
 
 # Database: PostgreSQL (Railway) or SQLite (local) via db module
 import db as db_module
@@ -488,7 +493,7 @@ def service_providers():
 @app.route('/brokers')
 def brokers_page():
     """Map of accounts whose profile role is broker."""
-    people = sections_module.place_on_map(db_module.list_users_by_role('broker'))
+    people = sections_module.place_on_map(db_module.list_directory_brokers())
     brokers = []
     map_points = []
     for person in people:
@@ -510,7 +515,11 @@ def brokers_page():
 @app.route('/off-market')
 @require_auth
 def off_market_page():
-    """Approved listings the seller kept off the public marketplace."""
+    """Approved broker-only listings. Hidden from the public and from buyers."""
+    user = get_current_user_from_request()
+    import authz
+    if not authz.is_broker(user):
+        return render_template('error.html', error_code=403, message='Off-market aircraft are visible to broker accounts only.'), 403
     rows = db_module.get_off_market_listings()
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
     listings = []
@@ -2358,9 +2367,21 @@ setup_jinja_globals()
 
 # Authentication routes (HTML form posts; also set jet_session cookie)
 @app.route('/login', methods=['GET', 'POST'])
+def _safe_next(target):
+    """Only allow same-site relative redirects."""
+    if not target or not isinstance(target, str):
+        return None
+    if not target.startswith('/') or target.startswith('//') or '\\' in target:
+        return None
+    return target
+
+
 def login():
     """User login page"""
     if request.method == 'POST':
+        if _auth_rate_limited():
+            flash('Too many attempts. Wait a minute and try again.', 'error')
+            return render_template('auth/login.html'), 429
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password') or ''
         user = get_user_by_email(email)
@@ -2370,7 +2391,7 @@ def login():
             token = _start_jet_session(user_id)
             _maybe_promote_admin(user_id, email)
             flash('Successfully logged in!', 'success')
-            next_page = request.args.get('next') or url_for('dashboard')
+            next_page = _safe_next(request.args.get('next')) or url_for('dashboard')
             resp = redirect(next_page)
             _set_jet_session_cookie(resp, token)
             return resp
@@ -2382,6 +2403,9 @@ def login():
 def register():
     """User registration page"""
     if request.method == 'POST':
+        if _auth_rate_limited():
+            flash('Too many attempts. Wait a minute and try again.', 'error')
+            return render_template('auth/register.html'), 429
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password') or ''
         first_name = request.form.get('first_name')
@@ -4825,6 +4849,26 @@ def _notify_admins_charter(inquiry_id, name, email, departure, arrival, aircraft
             logger.exception('Could not email admin %s about charter %s', addr, inquiry_id)
 
 
+def _mail_listing_status(email, title, outcome, reason):
+    """Tell the seller a listing was approved or rejected. Skips when mail is not configured."""
+    if not email:
+        return
+    try:
+        import email_service
+        if not email_service.is_configured():
+            logger.info('Listing %s %s. Email is not configured.', title, outcome)
+            return
+        if outcome == 'approved':
+            subject = 'Your JetSchool listing is live'
+            text = f'{title or "Your listing"} is approved and visible according to the visibility you chose.'
+        else:
+            subject = 'Your JetSchool listing needs changes'
+            text = f'{title or "Your listing"} was not approved. Reason: {reason or "No reason provided"}. You can edit it and send it back without paying again.'
+        email_service.send_email(email, subject, f'<p>{text}</p>', text)
+    except Exception:
+        logger.exception('listing status email failed')
+
+
 def _notify_admins_new_listing(listing_id, title, seller_email, market='public'):
     """Email every ADMIN_EMAILS address that a listing is waiting for approval."""
     import email_service as email_mod
@@ -5014,6 +5058,7 @@ def api_create_user_listing():
             pricing_plan,
             user_id=user_id,
             market=sections_module.normalize_market(data.get('market')),
+            details=data,
         )
         
         new_listing = {
@@ -5131,6 +5176,17 @@ def _listing_data_from_form(form, user):
         'manufacturer': form.get('manufacturer'),
         'pricing_plan': form.get('pricing_plan') or 'monthly',
         'market': sections_module.normalize_market(form.get('market')),
+        'serial_number': (form.get('serial_number') or '').strip(),
+        'registration': (form.get('registration') or '').strip(),
+        'variant': (form.get('variant') or '').strip(),
+        'engine_program': (form.get('engine_program') or '').strip(),
+        'engine_hours': form.get('engine_hours'),
+        'engine_cycles': form.get('engine_cycles'),
+        'maintenance_status': (form.get('maintenance_status') or '').strip(),
+        'avionics': (form.get('avionics') or '').strip(),
+        'paint_year': form.get('paint_year'),
+        'interior_year': form.get('interior_year'),
+        'passenger_config': (form.get('passenger_config') or '').strip(),
     }
 
 
@@ -5195,6 +5251,7 @@ def _create_listing_for_user(user, data):
             user_id=user['id'],
             status=initial_status,
             market=sections_module.normalize_market(data.get('market')),
+            details=data,
         )
         if initial_status == 'pending':
             _notify_admins_new_listing(
@@ -5228,6 +5285,59 @@ def api_listings_create():
     return jsonify(result), 201
 
 
+@app.route('/api/listings/<int:listing_id>/resubmit', methods=['POST'])
+@require_auth
+def api_listings_resubmit(listing_id: int):
+    """Send a rejected or draft listing back to review. A paid listing is not charged again."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    if row.get('status') not in ('rejected', 'draft', 'suspended'):
+        return jsonify({'error': 'cannot_resubmit', 'message': 'Only a rejected, draft, or suspended listing can be sent back.'}), 409
+    if _payment_required() and row.get('payment_status') != 'paid':
+        return jsonify({'error': 'payment_required', 'payment_required': True}), 402
+    previous = row.get('status')
+    db_module.set_user_listing_status(listing_id, 'pending')
+    db_module.record_listing_audit(listing_id, user['id'], 'resubmit', previous, 'pending', None)
+    return jsonify({'ok': True, 'status': 'pending', 'charged_again': False})
+
+
+@app.route('/api/admin/listings/<int:listing_id>/suspend', methods=['POST'])
+@require_admin
+def admin_suspend_listing(listing_id):
+    admin = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    previous = row.get('status')
+    db_module.set_user_listing_status(listing_id, 'suspended')
+    db_module.record_listing_audit(listing_id, admin['id'], 'suspend', previous, 'suspended', None)
+    return jsonify({'ok': True, 'status': 'suspended'})
+
+
+@app.route('/api/admin/listings/<int:listing_id>/notes', methods=['POST'])
+@require_admin
+def admin_listing_notes(listing_id):
+    admin = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    data = request.get_json(silent=True) or {}
+    notes = data.get('notes') or ''
+    db_module.set_listing_admin_notes(listing_id, notes)
+    db_module.record_listing_audit(listing_id, admin['id'], 'notes', row.get('status'), row.get('status'), notes)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/listings/<int:listing_id>/audit')
+@require_admin
+def admin_listing_audit(listing_id):
+    return jsonify({'audit': db_module.list_listing_audits(listing_id)})
+
+
 @app.route('/api/listings/<int:listing_id>', methods=['PATCH'])
 @require_auth
 def api_listings_patch(listing_id: int):
@@ -5256,7 +5366,9 @@ def api_listings_patch(listing_id: int):
 # and require checkout before admin review. Default false so the site works
 # end-to-end before Stripe is fully configured.
 # =============================================================================
-LISTING_PRICE_CENTS = 4900  # $49 per listing, marketed as 30% off $70. No upgrades.
+def _listing_fee_cents() -> int:
+    """Server-side listing fee. Promo through Dec 31, 2026 Chicago, then $49.99."""
+    return pricing_module.listing_price_cents()
 
 
 def _stripe_configured() -> bool:
@@ -5289,7 +5401,8 @@ def api_listing_checkout(listing_id: int):
     if row.get('payment_status') == 'paid':
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
 
-    amount = LISTING_PRICE_CENTS
+    amount = _listing_fee_cents()
+    quote = pricing_module.listing_price()
     base = request.host_url.rstrip('/')
     try:
         checkout = stripe.checkout.Session.create(
@@ -5301,7 +5414,7 @@ def api_listing_checkout(listing_id: int):
                     'unit_amount': amount,
                     'product_data': {
                         'name': f"JetSchool listing — {row.get('title') or ('Listing #' + str(listing_id))}",
-                        'description': '$49 listing fee (30% off $70). One price, no upgrades.',
+                        'description': quote['label'],
                     },
                 },
                 'quantity': 1,
@@ -5342,6 +5455,10 @@ def api_stripe_webhook():
     except Exception:
         logger.exception('Stripe webhook signature verification failed')
         return jsonify({'error': 'invalid_signature'}), 400
+
+    event_id = event.get('id') if isinstance(event, dict) else getattr(event, 'id', None)
+    if event_id and not db_module.claim_stripe_event(str(event_id)):
+        return jsonify({'received': True, 'duplicate': True}), 200
 
     event_type = event.get('type') if isinstance(event, dict) else event.type
     if event_type == 'checkout.session.completed':
@@ -5795,8 +5912,13 @@ def admin_approve_listing(listing_id):
         existing = db_module.get_listing_with_owner(listing_id)
         if not existing:
             return jsonify({'error': 'not_found'}), 404
+        if existing.get('user_id') == admin['id']:
+            return jsonify({'error': 'forbidden', 'message': 'You cannot approve your own listing.'}), 403
+        previous = existing.get('status')
         if not db_module.admin_approve_listing_any(listing_id, admin['id']):
             return jsonify({'error': 'server_error'}), 500
+        db_module.record_listing_audit(listing_id, admin['id'], 'approve', previous, 'active', None)
+        _mail_listing_status(existing.get('email'), existing.get('title'), 'approved', None)
         return jsonify({'ok': True, 'status': 'active'}), 200
     except Exception:
         logger.exception("Error approving listing")
@@ -5813,8 +5935,14 @@ def admin_reject_listing(listing_id):
         existing = db_module.get_listing_with_owner(listing_id)
         if not existing:
             return jsonify({'error': 'not_found'}), 404
+        admin = get_current_user_from_request()
+        previous = existing.get('status')
         if not db_module.admin_reject_listing_any(listing_id, reason):
             return jsonify({'error': 'server_error'}), 500
+        db_module.record_listing_audit(
+            listing_id, admin['id'] if admin else None, 'reject', previous, 'rejected', reason
+        )
+        _mail_listing_status(existing.get('email'), existing.get('title'), 'rejected', reason)
         return jsonify({'ok': True, 'status': 'rejected'}), 200
     except Exception:
         logger.exception("Error rejecting listing")

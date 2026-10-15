@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Aircraft for sale - JetSchool{% endblock %}
+{% block meta_description %}Approved aircraft listings on JetSchool.{% endblock %}
+{% block additional_css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">{% endblock %}
+{% block content %}
+<div class="section-page">
+    <h1>Aircraft for sale</h1>
+    <p class="section-lead">Approved public listings only. Photos open on the listing page.</p>
+    <form class="section-panel" method="get">
+        <div class="row g-3">
+            <div class="col-md-5"><label>Manufacturer</label><input class="form-control" name="manufacturer" value="{{ manufacturer }}"></div>
+            <div class="col-md-4"><label>Max price</label><input class="form-control" name="max_price" value="{{ max_price }}" type="number" min="0"></div>
+            <div class="col-md-3 d-flex align-items-end"><button class="section-btn w-100" type="submit">Filter</button></div>
+        </div>
+    </form>
+    {% if listings %}
+    <div class="section-grid">
+        {% for item in listings %}
+        <article class="section-card">
+            <h2><a href="{{ url_for('product.public_listing', listing_id=item.id) }}">{{ item.title }}</a></h2>
+            <p class="section-price">${{ '{:,.0f}'.format(item.price or 0) }}</p>
+            <p>{{ item.manufacturer or '' }}{% if item.year %} · {{ item.year }}{% endif %}</p>
+            <p class="section-meta">{{ item.location or '' }}{% if item.range %} · {{ item.range }} nm{% endif %}{% if item.passengers %} · {{ item.passengers }} seats{% endif %}</p>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-empty">No public listings match.</div>
+    {% endif %}
+</div>
+{% endblock %}

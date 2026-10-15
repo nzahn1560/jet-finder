@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Charter fleet - JetSchool{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block additional_css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">{% endblock %}
+{% block content %}
+<div class="section-page">
+    <h1>Charter fleet</h1>
+    <p class="section-lead">Aircraft you add here are the only ones a customer can request. Nothing is marked available unless you list it.</p>
+    {% if error %}<p class="text-danger">{{ error }}</p>{% endif %}
+    <form method="post" class="section-panel">
+        <div class="row g-3">
+            <div class="col-md-4"><label>Aircraft name</label><input class="form-control" name="name" required></div>
+            <div class="col-md-2"><label>Tail</label><input class="form-control" name="registration"></div>
+            <div class="col-md-2"><label>Base</label><input class="form-control" name="base_airport" placeholder="KTEB"></div>
+            <div class="col-md-2"><label>Seats</label><input class="form-control" name="seats" type="number" min="1"></div>
+            <div class="col-md-2"><label>Hourly rate</label><input class="form-control" name="hourly_rate" type="number" min="0" step="1"></div>
+            <div class="col-md-3"><label>Range nm</label><input class="form-control" name="range_nm" type="number" min="0"></div>
+            <div class="col-md-3"><label>Speed kt</label><input class="form-control" name="speed_kts" type="number" min="0"></div>
+            <div class="col-md-6"><label>Notes</label><input class="form-control" name="notes"></div>
+            <div class="col-12"><button class="section-btn" type="submit">Add aircraft</button></div>
+        </div>
+    </form>
+    <h2 class="h5 text-white">Your aircraft</h2>
+    {% for item in aircraft %}
+    <article class="section-card mb-2">
+        <h2>{{ item.name }}</h2>
+        <p class="section-meta">{{ item.base_airport or 'No base' }} · {{ item.seats or '?' }} seats · {{ item.status }}</p>
+        <form class="block-form" data-id="{{ item.id }}">
+            <div class="row g-2">
+                <div class="col-md-3"><input class="form-control" name="start_date" type="date" required></div>
+                <div class="col-md-3"><input class="form-control" name="end_date" type="date"></div>
+                <div class="col-md-3"><button class="section-btn" type="submit">Block dates</button></div>
+            </div>
+        </form>
+    </article>
+    {% else %}
+    <div class="section-empty">No charter aircraft yet.</div>
+    {% endfor %}
+    <h2 class="h5 text-white mt-4">Requests</h2>
+    {% for booking in bookings %}
+    <article class="section-card mb-2">
+        <h2>{{ booking.departure_airport }} to {{ booking.arrival_airport }}</h2>
+        <p>{{ booking.contact_name }} · {{ booking.contact_email }} · {{ booking.status }}</p>
+        <button class="section-btn status-btn" data-id="{{ booking.id }}" data-status="confirmed" type="button">Accept</button>
+        <button class="section-btn status-btn" data-id="{{ booking.id }}" data-status="cancelled" type="button">Decline</button>
+    </article>
+    {% else %}
+    <div class="section-empty">No requests yet.</div>
+    {% endfor %}
+</div>
+<script>
+document.querySelectorAll('.block-form').forEach(function (form) {
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const data = new FormData(form);
+        await fetch('/api/charter/fleet/' + form.dataset.id + '/block', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ start_date: data.get('start_date'), end_date: data.get('end_date') || data.get('start_date') }),
+        });
+        form.reset();
+    });
+});
+document.querySelectorAll('.status-btn').forEach(function (button) {
+    button.addEventListener('click', async function () {
+        await fetch('/api/charter/bookings/' + button.dataset.id + '/status', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: button.dataset.status }),
+        });
+        window.location.reload();
+    });
+});
+</script>
+{% endblock %}

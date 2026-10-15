@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Admin Portal - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
 {% block additional_css %}
 <style>
@@ -115,6 +116,8 @@ async function loadAdminListings() {
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
                 + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '">Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '">Reject</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="notes" data-id="' + l.id + '">Private note</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
                 + '    </div>'
                 + '  </div>'
@@ -135,6 +138,10 @@ async function loadAdminListings() {
                         const reason = prompt('Reason for rejection?') || '';
                         body = JSON.stringify({ reason: reason });
                     }
+                    if (act === 'notes') {
+                        const notes = prompt('Private admin note (sellers do not see this):') || '';
+                        body = JSON.stringify({ notes: notes });
+                    }
                     resp = await fetch('/api/admin/listings/' + id + '/' + act, {
                         method: 'POST', credentials: 'include',
                         headers: { 'Content-Type': 'application/json' },
@@ -146,7 +153,7 @@ async function loadAdminListings() {
                         const note = document.getElementById('admin-note');
                         if (note) {
                             note.hidden = false;
-                            note.innerHTML = 'Approved. It is on the marketplace now. <a href="/" style="color:#fff;">View it</a>';
+                            note.textContent = 'Approved. Public listings are on the marketplace. Broker-only listings stay off it.';
                         }
                     }
                     loadAdminListings();
