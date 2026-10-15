@@ -4793,7 +4793,7 @@ _PUBLIC_LISTING_KEYS = (
     'manufacturer', 'category', 'engine_type', 'model',
     'price', 'listing_price', 'year', 'hours', 'location',
     'description', 'listing_description', 'image', 'images',
-    'wingspan', 'speed', 'range', 'passengers',
+    'wingspan', 'speed', 'range', 'passengers', 'min_crew', 'multi_engine',
     'cabin_volume', 'baggage_volume', 'runway_length', 'max_altitude', 'altitude',
     'aircraft_length', 'aircraft_height', 'cabin_height',
     'total_hourly_cost', 'total_fixed_cost', 'total_variable_cost',
