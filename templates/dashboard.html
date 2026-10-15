@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Your profile - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
 {% block additional_css %}
 <style>
@@ -217,6 +218,14 @@
                 <a href="{{ url_for('home') }}" class="dash__btn dash__btn--secondary">
                     <i class="fas fa-bookmark"></i> Find aircraft to watch
                 </a>
+                <a href="{{ url_for('product.match_page') }}" class="dash__btn dash__btn--secondary">Best airplane for me</a>
+                <a href="{{ url_for('charter_search') }}" class="dash__btn dash__btn--secondary">Charter</a>
+                {% if user.is_admin or (user.profile_role == 'broker') or ('broker' in (user.roles or '')) %}
+                <a href="{{ url_for('off_market_page') }}" class="dash__btn dash__btn--secondary">Off-market deals</a>
+                {% endif %}
+                {% if user.is_admin or (user.profile_role == 'charter_operator') or ('charter_operator' in (user.roles or '')) %}
+                <a href="{{ url_for('product.charter_fleet_page') }}" class="dash__btn dash__btn--secondary">Charter fleet</a>
+                {% endif %}
             </div>
             <form id="profile-form" style="margin-top:1.5rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem;">
                 <input class="form-control" name="first_name" placeholder="First name" value="{{ user.first_name or '' }}">
@@ -225,7 +234,7 @@
                 <input class="form-control" name="phone" placeholder="Phone" value="{{ user.phone or '' }}">
                 <input class="form-control" name="profile_location" placeholder="City or airport" value="{{ user.profile_location or '' }}">
                 <select class="form-select" name="profile_role">
-                    {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'other'] %}
+                    {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
                     <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|title }}</option>
                     {% endfor %}
                 </select>
@@ -335,7 +344,12 @@
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
             const canEdit = l.status !== 'active' && l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
-            const copy = statusCopy[l.status] || 'Saved.';
+            const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
+            const copy = offMarket && l.status === 'active'
+                ? 'Live on the off-market page. Not on the public marketplace.'
+                : (offMarket && l.status === 'pending'
+                    ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
+                    : (statusCopy[l.status] || 'Saved.'));
             return '\n<div class="dash__card">\n'
                 + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
@@ -343,8 +357,9 @@
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
                 + rej + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
-                + (l.status === 'active' ? '<a class="dash__card-link" href="/">View on marketplace</a>' : '')
-                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49</button>' : '')
+                + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
+                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay listing fee</button>' : '')
+                + (l.status === 'rejected' ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Send back for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
                 + (canDelete ? '<button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
@@ -373,6 +388,16 @@
                 if (resp.ok && data.skip) { window.location.href = '/dashboard?submitted=' + id; return; }
                 alert(data.message || 'Payment could not be started. The listing is still saved.');
                 btn.disabled = false;
+            });
+        });
+        listEl.querySelectorAll('[data-resubmit]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const id = btn.getAttribute('data-resubmit');
+                const resp = await fetch('/api/listings/' + id + '/resubmit', { method: 'POST', credentials: 'include' });
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok) { window.location.href = '/dashboard'; return; }
+                if (data.payment_required) { alert('This listing still needs the listing fee before review.'); return; }
+                alert(data.message || data.error || 'Could not send it back.');
             });
         });
         listEl.querySelectorAll('[data-approve]').forEach(function (btn) {

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Mechanics - Jet Finder{% endblock %}
+{% block additional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+{% endblock %}
+
+{% block content %}
+<div class="section-page">
+    <h1>Mechanics</h1>
+    <p class="section-lead">Shops and mechanics who listed themselves on Jet Finder. Search by city, or list your own shop.</p>
+
+    <form class="section-panel" method="get" action="{{ url_for('service_providers') }}">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label for="q">City or state</label>
+                <input class="form-control" id="q" name="q" value="{{ query }}" placeholder="Dallas or TX">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button class="section-btn w-100" type="submit">Search</button>
+            </div>
+        </div>
+    </form>
+
+    {% if form_error %}
+    <p class="text-danger">{{ form_error }}</p>
+    {% endif %}
+    {% if form_ok %}
+    <p class="text-success">Your shop is listed.</p>
+    {% endif %}
+
+    <div id="mechanic-map" class="section-map"></div>
+
+    {% if shops %}
+    <div class="section-grid">
+        {% for shop in shops %}
+        <article class="section-card">
+            <h2>{{ shop.business_name or shop.display_name }}</h2>
+            <p>{{ shop.city }}{% if shop.state %}, {{ shop.state }}{% endif %}</p>
+            {% if shop.service_subcategory %}<p>{{ shop.service_subcategory }}</p>{% endif %}
+            {% if shop.description %}<p class="section-meta">{{ shop.description }}</p>{% endif %}
+            {% if shop.phone %}<p>Phone: {{ shop.phone }}</p>{% endif %}
+            {% if shop.email %}<p>Email: <a href="mailto:{{ shop.email }}">{{ shop.email }}</a></p>{% endif %}
+            {% if shop.website %}<p><a href="{{ shop.website }}" rel="noopener">Website</a></p>{% endif %}
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-empty">No mechanics listed{% if query %} for “{{ query }}”{% endif %} yet.</div>
+    {% endif %}
+
+    <div class="section-panel mt-4">
+        <h2 class="h5 text-white">List your shop</h2>
+        {% if current_user %}
+        <form method="post" action="{{ url_for('service_providers') }}">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label for="business_name">Business name</label>
+                    <input class="form-control" id="business_name" name="business_name" required>
+                </div>
+                <div class="col-md-3">
+                    <label for="city">City</label>
+                    <input class="form-control" id="city" name="city" required placeholder="Dallas">
+                </div>
+                <div class="col-md-3">
+                    <label for="state">State</label>
+                    <input class="form-control" id="state" name="state" required placeholder="TX">
+                </div>
+                <div class="col-md-4">
+                    <label for="phone">Phone</label>
+                    <input class="form-control" id="phone" name="phone" required>
+                </div>
+                <div class="col-md-4">
+                    <label for="email">Email</label>
+                    <input class="form-control" id="email" name="email" type="email" required value="{{ current_user.email }}">
+                </div>
+                <div class="col-md-4">
+                    <label for="specialty">Specialty</label>
+                    <input class="form-control" id="specialty" name="specialty" placeholder="Citation, King Air, avionics">
+                </div>
+                <div class="col-12">
+                    <label for="description">What you work on</label>
+                    <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+                </div>
+                <div class="col-12">
+                    <button class="section-btn" type="submit">Publish shop</button>
+                </div>
+            </div>
+        </form>
+        {% else %}
+        <p class="section-note mb-0"><a href="{{ url_for('login', next=url_for('service_providers')) }}">Sign in</a> to list a shop. Set your profile role to Mechanic if that is what you do.</p>
+        {% endif %}
+    </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+(function () {
+    function esc(value) {
+        return String(value || '').replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    const shops = {{ map_points|tojson }};
+    const map = L.map('mechanic-map').setView([39.8, -98.6], 4);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 16
+    }).addTo(map);
+    const pins = shops.filter(function (shop) { return shop.lat != null && shop.lon != null; });
+    const bounds = [];
+    pins.forEach(function (shop) {
+        const marker = L.circleMarker([shop.lat, shop.lon], {
+            radius: 8, color: '#F05545', fillColor: '#F05545', fillOpacity: 0.9
+        }).addTo(map);
+        marker.bindPopup('<strong>' + esc(shop.label) + '</strong><br>' + esc(shop.place || ''));
+        bounds.push([shop.lat, shop.lon]);
+    });
+    if (bounds.length) {
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+    }
+    setTimeout(function () { map.invalidateSize(); }, 200);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ listing.title }} for sale - JetSchool{% endblock %}
+{% block meta_description %}{{ listing.title }} listed at ${{ '{:,.0f}'.format(listing.price or 0) }} in {{ listing.location }}.{% endblock %}
+{% block extra_head %}
+<meta property="og:title" content="{{ listing.title }} for sale">
+<meta property="og:description" content="{{ listing.title }} in {{ listing.location }}.">
+{% endblock %}
+{% block additional_css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">{% endblock %}
+{% block content %}
+<div class="section-page">
+    <h1>{{ listing.title }}</h1>
+    <p class="section-price">${{ '{:,.0f}'.format(listing.price or 0) }}</p>
+    <p>{{ listing.manufacturer or profile.manufacturer or '' }}{% if listing.year %} · {{ listing.year }}{% endif %}{% if listing.hours is not none %} · {{ '{:,.0f}'.format(listing.hours or 0) }} hours{% endif %}</p>
+    <p class="section-meta">{{ listing.location }}{% if listing.registration %} · {{ listing.registration }}{% endif %}</p>
+    {% if profile %}
+    <div class="section-panel">
+        <h2 class="h5 text-white">From the aircraft profile</h2>
+        <p class="mb-0">Range {{ profile.range or 'n/a' }} nm · Speed {{ profile.speed or 'n/a' }} kt · Seats {{ profile.passengers or 'n/a' }} · {{ profile.category or '' }}</p>
+    </div>
+    {% endif %}
+    {% if listing.description %}<p>{{ listing.description }}</p>{% endif %}
+    {% if listing.avionics or listing.paint_year or listing.interior_year or listing.engine_hours %}
+    <p class="section-meta">
+        {% if listing.engine_hours %}Engines {{ listing.engine_hours }} hrs. {% endif %}
+        {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}
+        {% if listing.paint_year %}Paint {{ listing.paint_year }}. {% endif %}
+        {% if listing.interior_year %}Interior {{ listing.interior_year }}.{% endif %}
+    </p>
+    {% endif %}
+    {% if listing.email %}<p>Contact: <a href="mailto:{{ listing.email }}">{{ listing.email }}</a></p>{% endif %}
+    {% if media %}
+    <div class="section-grid">
+        {% for item in media %}
+            {% if item.media_type == 'photo' %}
+            <img src="{{ item.thumbnail_url or item.url }}" alt="{{ listing.title }}" loading="lazy" style="width:100%;height:220px;object-fit:cover;">
+            {% elif item.media_type == 'video' %}
+            <video controls preload="none" style="width:100%;"><source src="{{ item.url }}"></video>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,125 @@
+.section-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 20px 4rem;
+}
+
+.section-page h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    margin-bottom: 0.4rem;
+}
+
+.section-lead {
+    color: #c8c8c8;
+    max-width: 42rem;
+    margin-bottom: 1.5rem;
+}
+
+.section-panel {
+    background: rgba(0, 0, 0, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.section-panel .form-control,
+.section-panel .form-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border-radius: 0;
+}
+
+.section-panel .form-control:focus,
+.section-panel .form-select:focus {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: #F05545;
+    color: #fff;
+    box-shadow: none;
+}
+
+.section-panel label {
+    color: #fff;
+    font-size: 0.9rem;
+}
+
+.section-btn {
+    background: #F05545;
+    color: #fff;
+    border: 0;
+    padding: 0.65rem 1.2rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.section-btn:hover {
+    background: #d44437;
+    color: #fff;
+}
+
+.section-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.section-card {
+    background: rgba(0, 0, 0, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.section-card h2 {
+    font-size: 1.05rem;
+    color: #fff;
+    margin: 0;
+}
+
+.section-card p {
+    margin: 0;
+    color: #d0d0d0;
+}
+
+.section-price {
+    color: #F05545;
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.section-meta {
+    color: #9a9a9a;
+    font-size: 0.85rem;
+}
+
+.section-empty {
+    border: 1px dashed rgba(255, 255, 255, 0.25);
+    padding: 1.5rem;
+    color: #d0d0d0;
+}
+
+.section-map {
+    height: 520px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    margin-bottom: 1.25rem;
+}
+
+.section-note {
+    color: #bdbdbd;
+    font-size: 0.9rem;
+}
+
+.market-choice {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    color: #fff;
+}
+
+.market-choice label {
+    color: #fff;
+}

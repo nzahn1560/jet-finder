@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Admin Portal - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
 {% block additional_css %}
 <style>
@@ -108,12 +109,15 @@ async function loadAdminListings() {
                 + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
                 + ' &middot; ' + esc(l.location || '') + '<br>'
                 + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + '</span>'
+                + ((l.market === 'off_market') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
                 + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
                 + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
                 + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '">Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '">Reject</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="notes" data-id="' + l.id + '">Private note</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
                 + '    </div>'
                 + '  </div>'
@@ -134,6 +138,10 @@ async function loadAdminListings() {
                         const reason = prompt('Reason for rejection?') || '';
                         body = JSON.stringify({ reason: reason });
                     }
+                    if (act === 'notes') {
+                        const notes = prompt('Private admin note (sellers do not see this):') || '';
+                        body = JSON.stringify({ notes: notes });
+                    }
                     resp = await fetch('/api/admin/listings/' + id + '/' + act, {
                         method: 'POST', credentials: 'include',
                         headers: { 'Content-Type': 'application/json' },
@@ -145,7 +153,7 @@ async function loadAdminListings() {
                         const note = document.getElementById('admin-note');
                         if (note) {
                             note.hidden = false;
-                            note.innerHTML = 'Approved. It is on the marketplace now. <a href="/" style="color:#fff;">View it</a>';
+                            note.textContent = 'Approved. Public listings are on the marketplace. Broker-only listings stay off it.';
                         }
                     }
                     loadAdminListings();

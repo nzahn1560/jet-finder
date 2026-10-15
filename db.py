@@ -127,8 +127,19 @@ class User(Base):
     last_name = Column(String(100))
     company = Column(String(200))
     phone = Column(String(20))
-    profile_role = Column(String(50), default='other')  # broker, buyer, mechanic, other
+    profile_role = Column(String(50), default='other')  # broker, buyer, seller, mechanic, charter_operator, other
+    roles = Column(String(200), default='')  # extra roles, comma-separated. Never includes admin.
     profile_location = Column(String(255))  # city, region, or business location
+    broker_bio = Column(Text)
+    broker_specialties = Column(String(500))
+    broker_website = Column(String(255))
+    broker_years = Column(Integer)
+    broker_verified = Column(Boolean, default=False)
+    broker_state = Column(String(100))
+    broker_country = Column(String(100))
+    broker_lat = Column(Float)
+    broker_lon = Column(Float)
+    broker_image_url = Column(String(500))
     is_admin = Column(Boolean, default=False, nullable=False)  # Admin portal access
     user_type = Column(String(50), default='free_user')
     is_verified_seller = Column(Boolean, default=False)
@@ -171,6 +182,136 @@ class UserListing(Base):
     engine_type = Column(String(100))
     manufacturer = Column(String(200))
     pricing_plan = Column(String(50), default='monthly')
+    # public | broker_only | private. Legacy value off_market means broker_only.
+    market = Column(String(20), default='public', nullable=False)
+    serial_number = Column(String(80))
+    registration = Column(String(20))
+    variant = Column(String(120))
+    engine_program = Column(String(120))
+    engine_hours = Column(Integer)
+    engine_cycles = Column(Integer)
+    maintenance_status = Column(Text)
+    avionics = Column(Text)
+    paint_year = Column(Integer)
+    interior_year = Column(Integer)
+    passenger_config = Column(String(80))
+    admin_notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class CharterInquiry(Base):
+    """A charter estimate request. Stored so a coordinator can follow up."""
+    __tablename__ = 'charter_inquiries'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(50))
+    departure_airport = Column(String(10), nullable=False)
+    arrival_airport = Column(String(10), nullable=False)
+    departure_date = Column(String(40))
+    passengers = Column(Integer, default=1)
+    aircraft_name = Column(String(255))
+    estimated_price = Column(Float)
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class ListingAudit(Base):
+    """Who changed a listing, and from which status to which."""
+    __tablename__ = 'listing_audits'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    listing_id = Column(Integer, ForeignKey('user_listings.id'), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey('users.id'))
+    action = Column(String(40), nullable=False)
+    previous_status = Column(String(50))
+    new_status = Column(String(50))
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class StripeEvent(Base):
+    """Processed Stripe event ids so a repeated webhook cannot charge twice."""
+    __tablename__ = 'stripe_events'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(255), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class CharterOperator(Base):
+    __tablename__ = 'charter_operators'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), unique=True, nullable=False)
+    company_name = Column(String(200), nullable=False)
+    phone = Column(String(50))
+    email = Column(String(255))
+    status = Column(String(40), default='active')
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class CharterAircraft(Base):
+    """An operator's real aircraft. Empty table means nothing is available to book."""
+    __tablename__ = 'charter_aircraft'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operator_id = Column(Integer, ForeignKey('charter_operators.id'), nullable=False, index=True)
+    profile_id = Column(Integer)
+    name = Column(String(200), nullable=False)
+    registration = Column(String(20))
+    base_airport = Column(String(10))
+    seats = Column(Integer)
+    hourly_rate = Column(Float)
+    range_nm = Column(Integer)
+    speed_kts = Column(Integer)
+    status = Column(String(40), default='active', index=True)
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class CharterBlock(Base):
+    __tablename__ = 'charter_blocks'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    aircraft_id = Column(Integer, ForeignKey('charter_aircraft.id'), nullable=False, index=True)
+    start_date = Column(String(20), nullable=False)
+    end_date = Column(String(20), nullable=False)
+    reason = Column(String(200))
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class CharterBooking(Base):
+    """A request to book. Status stays 'requested' until an operator accepts it."""
+    __tablename__ = 'charter_bookings'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    aircraft_id = Column(Integer, ForeignKey('charter_aircraft.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    contact_name = Column(String(200), nullable=False)
+    contact_email = Column(String(255), nullable=False)
+    contact_phone = Column(String(50))
+    departure_airport = Column(String(10), nullable=False)
+    arrival_airport = Column(String(10), nullable=False)
+    departure_date = Column(String(20))
+    passengers = Column(Integer, default=1)
+    estimated_price = Column(Float)
+    notes = Column(Text)
+    status = Column(String(40), default='requested', index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -536,6 +677,19 @@ def init_db():
                 'engine_type TEXT',
                 'manufacturer TEXT',
                 'pricing_plan TEXT DEFAULT \'monthly\'',
+                'market TEXT DEFAULT \'public\'',
+                'serial_number TEXT',
+                'registration TEXT',
+                'variant TEXT',
+                'engine_program TEXT',
+                'engine_hours INTEGER',
+                'engine_cycles INTEGER',
+                'maintenance_status TEXT',
+                'avionics TEXT',
+                'paint_year INTEGER',
+                'interior_year INTEGER',
+                'passenger_config TEXT',
+                'admin_notes TEXT',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN {col_def}'))
@@ -547,6 +701,17 @@ def init_db():
                 'profile_role VARCHAR(50) DEFAULT \'other\'',
                 'profile_location VARCHAR(255)',
                 'is_admin BOOLEAN DEFAULT 0',
+                'roles VARCHAR(200)',
+                'broker_bio TEXT',
+                'broker_specialties VARCHAR(500)',
+                'broker_website VARCHAR(255)',
+                'broker_years INTEGER',
+                'broker_verified BOOLEAN DEFAULT 0',
+                'broker_state VARCHAR(100)',
+                'broker_country VARCHAR(100)',
+                'broker_lat FLOAT',
+                'broker_lon FLOAT',
+                'broker_image_url VARCHAR(500)',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -560,9 +725,41 @@ def init_db():
                 ('profile_role', "VARCHAR(50) DEFAULT 'other'"),
                 ('profile_location', 'VARCHAR(255)'),
                 ('is_admin', 'BOOLEAN DEFAULT FALSE NOT NULL'),
+                ('roles', 'VARCHAR(200)'),
+                ('broker_bio', 'TEXT'),
+                ('broker_specialties', 'VARCHAR(500)'),
+                ('broker_website', 'VARCHAR(255)'),
+                ('broker_years', 'INTEGER'),
+                ('broker_verified', 'BOOLEAN DEFAULT FALSE'),
+                ('broker_state', 'VARCHAR(100)'),
+                ('broker_country', 'VARCHAR(100)'),
+                ('broker_lat', 'DOUBLE PRECISION'),
+                ('broker_lon', 'DOUBLE PRECISION'),
+                ('broker_image_url', 'VARCHAR(500)'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    pass
+            for col, typ in [
+                ('market', "VARCHAR(20) DEFAULT 'public'"),
+                ('serial_number', 'VARCHAR(80)'),
+                ('registration', 'VARCHAR(20)'),
+                ('variant', 'VARCHAR(120)'),
+                ('engine_program', 'VARCHAR(120)'),
+                ('engine_hours', 'INTEGER'),
+                ('engine_cycles', 'INTEGER'),
+                ('maintenance_status', 'TEXT'),
+                ('avionics', 'TEXT'),
+                ('paint_year', 'INTEGER'),
+                ('interior_year', 'INTEGER'),
+                ('passenger_config', 'VARCHAR(80)'),
+                ('admin_notes', 'TEXT'),
+            ]:
+                try:
+                    conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS {col} {typ}'))
                     conn.commit()
                 except Exception:
                     conn.rollback()
@@ -649,12 +846,16 @@ def create_user(email, password_hash, first_name=None, last_name=None, company=N
         return u.id
 
 
-_PROFILE_ROLES = {'broker', 'buyer', 'seller', 'mechanic', 'other'}
+_PROFILE_ROLES = {'broker', 'buyer', 'seller', 'mechanic', 'charter_operator', 'other'}
 
 
 def update_user_profile(user_id, fields):
     """Update the public profile fields a customer can edit themselves."""
-    allowed = {'first_name', 'last_name', 'company', 'phone', 'profile_role', 'profile_location'}
+    allowed = {
+        'first_name', 'last_name', 'company', 'phone', 'profile_role', 'profile_location',
+        'roles', 'broker_bio', 'broker_specialties', 'broker_website', 'broker_years',
+        'broker_state', 'broker_country', 'broker_image_url',
+    }
     safe = {}
     for key, value in (fields or {}).items():
         if key not in allowed:
@@ -665,6 +866,14 @@ def update_user_profile(user_id, fields):
     if 'profile_role' in safe:
         role = (safe['profile_role'] or 'other').lower()
         safe['profile_role'] = role if role in _PROFILE_ROLES else 'other'
+    if 'roles' in safe:
+        from authz import clean_roles
+        safe['roles'] = clean_roles(safe['roles'])
+    if 'broker_years' in safe and safe['broker_years'] not in (None, ''):
+        try:
+            safe['broker_years'] = int(safe['broker_years'])
+        except (TypeError, ValueError):
+            safe.pop('broker_years', None)
     if not safe:
         return False
     with get_session() as s:
@@ -873,6 +1082,51 @@ def use_reset_token_and_set_password(token, new_password_hash):
         return uid
 
 
+def list_users_by_role(role, limit=500):
+    """Public directory fields for one profile role (broker, mechanic, and so on)."""
+    with get_session() as s:
+        rows = (
+            s.query(User)
+            .filter(User.profile_role == role, User.is_suspended == False)  # noqa: E712
+            .order_by(User.company.asc(), User.last_name.asc())
+            .limit(limit)
+            .all()
+        )
+        out = []
+        for u in rows:
+            out.append({
+                'id': u.id,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'company': u.company,
+                'phone': u.phone,
+                'email': u.email,
+                'profile_location': u.profile_location,
+            })
+        return out
+
+
+def create_charter_inquiry(data):
+    """Save a charter request. Returns the new row id."""
+    with get_session() as s:
+        row = CharterInquiry(
+            user_id=data.get('user_id'),
+            name=(data.get('name') or '').strip(),
+            email=(data.get('email') or '').strip(),
+            phone=(data.get('phone') or '').strip() or None,
+            departure_airport=(data.get('departure_airport') or '').strip().upper(),
+            arrival_airport=(data.get('arrival_airport') or '').strip().upper(),
+            departure_date=(data.get('departure_date') or '').strip() or None,
+            passengers=int(data.get('passengers') or 1),
+            aircraft_name=(data.get('aircraft_name') or '').strip() or None,
+            estimated_price=data.get('estimated_price'),
+            notes=(data.get('notes') or '').strip() or None,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
 def list_all_users_basic(limit=500):
     """Admin: list users with basic account info, no sensitive fields."""
     with get_session() as s:
@@ -895,16 +1149,72 @@ def list_all_users_basic(limit=500):
 
 
 # --- User listings helpers ---
+def _public_market_clause():
+    """Approved listings that belong on the public marketplace."""
+    from sqlalchemy import or_
+    return or_(
+        UserListing.market.is_(None),
+        UserListing.market == '',
+        UserListing.market == 'public',
+    )
+
+
+def _stored_market(value) -> str:
+    raw = str(value or '').strip().lower().replace('-', '_')
+    if raw in ('off_market', 'broker_only'):
+        return 'broker_only'
+    if raw == 'private':
+        return 'private'
+    return 'public'
+
+
+def _apply_listing_details(row, details):
+    if not details:
+        return
+    keys = (
+        'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
+        'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
+        'passenger_config',
+    )
+    for key in keys:
+        if key not in details or details[key] in (None, ''):
+            continue
+        value = details[key]
+        if key in ('engine_hours', 'engine_cycles', 'paint_year', 'interior_year'):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+        setattr(row, key, value)
+
+
 def get_active_user_listings():
-    """Return all active user_listings as list of dicts (for /api/user-listings)."""
+    """Approved public listings. Off-market aircraft stay off this list."""
     with get_session() as s:
-        rows = s.query(UserListing).filter(UserListing.status == 'active').order_by(UserListing.created_at.desc()).all()
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.status == 'active', _public_market_clause())
+            .order_by(UserListing.created_at.desc())
+            .all()
+        )
+        return [row.to_dict() for row in rows]
+
+
+def get_off_market_listings():
+    """Approved listings that are visible only on the off-market page."""
+    with get_session() as s:
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.status == 'active', UserListing.market.in_(('off_market', 'broker_only')))
+            .order_by(UserListing.created_at.desc())
+            .all()
+        )
         return [row.to_dict() for row in rows]
 
 
 def create_user_listing(profile_id, title, year, price, hours, location, email, description,
                         images_str, documents_str, engine_type, manufacturer, pricing_plan, user_id=None,
-                        status='pending'):
+                        status='pending', market='public', details=None):
     """Create a listing. Default status='pending' (awaiting admin approval).
 
     Pass status='unpaid' when payment is required before review.
@@ -928,7 +1238,9 @@ def create_user_listing(profile_id, title, year, price, hours, location, email, 
             pricing_plan=pricing_plan or 'monthly',
             status=status or 'pending',
             payment_status='pending',
+            market=_stored_market(market),
         )
+        _apply_listing_details(row, details)
         s.add(row)
         s.flush()
         return row.id
@@ -988,7 +1300,7 @@ def delete_user_listing_soft(listing_id):
 def search_user_listings(search_query=None, category=None, min_price=None, max_price=None, min_year=None, max_year=None, location=None):
     """Return list of active listing dicts matching filters."""
     with get_session() as s:
-        q = s.query(UserListing).filter(UserListing.status == 'active')
+        q = s.query(UserListing).filter(UserListing.status == 'active', _public_market_clause())
         # Simple filters (expand as needed)
         if min_price is not None:
             q = q.filter(UserListing.price >= min_price)
@@ -1063,9 +1375,20 @@ def update_user_listing_fields(listing_id, fields):
     """
     allowed = {
         'title', 'year', 'price', 'hours', 'location', 'email', 'description',
-        'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan',
+        'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan', 'market',
+        'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
+        'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
+        'passenger_config',
     }
     safe = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if 'market' in safe:
+        safe['market'] = _stored_market(safe['market'])
+    for key in ('engine_hours', 'engine_cycles', 'paint_year', 'interior_year'):
+        if key in safe and safe[key] not in (None, ''):
+            try:
+                safe[key] = int(safe[key])
+            except (TypeError, ValueError):
+                safe.pop(key, None)
     if not safe:
         return False
     with get_session() as s:
@@ -1090,6 +1413,253 @@ def admin_list_user_listings(status=None, limit=500):
             q = q.filter(UserListing.status == status)
         rows = q.order_by(UserListing.created_at.desc()).limit(limit).all()
         return [r.to_dict() for r in rows]
+
+
+def record_listing_audit(listing_id, actor_id, action, previous_status, new_status, notes=None):
+    with get_session() as s:
+        row = ListingAudit(
+            listing_id=listing_id,
+            actor_id=actor_id,
+            action=action,
+            previous_status=previous_status,
+            new_status=new_status,
+            notes=notes,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_listing_audits(listing_id, limit=50):
+    with get_session() as s:
+        rows = (
+            s.query(ListingAudit)
+            .filter(ListingAudit.listing_id == listing_id)
+            .order_by(ListingAudit.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        out = []
+        for row in rows:
+            item = row.to_dict()
+            if item.get('created_at') is not None:
+                item['created_at'] = str(item['created_at'])
+            out.append(item)
+        return out
+
+
+def claim_stripe_event(event_id: str) -> bool:
+    """True the first time this Stripe event id is seen."""
+    if not event_id:
+        return True
+    from sqlalchemy.exc import IntegrityError
+    try:
+        with get_session() as s:
+            s.add(StripeEvent(event_id=event_id))
+            s.flush()
+            return True
+    except IntegrityError:
+        return False
+
+
+def set_broker_verified(user_id, verified: bool) -> bool:
+    with get_session() as s:
+        n = s.query(User).filter(User.id == user_id).update(
+            {'broker_verified': bool(verified)}, synchronize_session=False
+        )
+        return n > 0
+
+
+def set_listing_admin_notes(listing_id, notes: str) -> bool:
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
+            {'admin_notes': notes}, synchronize_session=False
+        )
+        return n > 0
+
+
+def list_directory_brokers():
+    """Accounts that chose the broker role, with public profile fields only."""
+    with get_session() as s:
+        rows = (
+            s.query(User)
+            .filter(User.is_suspended == False)  # noqa: E712
+            .order_by(User.company.asc(), User.last_name.asc())
+            .all()
+        )
+        out = []
+        for user in rows:
+            roles = {(user.profile_role or '').lower()}
+            roles.update(part.strip().lower() for part in (user.roles or '').split(',') if part.strip())
+            if 'broker' not in roles:
+                continue
+            out.append({
+                'id': user.id,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'company': user.company,
+                'phone': user.phone,
+                'email': user.email,
+                'profile_location': user.profile_location,
+                'broker_bio': user.broker_bio,
+                'broker_specialties': user.broker_specialties,
+                'broker_website': user.broker_website,
+                'broker_years': user.broker_years,
+                'broker_verified': bool(user.broker_verified),
+                'broker_state': user.broker_state,
+                'broker_country': user.broker_country,
+                'broker_lat': user.broker_lat,
+                'broker_lon': user.broker_lon,
+                'broker_image_url': user.broker_image_url,
+            })
+        return out
+
+
+def ensure_charter_operator(user_id, company_name, phone=None, email=None):
+    with get_session() as s:
+        row = s.query(CharterOperator).filter(CharterOperator.user_id == user_id).first()
+        if row:
+            return row.id
+        row = CharterOperator(
+            user_id=user_id,
+            company_name=company_name or 'Charter operator',
+            phone=phone,
+            email=email,
+            status='active',
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_charter_operator_for_user(user_id):
+    with get_session() as s:
+        row = s.query(CharterOperator).filter(CharterOperator.user_id == user_id).first()
+        return row.to_dict() if row else None
+
+
+def create_charter_aircraft(operator_id, data):
+    with get_session() as s:
+        row = CharterAircraft(
+            operator_id=operator_id,
+            profile_id=data.get('profile_id'),
+            name=data['name'],
+            registration=data.get('registration'),
+            base_airport=(data.get('base_airport') or '').upper() or None,
+            seats=data.get('seats'),
+            hourly_rate=data.get('hourly_rate'),
+            range_nm=data.get('range_nm'),
+            speed_kts=data.get('speed_kts'),
+            notes=data.get('notes'),
+            status='active',
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_charter_aircraft(operator_id=None, active_only=True):
+    with get_session() as s:
+        q = s.query(CharterAircraft)
+        if operator_id is not None:
+            q = q.filter(CharterAircraft.operator_id == operator_id)
+        if active_only:
+            q = q.filter(CharterAircraft.status == 'active')
+        return [row.to_dict() for row in q.order_by(CharterAircraft.name.asc()).all()]
+
+
+def get_charter_aircraft(aircraft_id):
+    with get_session() as s:
+        row = s.query(CharterAircraft).filter(CharterAircraft.id == aircraft_id).first()
+        return row.to_dict() if row else None
+
+
+def add_charter_block(aircraft_id, start_date, end_date, reason=None):
+    with get_session() as s:
+        row = CharterBlock(
+            aircraft_id=aircraft_id,
+            start_date=start_date,
+            end_date=end_date,
+            reason=reason,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def charter_aircraft_blocked(aircraft_id, on_date: str) -> bool:
+    if not on_date:
+        return False
+    with get_session() as s:
+        rows = s.query(CharterBlock).filter(CharterBlock.aircraft_id == aircraft_id).all()
+        for row in rows:
+            if row.start_date <= on_date <= row.end_date:
+                return True
+        return False
+
+
+def create_charter_booking(data):
+    with get_session() as s:
+        row = CharterBooking(
+            aircraft_id=data['aircraft_id'],
+            user_id=data.get('user_id'),
+            contact_name=data['contact_name'],
+            contact_email=data['contact_email'],
+            contact_phone=data.get('contact_phone'),
+            departure_airport=data['departure_airport'],
+            arrival_airport=data['arrival_airport'],
+            departure_date=data.get('departure_date'),
+            passengers=int(data.get('passengers') or 1),
+            estimated_price=data.get('estimated_price'),
+            notes=data.get('notes'),
+            status='requested',
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_charter_bookings(user_id=None, operator_id=None):
+    with get_session() as s:
+        q = s.query(CharterBooking)
+        if user_id is not None:
+            q = q.filter(CharterBooking.user_id == user_id)
+        if operator_id is not None:
+            aircraft_ids = [
+                row.id for row in s.query(CharterAircraft).filter(CharterAircraft.operator_id == operator_id).all()
+            ]
+            if not aircraft_ids:
+                return []
+            q = q.filter(CharterBooking.aircraft_id.in_(aircraft_ids))
+        rows = q.order_by(CharterBooking.created_at.desc()).all()
+        out = []
+        for row in rows:
+            item = row.to_dict()
+            for key in ('created_at', 'updated_at'):
+                if item.get(key) is not None:
+                    item[key] = str(item[key])
+            out.append(item)
+        return out
+
+
+def get_charter_booking(booking_id):
+    with get_session() as s:
+        row = s.query(CharterBooking).filter(CharterBooking.id == booking_id).first()
+        return row.to_dict() if row else None
+
+
+def set_charter_booking_status(booking_id, status):
+    allowed = {
+        'requested', 'pending_operator_confirmation', 'confirmed',
+        'payment_pending', 'paid', 'cancelled', 'completed',
+    }
+    if status not in allowed:
+        return False
+    with get_session() as s:
+        n = s.query(CharterBooking).filter(CharterBooking.id == booking_id).update(
+            {'status': status}, synchronize_session=False
+        )
+        return n > 0
 
 
 def admin_approve_listing_any(listing_id, approved_by_user_id):
@@ -1274,12 +1844,13 @@ def has_unused_service_provider_credit(user_id):
 # --- Service providers (Railway-compatible: no sqlite3) ---
 def create_service_provider(user_id, provider_data):
     with get_session() as s:
-        lat = lon = None
-        if provider_data.get('street_address') and provider_data.get('city') and provider_data.get('state'):
-            try:
-                lat, lon = 40.7128, -74.0060
-            except Exception:
-                pass
+        lat = provider_data.get('latitude')
+        lon = provider_data.get('longitude')
+        try:
+            lat = float(lat) if lat not in (None, '') else None
+            lon = float(lon) if lon not in (None, '') else None
+        except (TypeError, ValueError):
+            lat = lon = None
         sp = ServiceProvider(
             user_id=user_id,
             business_name=provider_data['business_name'],

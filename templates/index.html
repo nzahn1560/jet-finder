@@ -3602,6 +3602,23 @@
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-black border border-secondary">
+                <div class="card-body">
+                    <h1 class="h3 text-white mb-2">Find the aircraft that fits the trip</h1>
+                    <p class="text-white-50 mb-3">Compare real listings, sell an aircraft, find a broker, or request a charter. The finder below is the aircraft tool.</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a class="btn btn-danger" href="{{ url_for('product.match_page') }}">Best airplane for me</a>
+                        <a class="btn btn-outline-light" href="{{ url_for('product.marketplace_browse') }}">Aircraft for sale</a>
+                        <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">Sell an aircraft</a>
+                        <a class="btn btn-outline-light" href="{{ url_for('brokers_page') }}">Find a broker</a>
+                        <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Charter</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->
