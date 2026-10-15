@@ -53,6 +53,15 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         return response
 
+    def test_login_endpoint_is_registered_and_home_renders(self):
+        from flask import url_for
+        with app.test_request_context():
+            self.assertEqual(url_for('login'), '/login')
+        home = self.client.get('/')
+        self.assertEqual(home.status_code, 200)
+        page = self.client.get('/login')
+        self.assertEqual(page.status_code, 200)
+
     def test_price_switches_on_new_year_chicago(self):
         chicago = ZoneInfo('America/Chicago')
         promo = datetime(2026, 12, 31, 23, 59, tzinfo=chicago)

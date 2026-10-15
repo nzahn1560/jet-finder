@@ -2365,8 +2365,6 @@ def setup_jinja_globals():
 # Call setup immediately
 setup_jinja_globals()
 
-# Authentication routes (HTML form posts; also set jet_session cookie)
-@app.route('/login', methods=['GET', 'POST'])
 def _safe_next(target):
     """Only allow same-site relative redirects."""
     if not target or not isinstance(target, str):
@@ -2376,6 +2374,8 @@ def _safe_next(target):
     return target
 
 
+# Authentication routes (HTML form posts; also set jet_session cookie)
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login page"""
     if request.method == 'POST':
