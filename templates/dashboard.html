@@ -218,7 +218,6 @@
                 <a href="{{ url_for('home') }}" class="dash__btn dash__btn--secondary">
                     <i class="fas fa-bookmark"></i> Find aircraft to watch
                 </a>
-                <a href="{{ url_for('product.match_page') }}" class="dash__btn dash__btn--secondary">Best airplane for me</a>
                 <a href="{{ url_for('charter_search') }}" class="dash__btn dash__btn--secondary">Charter</a>
                 {% if user.is_admin or (user.profile_role == 'broker') or ('broker' in (user.roles or '')) %}
                 <a href="{{ url_for('off_market_page') }}" class="dash__btn dash__btn--secondary">Off-market deals</a>
@@ -258,12 +257,6 @@
                 <p class="dash__card-desc">Find airports worldwide by IATA, ICAO, or city. Data from the Jet Finder database.</p>
                 <span class="dash__card-link">Search airports <i class="fas fa-arrow-right"></i></span>
                 <p class="dash__badge">Database</p>
-            </a>
-            <a href="{{ url_for('home') }}#goalFinder" class="dash__card" style="text-decoration: none; color: inherit;">
-                <div class="dash__card-icon"><i class="fas fa-balance-scale"></i></div>
-                <h3 class="dash__card-title">Compare the market</h3>
-                <p class="dash__card-desc">Pick the traits you care about and rank the approved listings against that mix.</p>
-                <span class="dash__card-link">Compare aircraft <i class="fas fa-arrow-right"></i></span>
             </a>
         </div>
 

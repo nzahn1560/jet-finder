@@ -756,8 +756,8 @@
     /* Clean Aircraft Grid Layout */
     .aircraft-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1.25rem;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
         padding: 0;
         width: 100%;
         margin: 0 auto;
@@ -781,7 +781,9 @@
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        min-height: 520px;
+        min-height: 0;
+        height: auto;
+        aspect-ratio: auto;
         width: 100%;
         max-width: none;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -792,7 +794,7 @@
     }
 
     .aircraft-content {
-        padding: 1.5rem;
+        padding: 0.65rem;
         flex-grow: 1;
         display: flex;
         flex-direction: column;
@@ -815,12 +817,16 @@
         box-shadow: 0 2px 8px rgba(240, 85, 69, 0.3);
     }
 
-    .spec-grid {
+    .aircraft-card .spec-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-        margin: 1rem 0;
+        gap: 0.3rem;
+        margin: 0.35rem 0;
         flex-grow: 1;
+    }
+
+    .aircraft-card .spec-item {
+        padding: 0.2rem 0.35rem;
     }
 
     .spec-item {
@@ -879,7 +885,7 @@
     }
 
     .aircraft-image {
-        height: 250px;
+        height: 72px;
         overflow: hidden;
         background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
         position: relative;
@@ -1708,19 +1714,19 @@
         }
 
         .aircraft-grid {
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1.25rem;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
             padding: 0;
             justify-items: stretch;
         }
 
         .aircraft-card {
             max-width: none;
-            min-height: 500px;
+            min-height: 0;
         }
 
         .aircraft-image {
-            height: 160px;
+            height: 100px;
         }
 
         .aircraft-content {
@@ -1731,8 +1737,8 @@
 
     @media (max-width: 992px) {
         .aircraft-grid {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 2rem;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
         }
     }
 
@@ -1751,7 +1757,8 @@
 
         .aircraft-card {
             max-width: 100%;
-            min-height: 480px;
+            min-height: 0;
+            height: auto;
         }
 
         .aircraft-image {
@@ -1771,7 +1778,7 @@
         }
 
         .aircraft-grid {
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            grid-template-columns: 1fr;
             gap: 1rem;
             padding: 0;
             justify-items: center;
@@ -1779,7 +1786,7 @@
 
         .aircraft-card {
             max-width: 100%;
-            min-height: 450px;
+            min-height: 0;
         }
 
         .aircraft-image {
@@ -3035,7 +3042,7 @@
     }
 
     .aircraft-image {
-        height: 180px;
+        height: 72px;
         overflow: hidden;
         background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
         position: relative;
@@ -3280,7 +3287,7 @@
         gap: 0.4rem;
         background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
         overflow-y: auto;
-        min-height: 340px;
+        min-height: 0;
     }
 
     .aircraft-name {
@@ -3348,6 +3355,38 @@
         color: #6c757d;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+    }
+
+    .aircraft-card .spec-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
+        padding: 0.2rem 0.35rem;
+        min-width: 0;
+    }
+
+    .aircraft-card .spec-label,
+    .aircraft-card .spec-value {
+        margin-bottom: 0;
+        font-size: 0.62rem;
+        line-height: 1.15;
+    }
+
+    .aircraft-card .card-actions {
+        padding: 6px;
+        gap: 4px;
+    }
+
+    .aircraft-card .card-actions .btn {
+        padding: 4px 6px;
+        font-size: 0.68rem;
+        letter-spacing: 0;
+        line-height: 1.2;
+    }
+
+    .aircraft-card .aircraft-name {
+        margin-bottom: 0.2rem;
+        font-size: 0.95rem;
     }
 
     /* Standardized Spacing System */
@@ -3602,23 +3641,6 @@
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card bg-black border border-secondary">
-                <div class="card-body">
-                    <h1 class="h3 text-white mb-2">Find the aircraft that fits the trip</h1>
-                    <p class="text-white-50 mb-3">Compare real listings, sell an aircraft, find a broker, or request a charter. The finder below is the aircraft tool.</p>
-                    <div class="d-flex flex-wrap gap-2">
-                        <a class="btn btn-danger" href="{{ url_for('product.match_page') }}">Best airplane for me</a>
-                        <a class="btn btn-outline-light" href="{{ url_for('product.marketplace_browse') }}">Aircraft for sale</a>
-                        <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">Sell an aircraft</a>
-                        <a class="btn btn-outline-light" href="{{ url_for('brokers_page') }}">Find a broker</a>
-                        <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Charter</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->
@@ -4015,15 +4037,6 @@
 <!-- Aircraft Listings Section -->
 <div class="row mt-5">
     <div class="col-12">
-        <div id="goalFinder" class="mb-4 p-3" style="background: rgba(18,19,24,0.92); border: 1px solid rgba(240,85,69,0.45); border-radius: 12px;">
-            <h5 class="text-white mb-1">Compare the market</h5>
-            <p class="mb-3" style="font-size: 0.95rem; color: #d0d0d0;">Check every trait you care about and whether you want it high or low. Approved listings are ranked on that combination, in the same cards below. Cost numbers use your trip length, number of trips, and years of ownership.</p>
-            <div class="d-flex flex-wrap gap-2 mb-3" id="goalButtons"></div>
-            <div class="row g-2" id="goalMetrics"></div>
-            <p class="mb-2 mt-2 text-white" id="goalSummary" style="font-size: 0.9rem;"></p>
-            <div id="marketCompare" style="overflow-x: auto;"></div>
-        </div>
-
         <!-- Sorting Controls -->
         <div class="sorting-controls mb-4">
             <div class="row align-items-center">
@@ -4593,7 +4606,7 @@
 
     // Pagination variables
     let currentPage = 1;
-    let itemsPerPage = 12;
+    let itemsPerPage = 16;
     let totalPages = 1;
 
     // Load approved user listings from server
@@ -4618,6 +4631,11 @@
             speed: num(ac.speed || ac.cruise_speed),
             passengers: num(ac.passengers || ac.seats),
             year: num(ac.year || ac.lowest_year),
+            min_crew: num(ac.min_crew),
+            multi_engine: ac.multi_engine || '',
+            aircraft_height: num(ac.aircraft_height),
+            aircraft_length: num(ac.aircraft_length),
+            wingspan: num(ac.wingspan),
             cabin_volume: cabin,
             cabinVolume: cabin,
             baggage_volume: num(ac.baggage_volume),
@@ -5172,30 +5190,48 @@
         console.log('🎯 Applying real-time filtering...');
 
         // Get current filter values
+        const readNumber = function (id) {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const raw = String(el.value || '').replace(/,/g, '').trim();
+            if (!raw) return null;
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : null;
+        };
+        const readText = function (id) {
+            const el = document.getElementById(id);
+            return el ? String(el.value || '').trim() : '';
+        };
+        const lowestYear = Math.max(readNumber('lowest-year') || 0, readNumber('lowestYear') || 0);
         currentFilters = {
-            range: document.getElementById('range-input')?.value || '',
-            passengers: document.getElementById('passengers')?.value || '',
-            budget: document.getElementById('budget')?.value || '',
-            minYear: document.getElementById('lowest-year')?.value || '',
-            minSpeed: document.getElementById('advanced_min_speed')?.value || '',
-            minAltitude: document.getElementById('advanced_min_altitude')?.value || '',
-            maxRunway: document.getElementById('advanced_max_runway')?.value || '',
-            minCabinVolume: document.getElementById('advanced_min_cabin_volume')?.value || '',
-            maxAnnualCost: document.getElementById('advanced_max_annual_cost')?.value || '',
-            maxHourlyCost: document.getElementById('advanced_max_hourly_cost')?.value || '',
-            fuelPrice: document.getElementById('advanced_fuel_price')?.value || '',
-            ownershipYears: document.getElementById('advanced_ownership_years')?.value || ''
+            range: readNumber('range-input'),
+            passengers: readNumber('passengers'),
+            budget: readNumber('budget'),
+            minYear: lowestYear || null,
+            maxYear: readNumber('highestYear'),
+            minSpeed: readNumber('speed'),
+            minAltitude: readNumber('maxOperatingAltitude'),
+            maxRunway: readNumber('balancedFieldLength'),
+            maxHeight: readNumber('aircraftHeight'),
+            maxWingspan: readNumber('wingspan'),
+            maxLength: readNumber('aircraftLength'),
+            maxCrew: readNumber('minCrewRequired'),
+            manufacturer: readText('manufacturer'),
+            type: readText('type'),
+            multiEngine: readText('multiEngine')
         };
 
         console.log('🔍 Current filters:', currentFilters);
 
         // Check if any filters are active
-        const hasActiveFilters = Object.values(currentFilters).some(value => value && value !== '');
+        const hasActiveFilters = Object.values(currentFilters).some(value => value !== null && value !== '');
 
         if (!hasActiveFilters) {
             console.log('ℹ️ No active filters - showing all aircraft');
             filteredAircraftData = [...allAircraftData];
-            currentPage = 1; // Reset to page 1 when clearing filters
+            currentPage = 1;
+            const sortBy = document.getElementById('sortSelect')?.value;
+            if (sortBy) { sortAircraft(sortBy); return; }
             updatePagination();
             updateAircraftDisplay();
             return;
@@ -5277,6 +5313,49 @@
                     filterReasons.push(`Year ${aircraft.year} < ${minYear}`);
                 }
             }
+            if (currentFilters.maxYear && aircraft.year > 0 && aircraft.year > currentFilters.maxYear) {
+                matches = false;
+                filterReasons.push(`Year ${aircraft.year} > ${currentFilters.maxYear}`);
+            }
+            if (currentFilters.maxHeight && aircraft.aircraft_height > 0 && aircraft.aircraft_height > currentFilters.maxHeight) {
+                matches = false;
+                filterReasons.push(`Height ${aircraft.aircraft_height} > ${currentFilters.maxHeight}`);
+            }
+            if (currentFilters.maxWingspan && aircraft.wingspan > 0 && aircraft.wingspan > currentFilters.maxWingspan) {
+                matches = false;
+                filterReasons.push(`Wingspan ${aircraft.wingspan} > ${currentFilters.maxWingspan}`);
+            }
+            if (currentFilters.maxLength && aircraft.aircraft_length > 0 && aircraft.aircraft_length > currentFilters.maxLength) {
+                matches = false;
+                filterReasons.push(`Length ${aircraft.aircraft_length} > ${currentFilters.maxLength}`);
+            }
+            if (currentFilters.maxCrew != null && aircraft.min_crew > 0 && aircraft.min_crew > currentFilters.maxCrew) {
+                matches = false;
+                filterReasons.push(`Crew ${aircraft.min_crew} > ${currentFilters.maxCrew}`);
+            }
+            if (currentFilters.manufacturer) {
+                const maker = String(aircraft.manufacturer || '').toUpperCase();
+                if (!maker.includes(String(currentFilters.manufacturer).toUpperCase())) {
+                    matches = false;
+                    filterReasons.push('Manufacturer');
+                }
+            }
+            if (currentFilters.type) {
+                const kind = String(currentFilters.type).toLowerCase();
+                const cat = ((aircraft.category || '') + ' ' + (aircraft.engine_type || '')).toLowerCase();
+                if (!cat.includes(kind)) {
+                    matches = false;
+                    filterReasons.push('Type');
+                }
+            }
+            if (currentFilters.multiEngine) {
+                const want = String(currentFilters.multiEngine).toLowerCase();
+                const has = String(aircraft.multi_engine || '').toLowerCase();
+                if (has && has !== want) {
+                    matches = false;
+                    filterReasons.push('Engines');
+                }
+            }
 
             // Cabin Volume filter
             if (currentFilters.minCabinVolume && aircraft.cabinVolume > 0) {
@@ -5325,11 +5404,9 @@
 
         console.log(`✅ Client-side filtering: ${filteredAircraftData.length} aircraft match criteria (${visibleCount} visible)`);
 
-        // Shopping site logic: Reset to page 1 when filtering (brings remaining aircraft forward)
         currentPage = 1;
-        console.log(`📄 Reset to page 1 after filtering`);
-
-        // Update pagination and display
+        const sortBy = document.getElementById('sortSelect')?.value;
+        if (sortBy) { sortAircraft(sortBy); return; }
         updatePagination();
         updateAircraftDisplay();
     }
@@ -6044,15 +6121,10 @@
                 }
 
                 html += `
-                    <div class="performance-score-item" style="margin-bottom: 8px;">
-                        <div class="performance-label" style="font-size: 0.75rem; font-weight: 600; color: #666; margin-bottom: 3px;">
-                            ${metricLabels[i]}
+                    <div class="performance-score-item" style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin:0 0 3px 0; font-size:0.68rem;">
+                        <span style="color:#cfcfcf; font-weight:600;">${metricLabels[i]}</span>
+                        <span style="background:${color}; color:#fff; border-radius:999px; padding:1px 7px; font-weight:700;">${percentage}%</span>
                     </div>
-                        <div class="performance-bar" style="background: ${color}; color: white; padding: 8px 12px; border-radius: 6px; text-align: center; font-weight: 700;">
-                            ${percentage}%
-                            <small style="opacity: 0.8; font-size: 0.7em; margin-left: 8px;">(${score.toFixed(2)})</small>
-                    </div>
-                </div>
             `;
             });
 
@@ -6069,7 +6141,7 @@
         const displayMetrics = calculateDynamicMetrics(aircraft, userInputs);
 
         card.className = 'aircraft-card-wrapper';
-        card.style.cssText = 'margin-bottom: 2rem; padding: 0;';
+        card.style.cssText = 'margin: 0; padding: 0;';
 
         const listingTitle = (aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim();
         const listingDescription = aircraft.listing_description || aircraft.description || '';
@@ -6102,12 +6174,12 @@
                 style="background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease;">
                 
                 <!-- Aircraft Image - Fixed Aspect Ratio -->
-                <div class="aircraft-image" style="position: relative; width: 100%; height: 220px; overflow: hidden; background: #f8f9fa;">
+                <div class="aircraft-image" style="position: relative; width: 100%; height: 72px; overflow: hidden; background: #f8f9fa;">
                     <img src="${primaryImage}" alt="${listingTitle}" 
                          style="width: 100%; height: 100%; object-fit: cover; object-position: center;">
                     </div>
                 
-                <div class="aircraft-content" style="padding: 20px;">
+                <div class="aircraft-content" style="padding: 10px;">
                     <h5 class="aircraft-name">${listingTitle}</h5>
                     ${aircraft.match_score != null ? `<div style="display:inline-block; margin-bottom:8px; background:#F05545; color:#fff; font-weight:700; font-size:0.75rem; padding:3px 8px; border-radius:999px;">${aircraft.match_score}% match${aircraft.is_user_listing ? ' · For sale' : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 0.85rem;">
@@ -6116,15 +6188,15 @@
                     </div>
                     
                     <!-- PRICE - Directly Under Title -->
-                    <div class="aircraft-price" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 12px 15px; text-align: center; border-radius: 8px; margin: 10px 0 15px 0; box-shadow: 0 3px 10px rgba(0,0,0,0.2);">
-                        <div style="font-size: 1.6rem; font-weight: 900; letter-spacing: 0.5px;">
+                    <div class="aircraft-price" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 6px 8px; text-align: center; border-radius: 8px; margin: 6px 0; box-shadow: 0 3px 10px rgba(0,0,0,0.2);">
+                        <div style="font-size: 1.05rem; font-weight: 900; letter-spacing: 0.3px;">
                             $${(priceValue || 0).toLocaleString()}
                                 </div>
                         <div style="font-size: 0.7rem; font-weight: 600; opacity: 0.9; margin-top: 2px; text-transform: uppercase;">Seller Asking Price</div>
                                 </div>
                     
                     <!-- Performance Scores - Relative Comparison (Stacked Vertically) -->
-                    <div class="performance-scores mb-3" id="performance-scores-${index}">
+                    <div class="performance-scores mb-1" id="performance-scores-${index}">
                         <!-- Performance scores will be populated after all cards are created -->
                             </div>
                     
@@ -6178,7 +6250,7 @@
                         </div>` : ''}
                         
                         <!-- Card Actions -->
-                        <div class="card-actions" style="padding: 15px 20px; border-top: 1px solid #eee; background: #f8f9fa;">
+                        <div class="card-actions" style="padding: 8px; border-top: 1px solid #eee; background: #f8f9fa;">
                             <button class="btn add-to-compare-btn" type="button"
                                     data-compare-id="${aircraft.id}"
                                     data-compare-name="${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}">
@@ -6191,11 +6263,11 @@
                                     data-manufacturer="${(aircraft.manufacturer || '').replace(/"/g, '&quot;')}"
                                     data-price="${priceValue || 0}"
                                     data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
-                                    style="width:100%; margin-top:8px; padding:12px; font-weight:600; border-radius:8px; border:1px solid #F05545; background:#fff; color:#F05545;">
+                                    style="width:100%; margin-top:6px; padding:6px; font-weight:600; border-radius:8px; border:1px solid #F05545; background:#fff; color:#F05545;">
                                 <i class="far fa-bookmark me-2"></i>Watch this aircraft
                             </button>
                             ${contactEmail ? `
-                            <a class="btn primary-action-btn" href="mailto:${contactEmail}" style="width: 100%; padding: 12px; font-weight: 600; border-radius: 8px; border: none; background: linear-gradient(135deg, #F05545, #d63c2d); color: #ffffff; transition: all 0.2s ease;">
+                            <a class="btn primary-action-btn" href="mailto:${contactEmail}" style="width: 100%; margin-top: 6px; padding: 6px; font-weight: 600; border-radius: 8px; border: none; background: linear-gradient(135deg, #F05545, #d63c2d); color: #ffffff; transition: all 0.2s ease;">
                                 <i class="fas fa-envelope me-2"></i>Contact Seller
                             </a>` : ''}
                     </div>
@@ -6482,11 +6554,10 @@
 
         // Clear all input values
         const filterInputs = [
-            'range-input', 'passengers', 'budget', 'lowest-year',
-            'advanced_min_speed', 'advanced_min_altitude',
-            'advanced_max_runway', 'advanced_min_cabin_volume',
-            'advanced_max_annual_cost', 'advanced_max_hourly_cost',
-            'advanced_fuel_price', 'advanced_ownership_years'
+            'range-input', 'passengers', 'budget', 'lowest-year', 'lowestYear', 'highestYear',
+            'speed', 'maxOperatingAltitude', 'balancedFieldLength', 'aircraftHeight',
+            'wingspan', 'aircraftLength', 'minCrewRequired', 'manufacturer', 'type', 'multiEngine',
+            'avg-trip-length', 'number-of-trips', 'yearsOfOwnership'
         ];
 
         filterInputs.forEach(inputId => {
@@ -7195,11 +7266,10 @@
 
         // Add event listeners to all filter inputs
         const filterInputs = [
-            'range-input', 'passengers', 'budget', 'lowest-year',
-            'advanced_min_speed', 'advanced_min_altitude',
-            'advanced_max_runway', 'advanced_min_cabin_volume',
-            'advanced_max_annual_cost', 'advanced_max_hourly_cost',
-            'advanced_fuel_price', 'advanced_ownership_years'
+            'range-input', 'passengers', 'budget', 'lowest-year', 'lowestYear', 'highestYear',
+            'speed', 'maxOperatingAltitude', 'balancedFieldLength', 'aircraftHeight',
+            'wingspan', 'aircraftLength', 'minCrewRequired', 'manufacturer', 'type', 'multiEngine',
+            'avg-trip-length', 'number-of-trips', 'yearsOfOwnership'
         ];
 
         filterInputs.forEach(inputId => {
@@ -7212,6 +7282,17 @@
                 console.warn(`⚠️ Input not found: ${inputId}`);
             }
         });
+
+        const rangeSlider = document.getElementById('range-slider');
+        if (rangeSlider) {
+            rangeSlider.addEventListener('input', debounce(function () {
+                const rangeInput = document.getElementById('range-input');
+                const rangeLabel = document.getElementById('range-value');
+                if (rangeInput) rangeInput.value = rangeSlider.value;
+                if (rangeLabel) rangeLabel.textContent = rangeSlider.value;
+                applyRealTimeFiltering();
+            }, 200));
+        }
 
         // Add event listener for sort select
         const sortSelect = document.getElementById('sortSelect');
@@ -7237,10 +7318,13 @@
         userInputControls.forEach(inputId => {
             const input = document.getElementById(inputId);
             if (input) {
-                input.addEventListener('input', debounce(() => {
+                const refreshFromInput = debounce(() => {
                     updateUserInputs();
                     recalculateAll();
-                }, 500));
+                    applyRealTimeFiltering();
+                }, 400);
+                input.addEventListener('input', refreshFromInput);
+                input.addEventListener('change', refreshFromInput);
                 console.log(`✅ Added user input listener to ${inputId}`);
             }
         });
