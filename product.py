@@ -109,6 +109,11 @@ def api_broker_profile():
         return err
     if request.method == 'PATCH':
         data = request.get_json(silent=True) or {}
+        if not authz.is_broker(user):
+            return jsonify({
+                'error': 'broker_subscription_required',
+                'message': 'A broker account is $10 a month. Start it from your profile.',
+            }), 402
         data['profile_role'] = 'broker'
         db_module.update_user_profile(user['id'], data)
         airport = sections_module.resolve_place(data.get('profile_location') or user.get('profile_location'), country='US')
@@ -242,6 +247,11 @@ def api_charter_book():
 
 @product.route('/charter/fleet', methods=['GET', 'POST'])
 def charter_fleet_page():
+    return render_template(
+        'coming_soon.html',
+        product='Charter',
+        summary='Shop a route and see the aircraft that can fly it. The bookable charter market is still being built, so this section stays closed.',
+    )
     user, err = _require_user()
     if err:
         return err

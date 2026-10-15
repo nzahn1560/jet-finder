@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Off market · Brokers only - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block additional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="section-page">
+    <article class="soon-card">
+        <p class="soon-kicker">Brokers only</p>
+        <h1>Off market</h1>
+        <p class="section-lead">Off-market aircraft are visible only to an account labeled as a broker. Buyer and seller accounts stay on the public marketplace.</p>
+        <p>A broker account is $10 a month. Start it from your profile, and this page opens after the subscription is active.</p>
+        <div class="soon-actions">
+            <a class="section-btn" href="{{ url_for('dashboard') }}">Open your profile</a>
+            <a class="soon-link" href="{{ url_for('home') }}">Public listings</a>
+        </div>
+    </article>
+</div>
+{% endblock %}

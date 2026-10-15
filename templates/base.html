@@ -175,6 +175,23 @@
             transform: translateX(5px);
         }
 
+        .nav-tag {
+            margin-left: 0.45rem;
+            font-size: 0.68rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #F05545;
+            border: 1px solid rgba(240, 85, 69, 0.45);
+            border-radius: 999px;
+            padding: 0.05rem 0.4rem;
+            vertical-align: middle;
+        }
+
+        .dropdown-item:hover .nav-tag {
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.7);
+        }
+
         .dropdown-header {
             color: #F05545 !important;
             font-weight: 700;
@@ -314,11 +331,13 @@
                         <li>
                             <a class="dropdown-item" href="{{ url_for('charter_search') }}">
                                 <i class="fas fa-plane-departure me-2"></i>Charter
+                                <span class="nav-tag">Coming soon</span>
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('service_providers') }}">
                                 <i class="fas fa-wrench me-2"></i>Mechanics
+                                <span class="nav-tag">Coming soon</span>
                             </a>
                         </li>
                         <li>
@@ -329,6 +348,7 @@
                         <li>
                             <a class="dropdown-item" href="{{ url_for('off_market_page') }}">
                                 <i class="fas fa-lock me-2"></i>Off Market
+                                <span class="nav-tag">Brokers only</span>
                             </a>
                         </li>
                         {% if current_user and current_user.is_admin %}

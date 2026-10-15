@@ -8,8 +8,8 @@
 
 {% block content %}
 <div class="section-page">
-    <h1>Off market</h1>
-    <p class="section-lead">Broker-only inventory. These aircraft are not on the public marketplace, and this page is not available to buyer accounts.</p>
+    <h1>Off market <span class="nav-tag">Brokers only</span></h1>
+    <p class="section-lead">This inventory is for accounts labeled as a broker. These aircraft stay off the public marketplace.</p>
     <p class="section-note"><a href="{{ url_for('create_listing') }}?market=off_market">Submit an off-market listing</a>. It still waits for approval before it shows here.</p>
 
     {% if listings %}

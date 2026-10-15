@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{ product }} · Coming soon - Jet Finder{% endblock %}
+{% block additional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="section-page">
+    <article class="soon-card">
+        <p class="soon-kicker">Coming soon</p>
+        <h1>{{ product }}</h1>
+        <p class="section-lead">{{ summary }}</p>
+        <p>The data and the business model for this section are still being built. The page stays in the menu so you can see where it will live.</p>
+        <div class="soon-actions">
+            <a class="section-btn" href="{{ url_for('home') }}">Back to Jet Finder</a>
+            <a class="soon-link" href="{{ url_for('brokers_page') }}">Find a broker</a>
+        </div>
+    </article>
+</div>
+{% endblock %}
