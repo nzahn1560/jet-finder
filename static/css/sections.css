@@ -341,15 +341,15 @@
 }
 
 .om-card h2 {
-    margin: 0 0 0.35rem;
-    font-size: 1rem;
+    margin: 0 0 0.4rem;
+    font-size: 1.25rem;
     color: #fff;
 }
 
 .om-card p {
-    margin: 0 0 0.25rem;
+    margin: 0 0 0.3rem;
     color: #d0d0d0;
-    font-size: 0.9rem;
+    font-size: 1.05rem;
 }
 
 .om-card__price {

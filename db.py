@@ -200,6 +200,7 @@ class UserListing(Base):
     passenger_config = Column(String(80))
     admin_notes = Column(Text)
     amendment_note = Column(Text)
+    review_message = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -732,6 +733,7 @@ def init_db():
                 'passenger_config TEXT',
                 'admin_notes TEXT',
                 'amendment_note TEXT',
+                'review_message TEXT',
                 'city TEXT',
                 'state TEXT',
             ]:
@@ -806,6 +808,7 @@ def init_db():
                 ('passenger_config', 'VARCHAR(80)'),
                 ('admin_notes', 'TEXT'),
                 ('amendment_note', 'TEXT'),
+                ('review_message', 'TEXT'),
                 ('city', 'VARCHAR(120)'),
                 ('state', 'VARCHAR(40)'),
             ]:
@@ -1553,10 +1556,18 @@ def set_broker_verified(user_id, verified: bool) -> bool:
         return n > 0
 
 
+def set_listing_review_message(listing_id, message: str) -> bool:
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
+            {'review_message': message, 'status': 'pending'}, synchronize_session=False
+        )
+        return n > 0
+
+
 def set_listing_amendment(listing_id, note: str) -> bool:
     with get_session() as s:
         n = s.query(UserListing).filter(UserListing.id == listing_id).update(
-            {'amendment_note': note}, synchronize_session=False
+            {'amendment_note': note, 'review_message': None}, synchronize_session=False
         )
         return n > 0
 
@@ -1957,6 +1968,7 @@ def admin_approve_listing_any(listing_id, approved_by_user_id):
             'approved_at': datetime.utcnow(),
             'rejection_reason': None,
             'amendment_note': None,
+            'review_message': None,
         }, synchronize_session=False)
         return n > 0
 

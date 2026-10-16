@@ -213,6 +213,34 @@ class ProductTests(unittest.TestCase):
         approved = self.client.post(f'/api/admin/listings/{listing_id}/approve')
         self.assertEqual(approved.status_code, 403)
 
+    def test_admin_review_compares_aircraft_data_and_keeps_a_fix_message_pending(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Review Jet', 'public'))
+        listing_id = created.get_json()['id']
+        self._login('buyer@example.com', 'buyer-pass-1')
+        self.assertEqual(self.client.get(f'/api/admin/listings/{listing_id}/review').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        review = self.client.get(f'/api/admin/listings/{listing_id}/review')
+        self.assertEqual(review.status_code, 200, review.get_json())
+        body = review.get_json()
+        self.assertEqual(body['listing']['price'], 2500000)
+        self.assertIn('price', body['aircraft_data'])
+        self.assertTrue(body['checks'])
+        sent = self.client.post(
+            f'/api/admin/listings/{listing_id}/message',
+            json={'message': 'Add the serial number.'},
+        )
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        self.assertEqual(sent.get_json()['status'], 'pending')
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'pending')
+        self.assertIn('serial', row.get('review_message') or '')
+        self._login('seller@example.com', 'seller-pass-1')
+        mine = self.client.get('/api/listings/me')
+        self.assertEqual(mine.status_code, 200)
+        found = next(item for item in mine.get_json()['listings'] if item['id'] == listing_id)
+        self.assertIn('serial', found.get('review_message') or '')
+
     def test_reject_then_resubmit_does_not_require_a_second_payment(self):
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Rejected Jet', 'public'))

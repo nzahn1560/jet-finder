@@ -353,6 +353,7 @@
             })[l.status] || '#8e8e93';
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
             const amendment = l.amendment_note ? '<p style="margin:0.4rem 0 0;color:#f4f4f4;font-size:0.85rem;">' + escapeHtml(l.amendment_note) + '</p>' : '';
+            const review = l.review_message ? '<p style="margin:0.4rem 0 0;color:#fbbf24;font-size:0.95rem;">' + escapeHtml(l.review_message) + '</p>' : '';
             const canEdit = l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
@@ -366,7 +367,7 @@
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
-                + rej + amendment + '\n'
+                + rej + amendment + review + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
                 + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay listing fee</button>' : '')
