@@ -408,10 +408,15 @@
                                     <label class="form-label">Interior year</label>
                                     <input type="number" class="form-control" id="interiorYear" name="interior_year" min="1950" max="2099">
                                 </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Location (Airport Code) *</label>
-                                    <input type="text" class="form-control" id="location" name="location"
-                                        placeholder="KVNY" required>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">City *</label>
+                                    <input type="text" class="form-control" id="listingCity" name="city"
+                                        placeholder="Dallas" required>
+                                </div>
+                                <div class="col-md-2 mb-3">
+                                    <label class="form-label">State *</label>
+                                    <input type="text" class="form-control" id="listingState" name="state"
+                                        placeholder="TX" required>
                                 </div>
                             </div>
                             <div class="row">
@@ -633,7 +638,9 @@
             profile_id: get('profile_id'),
             title: get('listing_name') || undefined,
             price: parseFloat(get('price') || '0'),
-            location: get('location').toUpperCase(),
+            city: get('city'),
+            state: get('state'),
+            location: [get('city'), get('state')].filter(Boolean).join(', '),
             email: get('email'),
             year: parseInt(get('year_model') || '0', 10) || undefined,
             hours: parseInt(get('total_time') || '0', 10) || 0,
@@ -744,7 +751,7 @@
                 if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent('/create-listing'); return; }
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.id) {
-                    return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, airport, and email, then try again.');
+                    return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, city, state, and email, then try again.');
                 }
                 listingId = data.id;
                 paymentRequired = !!data.payment_required;
@@ -808,7 +815,9 @@
             setVal('engineType', listing.engine_type);
             setVal('totalTime', listing.hours);
             setVal('manufacturerInput', listing.manufacturer);
-            setVal('location', listing.location);
+            setVal('listingCity', listing.city || '');
+            setVal('listingState', listing.state || '');
+            setVal('serialNumber', listing.serial_number || '');
             setVal('yearModel', listing.year);
             setVal('email', listing.email);
             setVal('description', listing.description);

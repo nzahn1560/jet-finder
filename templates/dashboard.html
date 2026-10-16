@@ -326,7 +326,7 @@
                     {% set role_labels = {
                         'buyer': 'Buyer',
                         'seller': 'Seller',
-                        'broker': 'Broker — $10/month',
+                        'broker': 'Broker — $19.99/month, free on a team',
                         'mechanic': 'Mechanic — coming soon',
                         'charter_operator': 'Charter operator — coming soon',
                         'other': 'Other'
@@ -338,14 +338,49 @@
                 <button type="submit" class="dash__btn dash__btn--primary" style="border:0; cursor:pointer;">Save profile</button>
                 <span id="profile-save-status" style="align-self:center; color:#8e8e93;"></span>
             </form>
-            {% set is_broker = (user.profile_role == 'broker') or ('broker' in (user.roles or '')) %}
+            {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
             <section class="broker-offer" id="broker-offer">
-                <h2>Broker account · $10 a month</h2>
-                {% if is_broker %}
-                <p>This account is labeled as a broker. Off-market aircraft are open to you.</p>
+                <h2>Broker teams · $19.99 a month</h2>
+                {% if on_team %}
+                <p>You are on {{ membership.name }}. The team pays $19.99 a month. Your individual broker account is free, and your listings stay under your name.</p>
+                {% if membership.is_admin and pending_members %}
+                <p>People waiting for you to allow them onto the team:</p>
+                <ul id="pending-members" style="list-style:none; padding:0; margin:0 0 0.75rem;">
+                    {% for member in pending_members %}
+                    <li style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.4rem;">
+                        <span>{{ member.first_name or 'Broker' }} {{ member.last_name or '' }}</span>
+                        <button type="button" class="dash__btn dash__btn--primary allow-member" data-user="{{ member.user_id }}" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Allow</button>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% elif membership and membership.is_admin %}
+                <p>{{ membership.name }} is not on the map until the $19.99 monthly team checkout completes. Brokers you allow in after that pay nothing.</p>
+                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Finish team checkout — $19.99/month</button>
+                <input type="hidden" id="team-name" value="{{ membership.name or '' }}">
+                <input type="hidden" id="team-city" value="{{ membership.city or '' }}">
+                <input type="hidden" id="team-state" value="{{ membership.state or '' }}">
+                {% elif membership and membership.membership_status == 'pending' %}
+                <p>Waiting for {{ membership.name }} to allow you in. There is no charge until a team admin adds you, and then you still pay nothing.</p>
                 {% else %}
-                <p>A broker label opens the brokers-only off-market page and puts you on the broker map. The charge is $10 a month.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Start broker account — $10/month</button>
+                <p>The map shows teams. Open a team to find the individual brokers and their listings. A team is $19.99 a month. A broker on that team pays nothing. A broker with no team pays $19.99 a month.</p>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:0.5rem; margin-bottom:0.75rem;">
+                    <input class="form-control" id="team-name" placeholder="Team name">
+                    <input class="form-control" id="team-city" placeholder="City">
+                    <input class="form-control" id="team-state" placeholder="State">
+                </div>
+                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Start a team — $19.99/month</button>
+                <button type="button" class="dash__btn dash__btn--secondary" id="become-broker" style="border:0; cursor:pointer; margin-left:0.4rem;">Go solo — $19.99/month</button>
+                {% if teams %}
+                <div style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                    <select class="form-select" id="join-team" style="max-width:280px;">
+                        {% for team in teams %}
+                        <option value="{{ team.id }}">{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="dash__btn dash__btn--secondary" id="request-join" style="border:0; cursor:pointer;">Request to join</button>
+                </div>
+                {% endif %}
                 {% endif %}
             </section>
         </header>
@@ -562,12 +597,12 @@ document.getElementById('company-logo-input').addEventListener('change', async f
 });
 
 async function startBrokerCheckout(status) {
-    if (status) status.textContent = 'Opening the $10 monthly checkout...';
+    if (status) status.textContent = 'Opening the $19.99 monthly checkout...';
     const pay = await fetch('/api/account/broker-checkout', { method: 'POST', credentials: 'include' });
     const payData = await pay.json().catch(function () { return {}; });
     if (payData.url) { window.location = payData.url; return; }
     if (payData.already) { window.location.reload(); return; }
-    if (status) status.textContent = payData.message || 'A broker account is $10 a month. Checkout is not connected yet.';
+    if (status) status.textContent = payData.message || 'A solo broker account is $19.99 a month. Checkout is not connected yet.';
 }
 
 document.getElementById('profile-form').addEventListener('submit', async function (e) {
@@ -603,9 +638,55 @@ if (becomeBroker) {
     becomeBroker.addEventListener('click', function () { startBrokerCheckout(document.getElementById('profile-save-status')); });
 }
 
+const startTeam = document.getElementById('start-team');
+if (startTeam) {
+    startTeam.addEventListener('click', async function () {
+        const status = document.getElementById('profile-save-status');
+        status.textContent = 'Opening the $19.99 team checkout...';
+        const resp = await fetch('/api/account/team-checkout', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: document.getElementById('team-name').value,
+                city: document.getElementById('team-city').value,
+                state: document.getElementById('team-state').value,
+            }),
+        });
+        const data = await resp.json().catch(function () { return {}; });
+        if (data.url) { window.location = data.url; return; }
+        status.textContent = data.message || 'A team is $19.99 a month. Checkout is not connected yet.';
+    });
+}
+
+const requestJoin = document.getElementById('request-join');
+if (requestJoin) {
+    requestJoin.addEventListener('click', async function () {
+        const status = document.getElementById('profile-save-status');
+        const teamId = document.getElementById('join-team').value;
+        status.textContent = 'Sending your request...';
+        const resp = await fetch('/api/broker-teams/' + teamId + '/join', { method: 'POST', credentials: 'include' });
+        const data = await resp.json().catch(function () { return {}; });
+        status.textContent = resp.ok ? 'Request sent. The team admin allows you in.' : (data.message || 'Could not join that team.');
+        if (resp.ok) setTimeout(function () { window.location.reload(); }, 500);
+    });
+}
+
+document.querySelectorAll('.allow-member').forEach(function (button) {
+    button.addEventListener('click', async function () {
+        const status = document.getElementById('profile-save-status');
+        const resp = await fetch('/api/broker-teams/' + button.getAttribute('data-team') + '/members/' + button.getAttribute('data-user') + '/allow', {
+            method: 'POST',
+            credentials: 'include',
+        });
+        status.textContent = resp.ok ? 'They are on the team.' : 'Could not allow that person.';
+        if (resp.ok) setTimeout(function () { window.location.reload(); }, 400);
+    });
+});
+
 (function confirmBrokerReturn() {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('broker') !== '1' || !params.get('session_id')) return;
+    if ((params.get('broker') !== '1' && params.get('team') !== '1') || !params.get('session_id')) return;
     fetch('/api/account/broker-confirm', {
         method: 'POST',
         credentials: 'include',

@@ -27,6 +27,7 @@ class ProductTests(unittest.TestCase):
         cls.buyer = cls._signup('buyer@example.com', 'buyer-pass-1', 'buyer')
         cls.broker = cls._signup('broker@example.com', 'broker-pass-1', 'broker')
         db_module.update_user_profile(cls.broker['id'], {'profile_role': 'broker'})
+        cls.team_id = db_module.create_broker_team(cls.broker['id'], 'Northstar', 'Teterboro', 'NJ', active=True)
         cls.operator = cls._signup('operator@example.com', 'operator-pass-1', 'charter_operator')
         cls.admin = cls._signup('admin@example.com', 'admin-pass-1', 'seller')
         db_module.set_user_admin(cls.admin['id'], True)
@@ -123,6 +124,33 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
         self.assertEqual(checkout.status_code, 503)
+        self.assertIn(b'19.99', checkout.data)
+
+    def test_role_alone_does_not_open_off_market(self):
+        labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
+        db_module.update_user_profile(labeled['id'], {'profile_role': 'broker'})
+        self._login('solo-label@example.com', 'broker-pass-1')
+        blocked = self.client.get('/off-market')
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_team_admin_allows_a_broker_who_pays_nothing(self):
+        self._login('buyer@example.com', 'buyer-pass-1')
+        joined = self.client.post(f'/api/broker-teams/{self.team_id}/join')
+        self.assertEqual(joined.status_code, 200, joined.get_json())
+        self.assertEqual(joined.get_json().get('status'), 'pending')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        self._login('broker@example.com', 'broker-pass-1')
+        allowed = self.client.post(f'/api/broker-teams/{self.team_id}/members/{self.buyer["id"]}/allow')
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        self._login('buyer@example.com', 'buyer-pass-1')
+        page = self.client.get('/off-market')
+        self.assertEqual(page.status_code, 200)
+        detail = self.client.get(f'/api/broker-teams/{self.team_id}')
+        names = [person.get('name') for person in detail.get_json().get('brokers', [])]
+        self.assertIn('Buyer', names)
+        checkout = self.client.post('/api/account/broker-checkout')
+        self.assertEqual(checkout.status_code, 200)
+        self.assertTrue(checkout.get_json().get('already'))
 
     def test_charter_and_mechanics_are_coming_soon(self):
         for path in ('/charter', '/charter-search', '/mechanics', '/charter/fleet'):

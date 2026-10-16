@@ -756,7 +756,7 @@
     /* Clean Aircraft Grid Layout */
     .aircraft-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 0.75rem;
         padding: 0;
         width: 100%;
@@ -782,7 +782,7 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
-        height: auto;
+        height: 320px;
         aspect-ratio: auto;
         width: 100%;
         max-width: none;
@@ -1714,7 +1714,7 @@
         }
 
         .aircraft-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.75rem;
             padding: 0;
             justify-items: stretch;
@@ -1758,15 +1758,15 @@
         .aircraft-card {
             max-width: 100%;
             min-height: 0;
-            height: auto;
+            height: 320px;
         }
 
         .aircraft-image {
-            height: 140px;
+            height: 72px;
         }
 
         .aircraft-content {
-            min-height: 320px;
+            min-height: 0;
             padding: 0.6rem;
         }
     }
@@ -1790,11 +1790,11 @@
         }
 
         .aircraft-image {
-            height: 120px;
+            height: 72px;
         }
 
         .aircraft-content {
-            min-height: 310px;
+            min-height: 0;
             padding: 0.5rem;
         }
     }
@@ -3280,14 +3280,46 @@
     }
 
     .aircraft-content {
-        padding: 0.75rem;
+        padding: 0.75rem 0.85rem 0.75rem 0.75rem;
         flex: 1;
         display: flex;
         flex-direction: column;
         gap: 0.4rem;
         background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
-        overflow-y: auto;
+        overflow-y: scroll;
         min-height: 0;
+        scrollbar-width: none;
+    }
+
+    .aircraft-content::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+    }
+
+    .listing-scroll {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        gap: 6px;
+    }
+
+    .listing-scroll__bar {
+        width: 8px;
+        flex: 0 0 8px;
+        margin: 8px 6px 8px 0;
+        background: #2a2a2a;
+        border-radius: 4px;
+        position: relative;
+    }
+
+    .listing-scroll__bar span {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        background: #F05545;
+        border-radius: 4px;
+        min-height: 28px;
     }
 
     .aircraft-name {
@@ -4247,9 +4279,25 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group mb-3">
-                                        <label class="form-label">Location</label>
-                                        <input type="text" class="form-control" id="listingLocation"
-                                            placeholder="Airport code or city">
+                                        <label class="form-label">City</label>
+                                        <input type="text" class="form-control" id="listingCity"
+                                            placeholder="Dallas">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">State</label>
+                                        <input type="text" class="form-control" id="listingState"
+                                            placeholder="TX" maxlength="40">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label class="form-label">Serial number</label>
+                                        <input type="text" class="form-control" id="listingSerial"
+                                            placeholder="S/N">
                                     </div>
                                 </div>
                                 <div class="col-md-6">
@@ -4606,7 +4654,7 @@
 
     // Pagination variables
     let currentPage = 1;
-    let itemsPerPage = 16;
+    let itemsPerPage = 12;
     let totalPages = 1;
 
     // Load approved user listings from server
@@ -5453,6 +5501,22 @@
             const aircraftCard = createAircraftCardHTML(aircraft, startIndex + index);
             aircraftGrid.appendChild(aircraftCard);
         });
+        document.querySelectorAll('.aircraft-content').forEach(function (content) {
+            const thumb = content.parentElement && content.parentElement.querySelector('.listing-scroll__bar span');
+            if (!thumb) return;
+            const sync = function () {
+                const bar = thumb.parentElement;
+                const track = bar.clientHeight || content.clientHeight;
+                const total = content.scrollHeight;
+                const thumbH = Math.max(28, Math.min(track, Math.round(track * (content.clientHeight / Math.max(total, 1)))));
+                const maxTop = Math.max(0, track - thumbH);
+                const maxScroll = Math.max(1, total - content.clientHeight);
+                thumb.style.height = thumbH + 'px';
+                thumb.style.top = Math.round((content.scrollTop / maxScroll) * maxTop) + 'px';
+            };
+            content.addEventListener('scroll', sync);
+            sync();
+        });
 
         console.log(`📊 Displayed ${currentPageAircraft.length} aircraft on page ${currentPage} (${filteredAircraftData.length} total filtered)`);
 
@@ -6145,7 +6209,15 @@
 
         const listingTitle = (aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim();
         const listingDescription = aircraft.listing_description || aircraft.description || '';
-        const listingLocation = aircraft.location || 'Location on request';
+        const cityName = String(aircraft.city || '').trim();
+        const stateName = String(aircraft.state || '').trim();
+        let listingPlace = [cityName, stateName].filter(Boolean).join(', ');
+        if (!listingPlace) {
+            const rawPlace = String(aircraft.location || '').trim();
+            listingPlace = /^[A-Za-z]{3,4}$/.test(rawPlace) ? '' : rawPlace;
+        }
+        const serialNumber = String(aircraft.serial_number || '').trim();
+        const listingLocation = (listingPlace || 'City, state on request') + ' · S/N ' + (serialNumber || '—');
         const engineType = aircraft.engine_type || aircraft.category || 'Unknown';
         const priceValue = aircraft.listing_price || aircraft.price || 0;
         const primaryImage = aircraft.image || '/static/images/aircraft_placeholder.jpg';
@@ -6171,20 +6243,20 @@
                 data-best-range-dollar="${aircraft.best_range_dollar || 0}"
                 data-best-performance-dollar="${aircraft.best_performance_dollar || 0}"
                 data-best-efficiency-dollar="${aircraft.best_efficiency_dollar || 0}"
-                style="background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease;">
+                style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease;">
                 
                 <!-- Aircraft Image - Fixed Aspect Ratio -->
-                <div class="aircraft-image" style="position: relative; width: 100%; height: 72px; overflow: hidden; background: #f8f9fa;">
+                <div class="aircraft-image" style="position: relative; width: 100%; height: 72px; overflow: hidden; background: #1a1a1a; flex-shrink: 0;">
                     <img src="${primaryImage}" alt="${listingTitle}" 
                          style="width: 100%; height: 100%; object-fit: cover; object-position: center;">
                     </div>
                 
+                <div class="listing-scroll">
                 <div class="aircraft-content" style="padding: 10px;">
                     <h5 class="aircraft-name">${listingTitle}</h5>
                     ${aircraft.match_score != null ? `<div style="display:inline-block; margin-bottom:8px; background:#F05545; color:#fff; font-weight:700; font-size:0.75rem; padding:3px 8px; border-radius:999px;">${aircraft.match_score}% match${aircraft.is_user_listing ? ' · For sale' : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 0.85rem;">
-                        <i class="fas fa-map-marker-alt me-1"></i>${listingLocation} · 
-                        <i class="fas fa-cog me-1"></i>${engineType}
+                        <i class="fas fa-map-marker-alt me-1"></i>${listingLocation}
                     </div>
                     
                     <!-- PRICE - Directly Under Title -->
@@ -6250,7 +6322,7 @@
                         </div>` : ''}
                         
                         <!-- Card Actions -->
-                        <div class="card-actions" style="padding: 8px; border-top: 1px solid #eee; background: #f8f9fa;">
+                        <div class="card-actions" style="padding: 8px 0 0; border-top: 1px solid #404040; background: transparent;">
                             <button class="btn add-to-compare-btn" type="button"
                                     data-compare-id="${aircraft.id}"
                                     data-compare-name="${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}">
@@ -6263,7 +6335,7 @@
                                     data-manufacturer="${(aircraft.manufacturer || '').replace(/"/g, '&quot;')}"
                                     data-price="${priceValue || 0}"
                                     data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
-                                    style="width:100%; margin-top:6px; padding:6px; font-weight:600; border-radius:8px; border:1px solid #F05545; background:#fff; color:#F05545;">
+                                    style="width:100%; margin-top:6px; padding:6px; font-weight:600; border-radius:8px; border:1px solid #F05545; background:transparent; color:#F05545;">
                                 <i class="far fa-bookmark me-2"></i>Watch this aircraft
                             </button>
                             ${contactEmail ? `
@@ -6272,6 +6344,8 @@
                             </a>` : ''}
                     </div>
                     </div> <!-- End aircraft-content -->
+                    <div class="listing-scroll__bar" aria-hidden="true"><span></span></div>
+                </div>
                 </div> <!-- End aircraft-card -->
             </div> <!-- End aircraft-card-wrapper -->
         `;
@@ -7649,14 +7723,16 @@
             const year = parseInt(document.getElementById('listingYear').value, 10);
             const hours = parseInt(document.getElementById('listingHours').value, 10);
             const price = parseFloat(document.getElementById('listingPrice').value);
-            const location = (document.getElementById('listingLocation').value || '').trim();
+            const city = (document.getElementById('listingCity').value || '').trim();
+            const state = (document.getElementById('listingState').value || '').trim();
+            const serialNumber = (document.getElementById('listingSerial').value || '').trim();
             const email = (document.getElementById('listingEmail').value || '').trim();
             const description = (document.getElementById('listingDescription').value || '').trim();
             const title = (document.getElementById('listingTitle').value || '').trim();
             if (!year || year < 1950) { alert('Enter the aircraft year.'); return; }
             if (!Number.isFinite(hours) || hours < 0) { alert('Enter total hours.'); return; }
             if (!price || price <= 0) { alert('Enter a price.'); return; }
-            if (!location || !email) { alert('Location and contact email are required.'); return; }
+            if (!city || !state || !email) { alert('City, state, and contact email are required.'); return; }
             createBtn.disabled = true;
             const original = createBtn.innerHTML;
             createBtn.innerHTML = 'Creating...';
@@ -7671,7 +7747,10 @@
                         year: year,
                         hours: hours,
                         price: price,
-                        location: location,
+                        city: city,
+                        state: state,
+                        location: city + ', ' + state,
+                        serial_number: serialNumber,
                         email: email,
                         description: description + (description ? '\n\n' : '') + 'Performance profile: ' + homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name,
                         manufacturer: homepageSelectedProfile.manufacturer,

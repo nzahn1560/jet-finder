@@ -202,6 +202,43 @@ class UserListing(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+    city = Column(String(120))
+    state = Column(String(40))
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class BrokerTeam(Base):
+    """A company on the broker map. The team pays; members do not."""
+    __tablename__ = 'broker_teams'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    admin_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    city = Column(String(120))
+    state = Column(String(40))
+    location = Column(String(200))
+    latitude = Column(Float)
+    longitude = Column(Float)
+    logo_url = Column(Text)
+    bio = Column(Text)
+    subscription_status = Column(String(20), default='inactive', nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class BrokerTeamMember(Base):
+    """An individual broker asking to join a team, or already on it."""
+    __tablename__ = 'broker_team_members'
+    __table_args__ = (UniqueConstraint('team_id', 'user_id', name='uq_broker_team_member'),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey('broker_teams.id'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    status = Column(String(20), default='pending', nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
@@ -693,6 +730,8 @@ def init_db():
                 'interior_year INTEGER',
                 'passenger_config TEXT',
                 'admin_notes TEXT',
+                'city TEXT',
+                'state TEXT',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN {col_def}'))
@@ -764,6 +803,8 @@ def init_db():
                 ('interior_year', 'INTEGER'),
                 ('passenger_config', 'VARCHAR(80)'),
                 ('admin_notes', 'TEXT'),
+                ('city', 'VARCHAR(120)'),
+                ('state', 'VARCHAR(40)'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -1213,7 +1254,7 @@ def _apply_listing_details(row, details):
     keys = (
         'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
         'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
-        'passenger_config',
+        'passenger_config', 'city', 'state',
     )
     for key in keys:
         if key not in details or details[key] in (None, ''):
@@ -1552,6 +1593,199 @@ def list_directory_brokers():
                 'broker_image_url': user.broker_image_url,
                 'profile_photo_url': user.profile_photo_url,
                 'company_logo_url': user.company_logo_url,
+            })
+        return out
+
+
+def _team_place(city, state):
+    city = (city or '').strip()
+    state = (state or '').strip()
+    if city and state:
+        return f'{city}, {state}'
+    return city or state or ''
+
+
+def create_broker_team(admin_user_id, name, city, state, latitude=None, longitude=None, logo_url=None, active=False):
+    """Create a company. It appears on the map only after the team subscription is active."""
+    with get_session() as s:
+        row = BrokerTeam(
+            name=(name or '').strip(),
+            admin_user_id=admin_user_id,
+            city=(city or '').strip() or None,
+            state=(state or '').strip() or None,
+            location=_team_place(city, state) or None,
+            latitude=latitude,
+            longitude=longitude,
+            logo_url=logo_url,
+            subscription_status='active' if active else 'inactive',
+        )
+        s.add(row)
+        s.flush()
+        member = BrokerTeamMember(team_id=row.id, user_id=admin_user_id, status='active' if active else 'pending')
+        s.add(member)
+        return row.id
+
+
+def set_team_subscription(team_id, status):
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id).first()
+        if not team:
+            return False
+        team.subscription_status = status
+        if status == 'active':
+            member = s.query(BrokerTeamMember).filter(
+                BrokerTeamMember.team_id == team_id,
+                BrokerTeamMember.user_id == team.admin_user_id,
+            ).first()
+            if member:
+                member.status = 'active'
+            else:
+                s.add(BrokerTeamMember(team_id=team_id, user_id=team.admin_user_id, status='active'))
+        return True
+
+
+def list_public_teams():
+    with get_session() as s:
+        rows = (
+            s.query(BrokerTeam)
+            .filter(BrokerTeam.subscription_status == 'active')
+            .order_by(BrokerTeam.name.asc())
+            .all()
+        )
+        return [row.to_dict() for row in rows]
+
+
+def get_broker_team(team_id):
+    with get_session() as s:
+        row = s.query(BrokerTeam).filter(BrokerTeam.id == team_id).first()
+        return row.to_dict() if row else None
+
+
+def user_on_active_team(user_id):
+    """True when this person is an approved member of a paid team."""
+    with get_session() as s:
+        row = (
+            s.query(BrokerTeamMember, BrokerTeam)
+            .join(BrokerTeam, BrokerTeam.id == BrokerTeamMember.team_id)
+            .filter(
+                BrokerTeamMember.user_id == user_id,
+                BrokerTeamMember.status == 'active',
+                BrokerTeam.subscription_status == 'active',
+            )
+            .first()
+        )
+        if not row:
+            return None
+        member, team = row
+        data = team.to_dict()
+        data['membership_status'] = member.status
+        return data
+
+
+def team_membership(user_id):
+    with get_session() as s:
+        row = (
+            s.query(BrokerTeamMember, BrokerTeam)
+            .join(BrokerTeam, BrokerTeam.id == BrokerTeamMember.team_id)
+            .filter(BrokerTeamMember.user_id == user_id)
+            .order_by(BrokerTeamMember.id.desc())
+            .first()
+        )
+        if not row:
+            return None
+        member, team = row
+        data = team.to_dict()
+        data['membership_status'] = member.status
+        data['is_admin'] = team.admin_user_id == user_id
+        return data
+
+
+def request_team_join(team_id, user_id):
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.subscription_status == 'active').first()
+        if not team:
+            return None
+        existing = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == user_id,
+        ).first()
+        if existing:
+            return existing.status
+        s.add(BrokerTeamMember(team_id=team_id, user_id=user_id, status='pending'))
+        return 'pending'
+
+
+def allow_team_member(team_id, admin_user_id, member_user_id):
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.admin_user_id == admin_user_id).first()
+        if not team:
+            return False
+        member = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == member_user_id,
+        ).first()
+        if not member:
+            return False
+        member.status = 'active'
+        return True
+
+
+def list_team_members(team_id, status=None):
+    with get_session() as s:
+        q = (
+            s.query(BrokerTeamMember, User)
+            .join(User, User.id == BrokerTeamMember.user_id)
+            .filter(BrokerTeamMember.team_id == team_id)
+        )
+        if status:
+            q = q.filter(BrokerTeamMember.status == status)
+        out = []
+        for member, user in q.all():
+            out.append({
+                'user_id': user.id,
+                'status': member.status,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'company': user.company,
+                'email': user.email,
+                'phone': user.phone,
+                'profile_photo_url': user.profile_photo_url,
+                'broker_specialties': user.broker_specialties,
+                'broker_bio': user.broker_bio,
+                'is_admin': user.id == s.query(BrokerTeam.admin_user_id).filter(BrokerTeam.id == team_id).scalar(),
+            })
+        return out
+
+
+def listings_for_user(user_id, include_off_market=False):
+    with get_session() as s:
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.user_id == user_id, UserListing.status == 'active')
+            .order_by(UserListing.created_at.desc())
+            .all()
+        )
+        out = []
+        for row in rows:
+            market = (row.market or 'public').lower()
+            if market in ('private',):
+                continue
+            if market in ('off_market', 'broker_only') and not include_off_market:
+                continue
+            city = row.city or ''
+            state = row.state or ''
+            place = _team_place(city, state) or row.location or ''
+            if place and len(place) <= 4 and place.isalpha():
+                place = _team_place(city, state)
+            out.append({
+                'id': row.id,
+                'title': row.title,
+                'price': row.price,
+                'city': city,
+                'state': state,
+                'place': place,
+                'serial_number': row.serial_number or '',
+                'year': row.year,
             })
         return out
 

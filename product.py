@@ -109,10 +109,13 @@ def api_broker_profile():
         return err
     if request.method == 'PATCH':
         data = request.get_json(silent=True) or {}
-        if not authz.is_broker(user):
+        from app import has_active_subscription
+        on_team = bool(db_module.user_on_active_team(user['id']))
+        paid = has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team')
+        if not user.get('is_admin') and not (authz.has_role(user, 'broker') and (on_team or paid)):
             return jsonify({
                 'error': 'broker_subscription_required',
-                'message': 'A broker account is $10 a month. Start it from your profile.',
+                'message': 'A solo broker account is $19.99 a month. On a team, the individual pays nothing.',
             }), 402
         data['profile_role'] = 'broker'
         db_module.update_user_profile(user['id'], data)

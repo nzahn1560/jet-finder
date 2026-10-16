@@ -499,37 +499,153 @@ def service_providers():
     )
 
 
+def _team_map_point(team):
+    place = team.get('location') or ', '.join(part for part in [team.get('city'), team.get('state')] if part)
+    lat = team.get('latitude')
+    lon = team.get('longitude')
+    if lat is None or lon is None:
+        airport = sections_module.resolve_place(place, country='US')
+        if airport:
+            lat = airport.get('lat')
+            lon = airport.get('lon')
+    members = db_module.list_team_members(team['id'], status='active')
+    return {
+        'id': team.get('id'),
+        'lat': lat,
+        'lon': lon,
+        'display_name': team.get('name') or 'Team',
+        'place': place,
+        'logo': team.get('logo_url') or '',
+        'bio': team.get('bio') or '',
+        'member_count': len(members),
+    }
+
+
 @app.route('/brokers')
 def brokers_page():
-    """Map of accounts whose profile role is broker."""
-    people = sections_module.place_on_map(db_module.list_directory_brokers())
-    brokers = []
-    map_points = []
-    for person in people:
-        name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part)
-        person['display_name'] = name or person.get('company') or 'Broker'
-        person['place'] = person.get('airport_city') or person.get('profile_location') or ''
-        brokers.append(person)
-        if person.get('broker_lat') is not None and person.get('broker_lon') is not None:
-            person['lat'] = person['broker_lat']
-            person['lon'] = person['broker_lon']
-        map_points.append({
-            'id': person.get('id'),
-            'lat': person.get('lat'),
-            'lon': person.get('lon'),
-            'display_name': person['display_name'],
-            'company': person.get('company') or '',
-            'place': person.get('place') or '',
-            'phone': person.get('phone') or '',
-            'email': person.get('email') or '',
-            'specialties': person.get('broker_specialties') or '',
-            'bio': person.get('broker_bio') or '',
-            'website': person.get('broker_website') or '',
-            'verified': bool(person.get('broker_verified')),
-            'photo': person.get('profile_photo_url') or person.get('broker_image_url') or '',
-            'logo': person.get('company_logo_url') or '',
+    """Map of broker teams. Individuals are opened from the company they belong to."""
+    teams = [_team_map_point(team) for team in db_module.list_public_teams()]
+    return render_template('brokers.html', map_points=teams)
+
+
+@app.route('/api/broker-teams/<int:team_id>')
+def api_broker_team_detail(team_id):
+    """Brokers on a team, and each broker's own listings."""
+    team = db_module.get_broker_team(team_id)
+    if not team or team.get('subscription_status') != 'active':
+        return jsonify({'error': 'not_found'}), 404
+    viewer = get_current_user_from_request()
+    include_off_market = _broker_market_access(viewer)
+    people = []
+    for member in db_module.list_team_members(team_id, status='active'):
+        name = ' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) or 'Broker'
+        people.append({
+            'user_id': member.get('user_id'),
+            'name': name,
+            'photo': member.get('profile_photo_url') or '',
+            'specialties': member.get('broker_specialties') or '',
+            'bio': member.get('broker_bio') or '',
+            'is_admin': bool(member.get('is_admin')),
+            'listings': db_module.listings_for_user(member.get('user_id'), include_off_market=include_off_market),
         })
-    return render_template('brokers.html', brokers=brokers, map_points=map_points)
+    return jsonify({
+        'id': team.get('id'),
+        'name': team.get('name'),
+        'place': team.get('location') or '',
+        'logo': team.get('logo_url') or '',
+        'brokers': people,
+    })
+
+
+@app.route('/api/broker-teams/<int:team_id>/join', methods=['POST'])
+@require_auth
+def api_broker_team_join(team_id):
+    """Ask a team admin to add this individual broker. Joining is free."""
+    user = request.current_user  # type: ignore[attr-defined]
+    current = db_module.team_membership(user['id'])
+    if current and current.get('id') != team_id:
+        return jsonify({'error': 'already_on_team', 'message': 'You already belong to a team request. One team at a time.'}), 400
+    status = db_module.request_team_join(team_id, user['id'])
+    if not status:
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify({'ok': True, 'status': status}), 200
+
+
+@app.route('/api/broker-teams/<int:team_id>/members/<int:member_id>/allow', methods=['POST'])
+@require_auth
+def api_broker_team_allow(team_id, member_id):
+    """The team admin lets an individual onto the team. That person pays nothing."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if not db_module.allow_team_member(team_id, user['id'], member_id):
+        return jsonify({'error': 'forbidden'}), 403
+    db_module.update_user_profile(member_id, {'profile_role': 'broker'})
+    return jsonify({'ok': True}), 200
+
+
+@app.route('/api/account/team-checkout', methods=['POST'])
+@require_auth
+def api_team_checkout():
+    """Start the $19.99/month charge for a new broker team."""
+    user = request.current_user  # type: ignore[attr-defined]
+    data = request.get_json(silent=True) or {}
+    current = db_module.team_membership(user['id'])
+    if current and current.get('subscription_status') == 'active':
+        return jsonify({'error': 'already_on_team', 'message': 'You already belong to a team.'}), 400
+    if current and not current.get('is_admin'):
+        return jsonify({'error': 'already_on_team', 'message': 'You already asked to join a team.'}), 400
+    name = (data.get('name') or '').strip()
+    city = (data.get('city') or '').strip()
+    state = (data.get('state') or '').strip()
+    if current and current.get('is_admin'):
+        team_id = current['id']
+        name = name or current.get('name') or ''
+    else:
+        if not name or not city or not state:
+            return jsonify({'error': 'missing_fields', 'message': 'Team name, city, and state are required.'}), 400
+        place = sections_module.resolve_place(f'{city}, {state}', country='US')
+        team_id = db_module.create_broker_team(
+            user['id'], name, city, state,
+            latitude=(place or {}).get('lat'),
+            longitude=(place or {}).get('lon'),
+            logo_url=user.get('company_logo_url'),
+            active=False,
+        )
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'payment_not_ready',
+            'team_id': team_id,
+            'message': 'A team is $19.99 a month. Card checkout is not connected on this server yet, so the team is not on the map.',
+        }), 503
+    base = request.host_url.rstrip('/')
+    try:
+        checkout = stripe.checkout.Session.create(
+            mode='subscription',
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': BROKER_FEE_CENTS,
+                    'recurring': {'interval': 'month'},
+                    'product_data': {
+                        'name': f'JetSchool broker team — {name}',
+                        'description': 'One team subscription. Brokers on the team pay nothing. $19.99 per month.',
+                    },
+                },
+                'quantity': 1,
+            }],
+            metadata={
+                'user_id': str(user['id']),
+                'purpose': 'broker_team',
+                'team_id': str(team_id),
+            },
+            customer_email=user.get('email'),
+            success_url=f'{base}/dashboard?team=1&session_id={{CHECKOUT_SESSION_ID}}',
+            cancel_url=f'{base}/dashboard?team=0',
+        )
+        return jsonify({'url': checkout.url, 'team_id': team_id}), 200
+    except Exception:
+        logger.exception('Team checkout creation failed')
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
 
 
 @app.route('/off-market')
@@ -537,8 +653,7 @@ def brokers_page():
 def off_market_page():
     """Approved broker-only listings. Hidden from the public and from buyers."""
     user = get_current_user_from_request()
-    import authz
-    if not authz.is_broker(user):
+    if not _broker_market_access(user):
         return render_template('brokers_only.html'), 403
     rows = db_module.get_off_market_listings()
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
@@ -1077,7 +1192,19 @@ def marketplace_search():
 def dashboard():
     """Customer profile: aircraft they sell, and aircraft they are watching."""
     user = get_current_user_info()
-    return render_template('dashboard.html', user=user, subscription=user.get('subscription') if user else None)
+    membership = db_module.team_membership(user['id']) if user else None
+    pending_members = []
+    if membership and membership.get('is_admin') and membership.get('subscription_status') == 'active':
+        pending_members = db_module.list_team_members(membership['id'], status='pending')
+    teams = db_module.list_public_teams() if user else []
+    return render_template(
+        'dashboard.html',
+        user=user,
+        subscription=user.get('subscription') if user else None,
+        membership=membership,
+        pending_members=pending_members,
+        teams=teams,
+    )
 
 @app.route('/airplane-stock-market')
 def airplane_stock_market():
@@ -2451,7 +2578,7 @@ def register():
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
                 if wants_broker:
-                    flash('Account created. A broker account is $10 a month — start it from your profile.', 'success')
+                    flash('Account created. A solo broker account is $19.99 a month, or join a team from your profile and pay nothing.', 'success')
                 else:
                     flash('Account created successfully!', 'success')
                 resp = redirect(url_for('dashboard', broker='start') if wants_broker else url_for('dashboard'))
@@ -2774,10 +2901,11 @@ def api_profile():
         import authz
         requested = (data.get('profile_role') or '').strip().lower()
         already_broker = authz.is_broker(user)
-        if requested == 'broker' and not already_broker and not has_active_subscription(user['id'], 'broker'):
+        on_team = bool(db_module.user_on_active_team(user['id']))
+        if requested == 'broker' and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
             data.pop('profile_role', None)
             broker_checkout_required = True
-        if 'roles' in data and not already_broker and not has_active_subscription(user['id'], 'broker'):
+        if 'roles' in data and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
             kept = [role for role in authz.clean_roles(data.get('roles')).split(',') if role and role != 'broker']
             data['roles'] = ','.join(kept)
         db_module.update_user_profile(user['id'], data)
@@ -2794,17 +2922,38 @@ def _stripe_field(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _grant_broker_account(user_id, customer_id=None, subscription_id=None):
-    """Turn on the broker role after a $10 monthly checkout completes."""
+BROKER_FEE_CENTS = 1999
+BROKER_FEE_LABEL = '$19.99'
+
+
+def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
+    """Turn on an individual broker after the $19.99 monthly checkout completes."""
     update_user_subscription(
         user_id,
-        'broker',
+        subscription_type,
         stripe_customer_id=customer_id,
         stripe_subscription_id=subscription_id,
         subscription_status='active',
         activated_at=datetime.utcnow(),
     )
     db_module.update_user_profile(user_id, {'profile_role': 'broker'})
+
+
+def _broker_market_access(user) -> bool:
+    """Off-market is open to site admins, paid solo brokers, and brokers on a paid team."""
+    import authz
+    if not user:
+        return False
+    if user.get('is_admin'):
+        return True
+    if not authz.has_role(user, 'broker'):
+        return False
+    if db_module.user_on_active_team(user['id']):
+        return True
+    return bool(
+        has_active_subscription(user['id'], 'broker')
+        or has_active_subscription(user['id'], 'broker_team')
+    )
 
 
 def _broker_paid_from_checkout(sess, expected_user_id=None):
@@ -2814,7 +2963,8 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
             meta = dict(meta)
         except Exception:
             meta = {}
-    if meta.get('purpose') != 'broker_account':
+    purpose = meta.get('purpose')
+    if purpose not in ('broker_account', 'broker_team'):
         return False
     try:
         user_id = int(meta.get('user_id') or 0)
@@ -2824,6 +2974,20 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
         return False
     if _stripe_field(sess, 'status') != 'complete':
         return False
+    if purpose == 'broker_team':
+        try:
+            team_id = int(meta.get('team_id') or 0)
+        except (TypeError, ValueError):
+            return False
+        if not db_module.set_team_subscription(team_id, 'active'):
+            return False
+        _grant_broker_account(
+            user_id,
+            customer_id=_stripe_field(sess, 'customer'),
+            subscription_id=_stripe_field(sess, 'subscription'),
+            subscription_type='broker_team',
+        )
+        return True
     _grant_broker_account(
         user_id,
         customer_id=_stripe_field(sess, 'customer'),
@@ -2835,15 +2999,17 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
 @app.route('/api/account/broker-checkout', methods=['POST'])
 @require_auth
 def api_broker_checkout():
-    """Start a $10/month Stripe subscription that labels the account as a broker."""
+    """Start a $19.99/month Stripe subscription for a broker who is not on a team."""
     user = request.current_user  # type: ignore[attr-defined]
+    if db_module.user_on_active_team(user['id']):
+        return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
     import authz
     if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
         return jsonify({'already': True}), 200
     if not _stripe_configured():
         return jsonify({
             'error': 'payment_not_ready',
-            'message': 'A broker account is $10 a month. Card checkout is not connected on this server yet, so the broker role stays off.',
+            'message': 'A broker who is not on a team pays $19.99 a month. Card checkout is not connected on this server yet, so the broker role stays off.',
         }), 503
     base = request.host_url.rstrip('/')
     try:
@@ -2853,11 +3019,11 @@ def api_broker_checkout():
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
-                    'unit_amount': 1000,
+                    'unit_amount': BROKER_FEE_CENTS,
                     'recurring': {'interval': 'month'},
                     'product_data': {
                         'name': 'JetSchool broker account',
-                        'description': 'Brokers-only access, including off-market aircraft. $10 per month.',
+                        'description': 'Solo broker access, including off-market aircraft. $19.99 per month.',
                     },
                 },
                 'quantity': 1,
@@ -4955,6 +5121,7 @@ _PUBLIC_LISTING_KEYS = (
     'total_hourly_cost', 'total_fixed_cost', 'total_variable_cost',
     'annual_budget', 'multi_year_total_cost',
     'email', 'contact_email', 'date_range', 'lowest_year', 'highest_year', 'status',
+    'serial_number', 'city', 'state',
 )
 
 
@@ -5136,6 +5303,9 @@ def _row_to_combined_listing(row, aircraft_map):
         'listing_price': price,
         'hours': hours,
         'location': location,
+        'city': row.get('city') or '',
+        'state': row.get('state') or '',
+        'serial_number': row.get('serial_number') or '',
         'contact_email': email,
         'email': email,
         'description': description,
@@ -5319,11 +5489,18 @@ def _listing_data_from_form(form, user):
     if notes:
         description = (description + '\n\n' + '\n'.join(notes)).strip()
     email = (form.get('email') or form.get('contact_email') or (user or {}).get('email') or '').strip()
+    city = (form.get('city') or '').strip()
+    state = (form.get('state') or '').strip()
+    location = (form.get('location') or '').strip()
+    if city and state:
+        location = f'{city}, {state}'
     return {
         'profile_id': form.get('profile_id'),
         'title': (form.get('listing_name') or form.get('title') or '').strip(),
         'price': form.get('price'),
-        'location': (form.get('location') or '').strip(),
+        'location': location,
+        'city': city,
+        'state': state,
         'email': email,
         'year': form.get('year_model') or form.get('year'),
         'hours': form.get('total_time') if form.get('total_time') not in (None, '') else form.get('hours'),
@@ -5353,13 +5530,19 @@ def _create_listing_for_user(user, data):
     """
     if not user:
         return None, ({'error': 'auth_required', 'message': 'Sign in before submitting a listing.'}, 401)
+    city = str(data.get('city') or '').strip()
+    state = str(data.get('state') or '').strip()
+    if city and state:
+        data['location'] = f'{city}, {state}'
+        data['city'] = city
+        data['state'] = state
     required = ['profile_id', 'price', 'location', 'email', 'year', 'hours']
     missing = [f for f in required if data.get(f) in (None, '')]
     if missing:
         return None, ({
             'error': 'missing_fields',
             'fields': missing,
-            'message': 'Choose an aircraft, then enter the year, hours, price, airport, and email.',
+            'message': 'Choose an aircraft, then enter the year, hours, price, city, state, and email.',
         }, 400)
     try:
         profile_id = int(data['profile_id'])
