@@ -26,6 +26,7 @@ class ProductTests(unittest.TestCase):
         cls.seller = cls._signup('seller@example.com', 'seller-pass-1', 'seller')
         cls.buyer = cls._signup('buyer@example.com', 'buyer-pass-1', 'buyer')
         cls.broker = cls._signup('broker@example.com', 'broker-pass-1', 'broker')
+        db_module.update_user_profile(cls.broker['id'], {'profile_role': 'broker'})
         cls.operator = cls._signup('operator@example.com', 'operator-pass-1', 'charter_operator')
         cls.admin = cls._signup('admin@example.com', 'admin-pass-1', 'seller')
         db_module.set_user_admin(cls.admin['id'], True)
@@ -102,9 +103,32 @@ class ProductTests(unittest.TestCase):
         self._login('buyer@example.com', 'buyer-pass-1')
         blocked = self.client.get('/off-market')
         self.assertEqual(blocked.status_code, 403)
+        self.assertIn(b'Brokers only', blocked.data)
         self._login('broker@example.com', 'broker-pass-1')
         allowed = self.client.get('/off-market')
         self.assertEqual(allowed.status_code, 200)
+        self.assertIn(b'Brokers only', allowed.data)
+
+    def test_signup_does_not_grant_a_free_broker_account(self):
+        created = self.client.post('/api/auth/signup', json={
+            'email': 'new-broker@example.com',
+            'password': 'broker-pass-1',
+            'first_name': 'New',
+            'profile_role': 'broker',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        self.assertEqual(created.get_json()['user']['profile_role'], 'buyer')
+        self.assertTrue(created.get_json().get('broker_checkout_required'))
+        blocked = self.client.get('/off-market')
+        self.assertEqual(blocked.status_code, 403)
+        checkout = self.client.post('/api/account/broker-checkout')
+        self.assertEqual(checkout.status_code, 503)
+
+    def test_charter_and_mechanics_are_coming_soon(self):
+        for path in ('/charter', '/charter-search', '/mechanics', '/charter/fleet'):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200, path)
+            self.assertIn(b'Coming soon', page.data)
 
     def test_owner_cannot_edit_someone_elses_listing(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -156,11 +180,11 @@ class ProductTests(unittest.TestCase):
 
     def test_charter_request_is_not_confirmed_until_operator_accepts(self):
         self._login('operator@example.com', 'operator-pass-1')
-        page = self.client.post('/charter/fleet', data={
+        operator_id = db_module.ensure_charter_operator(self.operator['id'], 'Operator Air', email='operator@example.com')
+        db_module.create_charter_aircraft(operator_id, {
             'name': 'Citation CJ3', 'registration': 'N100JS', 'base_airport': 'KTEB',
             'seats': 7, 'hourly_rate': 3200, 'range_nm': 1800, 'speed_kts': 400,
-        }, follow_redirects=False)
-        self.assertIn(page.status_code, (302, 303))
+        })
         available = self.client.get('/api/charter/available?departure=JFK&arrival=MIA&passengers=2&date=2026-11-01')
         aircraft = available.get_json()['aircraft']
         self.assertTrue(aircraft)

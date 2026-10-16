@@ -9,39 +9,25 @@
 {% block content %}
 <div class="section-page">
     <h1>Broker map</h1>
-    <p class="section-lead">Brokers appear here after they set their profile role to Broker and their location to an airport code or city.</p>
+    <p class="section-lead">Search by name, company, or city. Hover a pin for a short profile, then select the broker you want.</p>
 
-    <div id="broker-map" class="section-map"></div>
-
-    {% if brokers %}
-    <div class="section-grid">
-        {% for broker in brokers %}
-        <article class="section-card">
-            <h2>{{ broker.display_name }}</h2>
-            {% if broker.company %}<p>{{ broker.company }}</p>{% endif %}
-            {% if broker.broker_verified %}<p class="section-meta">Verified broker</p>{% endif %}
-            {% if broker.broker_specialties %}<p>{{ broker.broker_specialties }}</p>{% endif %}
-            {% if broker.broker_bio %}<p class="section-meta">{{ broker.broker_bio }}</p>{% endif %}
-            {% if broker.broker_website %}<p><a href="{{ broker.broker_website }}" rel="noopener">Website</a></p>{% endif %}
-            <p class="section-meta">
-                {% if broker.airport_city %}{{ broker.airport_city }}{% if broker.airport_code %} ({{ broker.airport_code }}){% endif %}
-                {% elif broker.profile_location %}{{ broker.profile_location }} — location not matched to an airport
-                {% else %}No location on the profile yet{% endif %}
-            </p>
-            {% if broker.phone %}<p>Phone: {{ broker.phone }}</p>{% endif %}
-            {% if broker.email %}<p>Email: <a href="mailto:{{ broker.email }}">{{ broker.email }}</a></p>{% endif %}
-        </article>
-        {% endfor %}
+    <div class="broker-shell">
+        <aside class="broker-list-wrap">
+            <label class="broker-search-label" for="broker-search">Find a broker</label>
+            <input id="broker-search" class="form-control" type="search" placeholder="Name, company, or city" autocomplete="off">
+            <div id="broker-list" class="broker-list"></div>
+        </aside>
+        <div class="broker-stage">
+            <div id="broker-map" class="section-map"></div>
+            <article id="broker-selected" class="broker-selected" hidden></article>
+        </div>
     </div>
-    {% else %}
-    <div class="section-empty">No brokers have published a profile yet. On your profile, choose the Broker role and add a location such as KTEB or Dallas.</div>
-    {% endif %}
 
     <p class="section-note mt-3">
-        {% if current_user %}
-        <a href="{{ url_for('dashboard') }}">Update your profile</a> to show up on this map.
+        {% if get_current_user_info() %}
+        <a href="{{ url_for('dashboard') }}">Update your profile</a> to show a photo, company logo, and location on this map.
         {% else %}
-        <a href="{{ url_for('register') }}">Create an account</a> and set the role to Broker.
+        <a href="{{ url_for('register') }}">Create an account</a>. A broker label is $10 a month.
         {% endif %}
     </p>
 </div>
@@ -54,23 +40,113 @@
         });
     }
     const brokers = {{ map_points|tojson }};
+    const listEl = document.getElementById('broker-list');
+    const searchEl = document.getElementById('broker-search');
+    const selectedEl = document.getElementById('broker-selected');
     const map = L.map('broker-map').setView([39.8, -98.6], 4);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri',
         maxZoom: 16
     }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 16,
+        pane: 'overlayPane'
+    }).addTo(map);
+
+    const markers = new Map();
+    let activeId = null;
+
+    function photoStyle(url) {
+        return url ? "background-image:url('" + String(url).replace(/'/g, '') + "')" : '';
+    }
+
+    function miniHtml(broker) {
+        const initial = esc((broker.display_name || 'B').slice(0, 1));
+        return '<div class="broker-mini">'
+            + '<div class="broker-mini__banner" style="' + photoStyle(broker.logo) + '"></div>'
+            + '<div class="broker-mini__photo" style="' + photoStyle(broker.photo) + '">' + (broker.photo ? '' : initial) + '</div>'
+            + '<strong>' + esc(broker.display_name) + '</strong>'
+            + (broker.company ? '<span>' + esc(broker.company) + '</span>' : '')
+            + (broker.place ? '<span class="broker-mini__place">' + esc(broker.place) + '</span>' : '')
+            + (broker.specialties ? '<span>' + esc(broker.specialties) + '</span>' : '')
+            + '</div>';
+    }
+
+    function selectBroker(broker) {
+        activeId = broker.id;
+        document.querySelectorAll('.broker-person').forEach(function (node) {
+            node.classList.toggle('is-selected', Number(node.getAttribute('data-id')) === broker.id);
+        });
+        markers.forEach(function (marker, id) {
+            const on = id === broker.id;
+            marker.setStyle({ radius: on ? 11 : 8, weight: on ? 3 : 2, color: on ? '#fff' : '#F05545' });
+        });
+        selectedEl.hidden = false;
+        selectedEl.innerHTML = miniHtml(broker)
+            + (broker.bio ? '<p>' + esc(broker.bio) + '</p>' : '')
+            + (broker.phone ? '<p>' + esc(broker.phone) + '</p>' : '')
+            + (broker.email ? '<p><a href="mailto:' + esc(broker.email) + '">' + esc(broker.email) + '</a></p>' : '')
+            + (broker.website ? '<p><a href="' + esc(broker.website) + '" rel="noopener">Website</a></p>' : '');
+        const marker = markers.get(broker.id);
+        if (marker) {
+            map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 7), { duration: 0.6 });
+        }
+    }
+
+    function renderList(query) {
+        const needle = (query || '').trim().toLowerCase();
+        const shown = brokers.filter(function (broker) {
+            if (!needle) return true;
+            return [broker.display_name, broker.company, broker.place, broker.specialties].join(' ').toLowerCase().indexOf(needle) >= 0;
+        });
+        if (!shown.length) {
+            listEl.innerHTML = '<p class="broker-empty">No broker matches that search.</p>';
+            return;
+        }
+        listEl.innerHTML = shown.map(function (broker) {
+            return '<button type="button" class="broker-person' + (broker.id === activeId ? ' is-selected' : '') + '" data-id="' + broker.id + '">'
+                + '<span class="broker-person__photo" style="' + photoStyle(broker.photo) + '">' + (broker.photo ? '' : esc((broker.display_name || 'B').slice(0, 1))) + '</span>'
+                + '<span><strong>' + esc(broker.display_name) + '</strong>'
+                + '<em>' + esc(broker.company || broker.place || 'Broker') + '</em></span>'
+                + '</button>';
+        }).join('');
+        listEl.querySelectorAll('.broker-person').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const id = Number(button.getAttribute('data-id'));
+                const broker = brokers.find(function (item) { return item.id === id; });
+                if (broker) selectBroker(broker);
+            });
+        });
+        markers.forEach(function (marker, id) {
+            const visible = shown.some(function (broker) { return broker.id === id; });
+            if (visible) marker.addTo(map);
+            else map.removeLayer(marker);
+        });
+    }
+
     const bounds = [];
     brokers.forEach(function (broker) {
         if (broker.lat == null || broker.lon == null) return;
         const marker = L.circleMarker([broker.lat, broker.lon], {
-            radius: 8, color: '#F05545', fillColor: '#F05545', fillOpacity: 0.9
+            radius: 8, color: '#F05545', weight: 2, fillColor: '#F05545', fillOpacity: 0.92
         }).addTo(map);
-        marker.bindPopup('<strong>' + esc(broker.display_name) + '</strong><br>' + esc(broker.company || '') + '<br>' + esc(broker.place || ''));
+        marker.bindTooltip(miniHtml(broker), {
+            direction: 'top',
+            opacity: 1,
+            className: 'broker-tip',
+            offset: [0, -8]
+        });
+        marker.on('click', function () { selectBroker(broker); });
+        markers.set(broker.id, marker);
         bounds.push([broker.lat, broker.lon]);
     });
-    if (bounds.length) {
-        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 8 });
+    if (!brokers.length) {
+        listEl.innerHTML = '<p class="broker-empty">No brokers have published a profile yet.</p>';
+    } else {
+        renderList('');
     }
+    if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 8 });
+    searchEl.addEventListener('input', function () { renderList(searchEl.value); });
     setTimeout(function () { map.invalidateSize(); }, 200);
 })();
 </script>

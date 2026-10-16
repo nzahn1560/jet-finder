@@ -140,6 +140,9 @@ class User(Base):
     broker_lat = Column(Float)
     broker_lon = Column(Float)
     broker_image_url = Column(String(500))
+    # Profile photo and company-logo background. Values are image data URLs until Cloudflare R2 stores the files.
+    profile_photo_url = Column(Text)
+    company_logo_url = Column(Text)
     is_admin = Column(Boolean, default=False, nullable=False)  # Admin portal access
     user_type = Column(String(50), default='free_user')
     is_verified_seller = Column(Boolean, default=False)
@@ -712,6 +715,8 @@ def init_db():
                 'broker_lat FLOAT',
                 'broker_lon FLOAT',
                 'broker_image_url VARCHAR(500)',
+                'profile_photo_url TEXT',
+                'company_logo_url TEXT',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -736,6 +741,8 @@ def init_db():
                 ('broker_lat', 'DOUBLE PRECISION'),
                 ('broker_lon', 'DOUBLE PRECISION'),
                 ('broker_image_url', 'VARCHAR(500)'),
+                ('profile_photo_url', 'TEXT'),
+                ('company_logo_url', 'TEXT'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -849,12 +856,32 @@ def create_user(email, password_hash, first_name=None, last_name=None, company=N
 _PROFILE_ROLES = {'broker', 'buyer', 'seller', 'mechanic', 'charter_operator', 'other'}
 
 
+def stored_image_url(value):
+    """Keep a small image preview or a future Cloudflare R2 https URL. Reject anything else."""
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.startswith('https://') and len(value) <= 500:
+        return value
+    if (
+        value.startswith('data:image/')
+        and ';base64,' in value
+        and len(value) <= 1_200_000
+        and value.split(',', 1)[0] in ('data:image/jpeg;base64', 'data:image/png;base64', 'data:image/webp;base64')
+    ):
+        return value
+    return None
+
+
 def update_user_profile(user_id, fields):
     """Update the public profile fields a customer can edit themselves."""
     allowed = {
         'first_name', 'last_name', 'company', 'phone', 'profile_role', 'profile_location',
         'roles', 'broker_bio', 'broker_specialties', 'broker_website', 'broker_years',
         'broker_state', 'broker_country', 'broker_image_url',
+        'profile_photo_url', 'company_logo_url',
     }
     safe = {}
     for key, value in (fields or {}).items():
@@ -869,6 +896,18 @@ def update_user_profile(user_id, fields):
     if 'roles' in safe:
         from authz import clean_roles
         safe['roles'] = clean_roles(safe['roles'])
+    for image_key in ('profile_photo_url', 'company_logo_url'):
+        if image_key not in safe:
+            continue
+        raw = (fields or {}).get(image_key)
+        if raw in (None, ''):
+            safe[image_key] = None
+        else:
+            cleaned = stored_image_url(raw if isinstance(raw, str) else safe[image_key])
+            if cleaned is None:
+                safe.pop(image_key, None)
+            else:
+                safe[image_key] = cleaned
     if 'broker_years' in safe and safe['broker_years'] not in (None, ''):
         try:
             safe['broker_years'] = int(safe['broker_years'])
@@ -1511,6 +1550,8 @@ def list_directory_brokers():
                 'broker_lat': user.broker_lat,
                 'broker_lon': user.broker_lon,
                 'broker_image_url': user.broker_image_url,
+                'profile_photo_url': user.profile_photo_url,
+                'company_logo_url': user.company_logo_url,
             })
         return out
 

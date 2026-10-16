@@ -370,8 +370,12 @@ def per_use_required(service_type, price_per_use):
 @app.route('/charter')
 @app.route('/charter-search')
 def charter_search():
-    """Charter estimates from the aircraft already on the site."""
-    return render_template('charter.html')
+    """Charter stays closed while the booking model is still being built."""
+    return render_template(
+        'coming_soon.html',
+        product='Charter',
+        summary='Shop a route and see the aircraft that can fly it. The bookable charter market is still being built, so this section stays closed.',
+    )
 
 @app.route('/empty-legs')
 def empty_legs():
@@ -450,7 +454,12 @@ def _directory_map_points(cards):
 @app.route('/mechanics', methods=['GET', 'POST'])
 @app.route('/service-providers', methods=['GET', 'POST'])
 def service_providers():
-    """Mechanic directory. A signed-in user can publish a shop."""
+    """Mechanic directory stays closed while the service model is still being built."""
+    return render_template(
+        'coming_soon.html',
+        product='Mechanics',
+        summary='Find a shop and see what they offer. Mechanic listings stay closed while that side of the business is still being built.',
+    )
     form_error = None
     if request.method == 'POST':
         user = get_current_user_from_request()
@@ -501,14 +510,25 @@ def brokers_page():
         person['display_name'] = name or person.get('company') or 'Broker'
         person['place'] = person.get('airport_city') or person.get('profile_location') or ''
         brokers.append(person)
-        if person.get('lat') is not None and person.get('lon') is not None:
-            map_points.append({
-                'lat': person['lat'],
-                'lon': person['lon'],
-                'display_name': person['display_name'],
-                'company': person.get('company') or '',
-                'place': person.get('place') or '',
-            })
+        if person.get('broker_lat') is not None and person.get('broker_lon') is not None:
+            person['lat'] = person['broker_lat']
+            person['lon'] = person['broker_lon']
+        map_points.append({
+            'id': person.get('id'),
+            'lat': person.get('lat'),
+            'lon': person.get('lon'),
+            'display_name': person['display_name'],
+            'company': person.get('company') or '',
+            'place': person.get('place') or '',
+            'phone': person.get('phone') or '',
+            'email': person.get('email') or '',
+            'specialties': person.get('broker_specialties') or '',
+            'bio': person.get('broker_bio') or '',
+            'website': person.get('broker_website') or '',
+            'verified': bool(person.get('broker_verified')),
+            'photo': person.get('profile_photo_url') or person.get('broker_image_url') or '',
+            'logo': person.get('company_logo_url') or '',
+        })
     return render_template('brokers.html', brokers=brokers, map_points=map_points)
 
 
@@ -519,7 +539,7 @@ def off_market_page():
     user = get_current_user_from_request()
     import authz
     if not authz.is_broker(user):
-        return render_template('error.html', error_code=403, message='Off-market aircraft are visible to broker accounts only.'), 403
+        return render_template('brokers_only.html'), 403
     rows = db_module.get_off_market_listings()
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
     listings = []
@@ -2413,6 +2433,9 @@ def register():
         company = request.form.get('company')
         phone = request.form.get('phone')
         profile_role = request.form.get('profile_role')
+        wants_broker = (profile_role or '').strip().lower() == 'broker'
+        if wants_broker:
+            profile_role = 'buyer'
         profile_location = request.form.get('profile_location')
 
         if not email or not password:
@@ -2427,8 +2450,11 @@ def register():
                 session['user_id'] = user_id_int
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
-                flash('Account created successfully!', 'success')
-                resp = redirect(url_for('dashboard'))
+                if wants_broker:
+                    flash('Account created. A broker account is $10 a month — start it from your profile.', 'success')
+                else:
+                    flash('Account created successfully!', 'success')
+                resp = redirect(url_for('dashboard', broker='start') if wants_broker else url_for('dashboard'))
                 _set_jet_session_cookie(resp, token)
                 return resp
             else:
@@ -2656,11 +2682,13 @@ def api_auth_signup():
     if get_user_by_email(email):
         return jsonify({'error': 'email_in_use'}), 400
     try:
+        requested_role = (data.get('profile_role') or '').strip().lower()
+        wants_broker = requested_role == 'broker'
         user_id = create_user(
             email, password,
             data.get('first_name'), data.get('last_name'),
             data.get('company'), data.get('phone'),
-            profile_role=data.get('profile_role'),
+            profile_role='buyer' if wants_broker else data.get('profile_role'),
             profile_location=data.get('profile_location'),
         )
     except Exception:
@@ -2673,7 +2701,11 @@ def api_auth_signup():
     token = _start_jet_session(user_id)
     _maybe_promote_admin(user_id, email)
     user = get_user_by_id(user_id)
-    resp = jsonify({'ok': True, 'user': _user_public_dict(user)})
+    resp = jsonify({
+        'ok': True,
+        'user': _user_public_dict(user),
+        'broker_checkout_required': wants_broker,
+    })
     _set_jet_session_cookie(resp, token)
     return resp, 201
 
@@ -2729,11 +2761,135 @@ def api_auth_me():
 def api_profile():
     """Customer profile. GET returns the account. PATCH updates name, role, location, phone."""
     user = request.current_user  # type: ignore[attr-defined]
+    broker_checkout_required = False
     if request.method == 'PATCH':
         data = request.get_json(silent=True) or {}
+        for image_key in ('profile_photo_url', 'company_logo_url'):
+            raw = data.get(image_key)
+            if raw not in (None, '') and db_module.stored_image_url(raw) is None:
+                return jsonify({
+                    'error': 'image_too_large',
+                    'message': 'Use a smaller image. Cloudflare storage will take the full file next.',
+                }), 400
+        import authz
+        requested = (data.get('profile_role') or '').strip().lower()
+        already_broker = authz.is_broker(user)
+        if requested == 'broker' and not already_broker and not has_active_subscription(user['id'], 'broker'):
+            data.pop('profile_role', None)
+            broker_checkout_required = True
+        if 'roles' in data and not already_broker and not has_active_subscription(user['id'], 'broker'):
+            kept = [role for role in authz.clean_roles(data.get('roles')).split(',') if role and role != 'broker']
+            data['roles'] = ','.join(kept)
         db_module.update_user_profile(user['id'], data)
         user = get_user_by_id(user['id']) or user
-    return jsonify({'user': _user_public_dict(user)}), 200
+    return jsonify({
+        'user': _user_public_dict(user),
+        'broker_checkout_required': broker_checkout_required,
+    }), 200
+
+
+def _stripe_field(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _grant_broker_account(user_id, customer_id=None, subscription_id=None):
+    """Turn on the broker role after a $10 monthly checkout completes."""
+    update_user_subscription(
+        user_id,
+        'broker',
+        stripe_customer_id=customer_id,
+        stripe_subscription_id=subscription_id,
+        subscription_status='active',
+        activated_at=datetime.utcnow(),
+    )
+    db_module.update_user_profile(user_id, {'profile_role': 'broker'})
+
+
+def _broker_paid_from_checkout(sess, expected_user_id=None):
+    meta = _stripe_field(sess, 'metadata') or {}
+    if not isinstance(meta, dict):
+        try:
+            meta = dict(meta)
+        except Exception:
+            meta = {}
+    if meta.get('purpose') != 'broker_account':
+        return False
+    try:
+        user_id = int(meta.get('user_id') or 0)
+    except (TypeError, ValueError):
+        return False
+    if not user_id or (expected_user_id is not None and user_id != int(expected_user_id)):
+        return False
+    if _stripe_field(sess, 'status') != 'complete':
+        return False
+    _grant_broker_account(
+        user_id,
+        customer_id=_stripe_field(sess, 'customer'),
+        subscription_id=_stripe_field(sess, 'subscription'),
+    )
+    return True
+
+
+@app.route('/api/account/broker-checkout', methods=['POST'])
+@require_auth
+def api_broker_checkout():
+    """Start a $10/month Stripe subscription that labels the account as a broker."""
+    user = request.current_user  # type: ignore[attr-defined]
+    import authz
+    if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
+        return jsonify({'already': True}), 200
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'payment_not_ready',
+            'message': 'A broker account is $10 a month. Card checkout is not connected on this server yet, so the broker role stays off.',
+        }), 503
+    base = request.host_url.rstrip('/')
+    try:
+        checkout = stripe.checkout.Session.create(
+            mode='subscription',
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': 1000,
+                    'recurring': {'interval': 'month'},
+                    'product_data': {
+                        'name': 'JetSchool broker account',
+                        'description': 'Brokers-only access, including off-market aircraft. $10 per month.',
+                    },
+                },
+                'quantity': 1,
+            }],
+            metadata={'user_id': str(user['id']), 'purpose': 'broker_account'},
+            customer_email=user.get('email'),
+            success_url=f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
+            cancel_url=f'{base}/dashboard?broker=0',
+        )
+        return jsonify({'url': checkout.url}), 200
+    except Exception:
+        logger.exception('Broker checkout creation failed')
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+
+
+@app.route('/api/account/broker-confirm', methods=['POST'])
+@require_auth
+def api_broker_confirm():
+    """Apply a finished broker checkout when the customer returns from Stripe."""
+    user = request.current_user  # type: ignore[attr-defined]
+    session_id = ((request.get_json(silent=True) or {}).get('session_id') or '').strip()
+    if not session_id or not _stripe_configured():
+        return jsonify({'error': 'not_confirmed'}), 400
+    try:
+        sess = stripe.checkout.Session.retrieve(session_id)
+    except Exception:
+        logger.exception('Broker checkout confirm failed')
+        return jsonify({'error': 'stripe_error'}), 502
+    if not _broker_paid_from_checkout(sess, expected_user_id=user['id']):
+        return jsonify({'error': 'not_confirmed'}), 400
+    fresh = get_user_by_id(user['id']) or user
+    return jsonify({'ok': True, 'user': _user_public_dict(fresh)}), 200
 
 
 def _saved_snapshot_from_request(data: dict) -> dict:
@@ -5464,6 +5620,9 @@ def api_stripe_webhook():
     if event_type == 'checkout.session.completed':
         sess = event['data']['object'] if isinstance(event, dict) else event.data.object
         session_id = sess.get('id') if isinstance(sess, dict) else sess.id
+        if _broker_paid_from_checkout(sess):
+            logger.info('Stripe webhook: broker account activated from session %s', session_id)
+            return jsonify({'received': True}), 200
         listing_id = db_module.mark_listing_paid_by_session(session_id)
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
