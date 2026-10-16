@@ -158,6 +158,44 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(page.status_code, 200, path)
             self.assertIn(b'Coming soon', page.data)
 
+    def test_off_market_listing_needs_only_name_profile_and_year(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json={
+            'profile_id': self.profile_id,
+            'title': 'Quiet Name',
+            'year': 2016,
+            'market': 'broker_only',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        row = db_module.get_listing_with_owner(created.get_json()['id'])
+        self.assertEqual(row['title'], 'Quiet Name')
+        self.assertEqual(row['year'], 2016)
+
+    def test_editing_a_live_listing_is_sent_back_as_an_amendment(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Amend Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        patched = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1800000})
+        self.assertEqual(patched.status_code, 200, patched.get_json())
+        note = patched.get_json().get('amendment') or ''
+        self.assertIn('Amendment', note)
+        self.assertIn('Price', note)
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'pending')
+        self.assertIn('Price', row.get('amendment_note') or '')
+
+    def test_public_profile_hides_edit_from_visitors(self):
+        visitor = self.client.get(f"/people/{self.buyer['id']}")
+        self.assertEqual(visitor.status_code, 200)
+        self.assertNotIn(b'Member since', visitor.data)
+        self.assertNotIn(b'id="open-profile-edit"', visitor.data)
+        self._login('buyer@example.com', 'buyer-pass-1')
+        owner = self.client.get(f"/people/{self.buyer['id']}")
+        self.assertIn(b'id="open-profile-edit"', owner.data)
+        self.assertIn(b'id="profile-edit"', owner.data)
+        self.assertIn(b'hidden', owner.data)
+
     def test_owner_cannot_edit_someone_elses_listing(self):
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Owned Jet', 'public'))

@@ -374,7 +374,7 @@ def charter_search():
     return render_template(
         'coming_soon.html',
         product='Charter',
-        summary='Shop a route and see the aircraft that can fly it. The bookable charter market is still being built, so this section stays closed.',
+        summary='Shop a route and see the aircraft that can fly it.',
     )
 
 @app.route('/empty-legs')
@@ -458,7 +458,7 @@ def service_providers():
     return render_template(
         'coming_soon.html',
         product='Mechanics',
-        summary='Find a shop and see what they offer. Mechanic listings stay closed while that side of the business is still being built.',
+        summary='Find a shop and see what they offer.',
     )
     form_error = None
     if request.method == 'POST':
@@ -660,15 +660,22 @@ def off_market_page():
     listings = []
     for row in rows:
         combined = _row_to_combined_listing(row, aircraft_map) or {}
+        city = (row.get('city') or '').strip()
+        state = (row.get('state') or '').strip()
+        place = ', '.join(part for part in (city, state) if part)
+        if not place:
+            raw_place = (row.get('location') or '').strip()
+            place = '' if raw_place.isalpha() and len(raw_place) <= 4 else raw_place
         listings.append({
             'id': row.get('id'),
             'title': combined.get('title') or row.get('title') or 'Aircraft',
             'price': row.get('price'),
             'year': row.get('year'),
             'hours': row.get('hours'),
-            'location': row.get('location') or '',
+            'location': place,
             'manufacturer': row.get('manufacturer') or combined.get('manufacturer') or '',
-            'description': row.get('description') or '',
+            'model': combined.get('aircraft_name') or combined.get('model') or '',
+            'serial_number': row.get('serial_number') or '',
             'email': row.get('email') or '',
         })
     return render_template('off_market.html', listings=listings)
@@ -1192,15 +1199,58 @@ def marketplace_search():
 def dashboard():
     """Customer profile: aircraft they sell, and aircraft they are watching."""
     user = get_current_user_info()
-    membership = db_module.team_membership(user['id']) if user else None
+    person, membership, pending_members, teams = _profile_page_context(user)
+    return render_template(
+        'dashboard.html',
+        user=person,
+        is_owner=True,
+        subscription=person.get('subscription') if person else None,
+        membership=membership,
+        pending_members=pending_members,
+        teams=teams,
+    )
+
+
+def _place_parts(location):
+    text = (location or '').strip()
+    if ',' not in text:
+        return text, ''
+    city, state = text.split(',', 1)
+    return city.strip(), state.strip()
+
+
+def _profile_page_context(person):
+    """Public profile fields plus brokerage details for the account owner."""
+    if not person:
+        return person, None, [], []
+    person = {key: value for key, value in person.items() if key not in {'password_hash', 'verification_documents'}}
+    city, state = _place_parts(person.get('profile_location'))
+    person['profile_city'] = city
+    person['profile_state'] = state
+    membership = db_module.team_membership(person['id'])
     pending_members = []
     if membership and membership.get('is_admin') and membership.get('subscription_status') == 'active':
         pending_members = db_module.list_team_members(membership['id'], status='pending')
-    teams = db_module.list_public_teams() if user else []
+    teams = db_module.list_public_teams()
+    return person, membership, pending_members, teams
+
+
+@app.route('/people/<int:user_id>')
+def public_profile(user_id):
+    """A visitable profile. The edit controls render only for the account owner."""
+    person = get_user_by_id(user_id)
+    if not person or person.get('is_suspended'):
+        return render_template('error.html', error_code=404, message='Profile not found'), 404
+    viewer = get_current_user_from_request()
+    is_owner = bool(viewer and viewer.get('id') == person.get('id'))
+    person, membership, pending_members, teams = _profile_page_context(person)
+    if not is_owner:
+        pending_members = []
+        teams = []
     return render_template(
-        'dashboard.html',
-        user=user,
-        subscription=user.get('subscription') if user else None,
+        'profile_public.html',
+        user=person,
+        is_owner=is_owner,
         membership=membership,
         pending_members=pending_members,
         teams=teams,
@@ -2563,7 +2613,11 @@ def register():
         wants_broker = (profile_role or '').strip().lower() == 'broker'
         if wants_broker:
             profile_role = 'buyer'
-        profile_location = request.form.get('profile_location')
+        profile_city = (request.form.get('profile_city') or '').strip()
+        profile_state = (request.form.get('profile_state') or '').strip()
+        profile_location = (request.form.get('profile_location') or '').strip()
+        if profile_city or profile_state:
+            profile_location = ', '.join(part for part in (profile_city, profile_state) if part)
 
         if not email or not password:
             flash('Email and password are required', 'error')
@@ -2578,7 +2632,7 @@ def register():
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
                 if wants_broker:
-                    flash('Account created. A solo broker account is $19.99 a month, or join a team from your profile and pay nothing.', 'success')
+                    flash('Account created. Broker access is on your profile.', 'success')
                 else:
                     flash('Account created successfully!', 'success')
                 resp = redirect(url_for('dashboard', broker='start') if wants_broker else url_for('dashboard'))
@@ -2896,9 +2950,13 @@ def api_profile():
             if raw not in (None, '') and db_module.stored_image_url(raw) is None:
                 return jsonify({
                     'error': 'image_too_large',
-                    'message': 'Use a smaller image. Cloudflare storage will take the full file next.',
+                    'message': 'Use a smaller image.',
                 }), 400
         import authz
+        city = (data.get('profile_city') or '').strip()
+        state = (data.get('profile_state') or '').strip()
+        if 'profile_city' in data or 'profile_state' in data:
+            data['profile_location'] = ', '.join(part for part in (city, state) if part)
         requested = (data.get('profile_role') or '').strip().lower()
         already_broker = authz.is_broker(user)
         on_team = bool(db_module.user_on_active_team(user['id']))
@@ -5453,6 +5511,7 @@ def api_listings_me():
                 'payment_status': row.get('payment_status'),
                 'pricing_plan': row.get('pricing_plan'),
                 'rejection_reason': row.get('rejection_reason'),
+                'amendment_note': row.get('amendment_note'),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
                 'photo_count': sum(1 for m in media if m.get('media_type') == 'photo'),
@@ -5536,28 +5595,43 @@ def _create_listing_for_user(user, data):
         data['location'] = f'{city}, {state}'
         data['city'] = city
         data['state'] = state
-    required = ['profile_id', 'price', 'location', 'email', 'year', 'hours']
+    off_market = sections_module.normalize_market(data.get('market')) == 'broker_only'
+    if off_market:
+        if not str(data.get('title') or '').strip() or data.get('profile_id') in (None, '') or data.get('year') in (None, ''):
+            return None, ({
+                'error': 'missing_fields',
+                'message': 'An off-market listing needs a name, a performance profile, and the year.',
+            }, 400)
+        if data.get('price') in (None, ''):
+            data['price'] = 0
+        if data.get('hours') in (None, ''):
+            data['hours'] = 0
+        if not data.get('location'):
+            data['location'] = ''
+        if not data.get('email'):
+            data['email'] = (user or {}).get('email') or ''
+    required = ['profile_id', 'year'] if off_market else ['profile_id', 'price', 'location', 'email', 'year', 'hours']
     missing = [f for f in required if data.get(f) in (None, '')]
     if missing:
         return None, ({
             'error': 'missing_fields',
             'fields': missing,
-            'message': 'Choose an aircraft, then enter the year, hours, price, city, state, and email.',
+            'message': 'An off-market listing needs a name, a performance profile, and the year.' if off_market else 'Choose an aircraft, then enter the year, hours, price, city, state, and email.',
         }, 400)
     try:
         profile_id = int(data['profile_id'])
-        price = float(data['price'])
+        price = float(data['price'] or 0)
         hours = int(data.get('hours') or 0)
         year_value = int(data['year'])
     except (TypeError, ValueError):
         return None, ({
             'error': 'invalid_fields',
-            'message': 'Year, hours, and price need to be numbers, and an aircraft has to be selected.',
+            'message': 'Year needs to be a number, and an aircraft has to be selected.',
         }, 400)
-    if price <= 0 or year_value < 1950 or hours < 0:
+    if year_value < 1950 or hours < 0 or (not off_market and price <= 0):
         return None, ({
             'error': 'invalid_fields',
-            'message': 'Enter a year from 1950 on, hours that are zero or more, and a price above zero.',
+            'message': 'Enter a year from 1950 on.' if off_market else 'Enter a year from 1950 on, hours that are zero or more, and a price above zero.',
         }, 400)
     profile = None
     for aircraft in get_unified_aircraft_data():
@@ -5691,12 +5765,78 @@ def api_listings_patch(listing_id: int):
     is_owner = row.get('user_id') == user['id']
     if not is_owner and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    if is_owner and not user.get('is_admin') and row.get('status') == 'active':
-        return jsonify({'error': 'cannot_edit_active', 'message': 'Approved listings cannot be edited.'}), 403
     data = request.get_json(silent=True) or {}
+    city = str(data.get('city') or '').strip()
+    state = str(data.get('state') or '').strip()
+    if city and state:
+        data['location'] = f'{city}, {state}'
+    changes = _listing_amendments(row, data)
     if not db_module.update_user_listing_fields(listing_id, data):
         return jsonify({'error': 'no_changes'}), 400
-    return jsonify({'ok': True}), 200
+    note = None
+    status = row.get('status')
+    if changes and is_owner and not user.get('is_admin'):
+        note = 'Amendment. ' + '; '.join(changes)
+        db_module.set_listing_amendment(listing_id, note)
+        if status in ('active', 'rejected', 'suspended'):
+            db_module.set_user_listing_status(listing_id, 'pending')
+            status = 'pending'
+        db_module.record_listing_audit(listing_id, user['id'], 'amendment', row.get('status'), status, note)
+        _notify_admins_new_listing(
+            listing_id, row.get('title') or 'Listing', row.get('email') or user.get('email'),
+            market=sections_module.normalize_market(row.get('market')),
+        )
+    return jsonify({'ok': True, 'status': status, 'amendment': note}), 200
+
+
+_AMENDMENT_LABELS = {
+    'title': 'Name',
+    'year': 'Year',
+    'price': 'Price',
+    'hours': 'Hours',
+    'location': 'Location',
+    'city': 'City',
+    'state': 'State',
+    'email': 'Email',
+    'description': 'Description',
+    'manufacturer': 'Manufacturer',
+    'engine_type': 'Engine',
+    'serial_number': 'S/N',
+    'market': 'Market',
+}
+
+
+def _listing_amendments(before, fields):
+    """Human list of fields that actually changed."""
+    allowed = set(_AMENDMENT_LABELS)
+    changes = []
+    for key, new_value in (fields or {}).items():
+        if key not in allowed:
+            continue
+        old_value = before.get(key)
+        if _same_listing_value(old_value, new_value):
+            continue
+        changes.append(f"{_AMENDMENT_LABELS[key]}: {_show_value(old_value)} → {_show_value(new_value)}")
+    return changes
+
+
+def _same_listing_value(old_value, new_value):
+    if old_value in (None, '') and new_value in (None, ''):
+        return True
+    try:
+        if isinstance(old_value, (int, float)) or (isinstance(new_value, (int, float)) and str(old_value).replace('.', '', 1).isdigit()):
+            return float(old_value or 0) == float(new_value or 0)
+    except (TypeError, ValueError):
+        pass
+    return str(old_value or '').strip() == str(new_value or '').strip()
+
+
+def _show_value(value):
+    if value in (None, ''):
+        return '—'
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 # =============================================================================

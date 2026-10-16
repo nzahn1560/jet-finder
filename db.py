@@ -199,6 +199,7 @@ class UserListing(Base):
     interior_year = Column(Integer)
     passenger_config = Column(String(80))
     admin_notes = Column(Text)
+    amendment_note = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -730,6 +731,7 @@ def init_db():
                 'interior_year INTEGER',
                 'passenger_config TEXT',
                 'admin_notes TEXT',
+                'amendment_note TEXT',
                 'city TEXT',
                 'state TEXT',
             ]:
@@ -803,6 +805,7 @@ def init_db():
                 ('interior_year', 'INTEGER'),
                 ('passenger_config', 'VARCHAR(80)'),
                 ('admin_notes', 'TEXT'),
+                ('amendment_note', 'TEXT'),
                 ('city', 'VARCHAR(120)'),
                 ('state', 'VARCHAR(40)'),
             ]:
@@ -1458,7 +1461,7 @@ def update_user_listing_fields(listing_id, fields):
         'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan', 'market',
         'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
         'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
-        'passenger_config',
+        'passenger_config', 'city', 'state',
     }
     safe = {k: v for k, v in (fields or {}).items() if k in allowed}
     if 'market' in safe:
@@ -1546,6 +1549,14 @@ def set_broker_verified(user_id, verified: bool) -> bool:
     with get_session() as s:
         n = s.query(User).filter(User.id == user_id).update(
             {'broker_verified': bool(verified)}, synchronize_session=False
+        )
+        return n > 0
+
+
+def set_listing_amendment(listing_id, note: str) -> bool:
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
+            {'amendment_note': note}, synchronize_session=False
         )
         return n > 0
 
@@ -1945,6 +1956,7 @@ def admin_approve_listing_any(listing_id, approved_by_user_id):
             'approved_by': approved_by_user_id,
             'approved_at': datetime.utcnow(),
             'rejection_reason': None,
+            'amendment_note': None,
         }, synchronize_session=False)
         return n > 0
 

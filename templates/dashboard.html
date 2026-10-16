@@ -272,136 +272,7 @@
 {% block content %}
 <div class="dash">
     <div class="dash__inner">
-        <header class="dash__hero">
-            {% set display_name = (user.company or (user.first_name ~ ' ' ~ (user.last_name or '')))|trim or 'Member' %}
-            {% set initials = ((user.first_name or 'M')[:1] ~ (user.last_name or '')[:1])|upper %}
-            <div class="brand-banner" id="company-banner" {% if user.company_logo_url %}style="background-image:url('{{ user.company_logo_url }}')"{% endif %}>
-                <div class="brand-banner__shade"></div>
-                <label class="brand-upload">Company logo background
-                    <input type="file" id="company-logo-input" accept="image/jpeg,image/png,image/webp" hidden>
-                </label>
-            </div>
-            <div class="brand-row">
-                <label class="brand-photo" id="profile-photo" {% if user.profile_photo_url %}style="background-image:url('{{ user.profile_photo_url }}')"{% endif %}>
-                    {% if not user.profile_photo_url %}<span>{{ initials }}</span>{% endif %}
-                    <input type="file" id="profile-photo-input" accept="image/jpeg,image/png,image/webp" hidden>
-                </label>
-                <div>
-                    <h1 class="dash__name">{{ display_name }}</h1>
-            <div class="dash__sub">
-                <span class="dash__role">{{ (user.profile_role or 'other')|title }}</span>
-                {% if user.profile_location %}
-                <span class="dash__location"><i class="fas fa-map-marker-alt"></i> {{ user.profile_location }}</span>
-                {% endif %}
-                {% if user.company and (user.first_name or user.last_name) %}
-                <span>{{ user.first_name }} {{ user.last_name }}</span>
-                {% endif %}
-                <span>Member since {{ (user.created_at or 'Recently')[:10] }}</span>
-            </div>
-                </div>
-            </div>
-            <p class="brand-note">Profile photo and company logo preview here. Cloudflare storage will host the files next; choosing an image saves a preview with your account.</p>
-            <div class="dash__actions">
-                <a href="{{ url_for('create_listing') }}" class="dash__btn dash__btn--primary">
-                    <i class="fas fa-plus"></i> List an aircraft for sale
-                </a>
-                <a href="{{ url_for('home') }}" class="dash__btn dash__btn--secondary">
-                    <i class="fas fa-bookmark"></i> Find aircraft to watch
-                </a>
-                <a href="{{ url_for('charter_search') }}" class="dash__btn dash__btn--secondary">Charter · Coming soon</a>
-                {% if user.is_admin or (user.profile_role == 'broker') or ('broker' in (user.roles or '')) %}
-                <a href="{{ url_for('off_market_page') }}" class="dash__btn dash__btn--secondary">Off market · Brokers only</a>
-                {% endif %}
-                {% if user.is_admin or (user.profile_role == 'charter_operator') or ('charter_operator' in (user.roles or '')) %}
-                <a href="{{ url_for('charter_search') }}" class="dash__btn dash__btn--secondary">Charter fleet · Coming soon</a>
-                {% endif %}
-            </div>
-            <form id="profile-form" style="margin-top:1.5rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem;">
-                <input class="form-control" name="first_name" placeholder="First name" value="{{ user.first_name or '' }}">
-                <input class="form-control" name="last_name" placeholder="Last name" value="{{ user.last_name or '' }}">
-                <input class="form-control" name="company" placeholder="Company" value="{{ user.company or '' }}">
-                <input class="form-control" name="phone" placeholder="Phone" value="{{ user.phone or '' }}">
-                <input class="form-control" name="profile_location" placeholder="City or airport" value="{{ user.profile_location or '' }}">
-                <select class="form-select" name="profile_role">
-                    {% set role_labels = {
-                        'buyer': 'Buyer',
-                        'seller': 'Seller',
-                        'broker': 'Broker — $19.99/month, free on a team',
-                        'mechanic': 'Mechanic — coming soon',
-                        'charter_operator': 'Charter operator — coming soon',
-                        'other': 'Other'
-                    } %}
-                    {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
-                    <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role_labels[role] }}</option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="dash__btn dash__btn--primary" style="border:0; cursor:pointer;">Save profile</button>
-                <span id="profile-save-status" style="align-self:center; color:#8e8e93;"></span>
-            </form>
-            {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
-            <section class="broker-offer" id="broker-offer">
-                <h2>Broker teams · $19.99 a month</h2>
-                {% if on_team %}
-                <p>You are on {{ membership.name }}. The team pays $19.99 a month. Your individual broker account is free, and your listings stay under your name.</p>
-                {% if membership.is_admin and pending_members %}
-                <p>People waiting for you to allow them onto the team:</p>
-                <ul id="pending-members" style="list-style:none; padding:0; margin:0 0 0.75rem;">
-                    {% for member in pending_members %}
-                    <li style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.4rem;">
-                        <span>{{ member.first_name or 'Broker' }} {{ member.last_name or '' }}</span>
-                        <button type="button" class="dash__btn dash__btn--primary allow-member" data-user="{{ member.user_id }}" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Allow</button>
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                {% elif membership and membership.is_admin %}
-                <p>{{ membership.name }} is not on the map until the $19.99 monthly team checkout completes. Brokers you allow in after that pay nothing.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Finish team checkout — $19.99/month</button>
-                <input type="hidden" id="team-name" value="{{ membership.name or '' }}">
-                <input type="hidden" id="team-city" value="{{ membership.city or '' }}">
-                <input type="hidden" id="team-state" value="{{ membership.state or '' }}">
-                {% elif membership and membership.membership_status == 'pending' %}
-                <p>Waiting for {{ membership.name }} to allow you in. There is no charge until a team admin adds you, and then you still pay nothing.</p>
-                {% else %}
-                <p>The map shows teams. Open a team to find the individual brokers and their listings. A team is $19.99 a month. A broker on that team pays nothing. A broker with no team pays $19.99 a month.</p>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:0.5rem; margin-bottom:0.75rem;">
-                    <input class="form-control" id="team-name" placeholder="Team name">
-                    <input class="form-control" id="team-city" placeholder="City">
-                    <input class="form-control" id="team-state" placeholder="State">
-                </div>
-                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Start a team — $19.99/month</button>
-                <button type="button" class="dash__btn dash__btn--secondary" id="become-broker" style="border:0; cursor:pointer; margin-left:0.4rem;">Go solo — $19.99/month</button>
-                {% if teams %}
-                <div style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                    <select class="form-select" id="join-team" style="max-width:280px;">
-                        {% for team in teams %}
-                        <option value="{{ team.id }}">{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
-                        {% endfor %}
-                    </select>
-                    <button type="button" class="dash__btn dash__btn--secondary" id="request-join" style="border:0; cursor:pointer;">Request to join</button>
-                </div>
-                {% endif %}
-                {% endif %}
-            </section>
-        </header>
-
-        <h2 class="dash__section-title">Quick actions</h2>
-        <div class="dash__grid">
-            <a href="{{ url_for('home') }}" class="dash__card" style="text-decoration: none; color: inherit;">
-                <div class="dash__card-icon"><i class="fas fa-plane"></i></div>
-                <h3 class="dash__card-title">Aircraft search</h3>
-                <p class="dash__card-desc">Search and compare aircraft from the Jet Finder database. Filter by budget, range, and more.</p>
-                <span class="dash__card-link">Search aircraft <i class="fas fa-arrow-right"></i></span>
-                <p class="dash__badge">Database</p>
-            </a>
-            <a href="{{ url_for('home') }}" class="dash__card" style="text-decoration: none; color: inherit;">
-                <div class="dash__card-icon"><i class="fas fa-map-marker-alt"></i></div>
-                <h3 class="dash__card-title">Airport search</h3>
-                <p class="dash__card-desc">Find airports worldwide by IATA, ICAO, or city. Data from the Jet Finder database.</p>
-                <span class="dash__card-link">Search airports <i class="fas fa-arrow-right"></i></span>
-                <p class="dash__badge">Database</p>
-            </a>
-        </div>
+        {% include '_profile_card.html' %}
 
         {% if subscription %}
         <div class="subscription-status {{ 'active' if subscription.subscription_status == 'active' else '' }}" style="margin-top: 2rem; padding: 1.25rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);">
@@ -431,14 +302,17 @@
         </div>
         {% elif request.args.get('updated') %}
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
-            Changes saved. If this listing was already approved, it stays on the marketplace.
+            {% if request.args.get('updated') == 'amendment' %}
+            Amendment sent for approval.
+            {% else %}
+            Changes saved.
+            {% endif %}
         </div>
         {% endif %}
         <div id="my-listings-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading your listings...</div>
         <div id="my-listings" class="dash__grid" data-admin="{{ 1 if user.is_admin else 0 }}"></div>
 
         <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're watching</h2>
-        <p style="color:#8e8e93; font-family:'Rajdhani', sans-serif;">Models from search, and listings you saved because you might buy them.</p>
         <div id="saved-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading saved aircraft...</div>
         <div id="saved-aircraft" class="dash__grid"></div>
     </div>
@@ -458,7 +332,7 @@
         const data = await r.json();
         const listings = data.listings || [];
         if (listings.length === 0) {
-            statusEl.textContent = 'You have no listings yet. Click "Create listing" above to make your first one.';
+            statusEl.textContent = 'No listings yet.';
             return;
         }
         statusEl.textContent = listings.length + ' listing' + (listings.length === 1 ? '' : 's');
@@ -478,7 +352,8 @@
                 rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
             })[l.status] || '#8e8e93';
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
-            const canEdit = l.status !== 'active' && l.status !== 'archived' && l.status !== 'deleted';
+            const amendment = l.amendment_note ? '<p style="margin:0.4rem 0 0;color:#f4f4f4;font-size:0.85rem;">' + escapeHtml(l.amendment_note) + '</p>' : '';
+            const canEdit = l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
             const copy = offMarket && l.status === 'active'
@@ -489,9 +364,9 @@
             return '\n<div class="dash__card">\n'
                 + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
-                + '  <strong>$' + (Number(l.price) || 0).toLocaleString() + '</strong> &middot; ' + escapeHtml(l.location || '') + '</p>\n'
+                + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
-                + rej + '\n'
+                + rej + amendment + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
                 + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay listing fee</button>' : '')
@@ -556,134 +431,6 @@
     }
 })();
 
-const profileImages = { profile_photo_url: null, company_logo_url: null };
-
-function fitImageFile(file) {
-    return new Promise(function (resolve, reject) {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.onload = function () {
-            const max = 720;
-            const scale = Math.min(1, max / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(img.width * scale));
-            canvas.height = Math.max(1, Math.round(img.height * scale));
-            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-            URL.revokeObjectURL(url);
-            resolve(canvas.toDataURL('image/jpeg', 0.72));
-        };
-        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('image')); };
-        img.src = url;
-    });
-}
-
-document.getElementById('profile-photo-input').addEventListener('change', async function () {
-    const file = this.files && this.files[0];
-    if (!file) return;
-    const dataUrl = await fitImageFile(file);
-    profileImages.profile_photo_url = dataUrl;
-    const photo = document.getElementById('profile-photo');
-    photo.style.backgroundImage = "url('" + dataUrl + "')";
-    const label = photo.querySelector('span');
-    if (label) label.remove();
-});
-
-document.getElementById('company-logo-input').addEventListener('change', async function () {
-    const file = this.files && this.files[0];
-    if (!file) return;
-    const dataUrl = await fitImageFile(file);
-    profileImages.company_logo_url = dataUrl;
-    document.getElementById('company-banner').style.backgroundImage = "url('" + dataUrl + "')";
-});
-
-async function startBrokerCheckout(status) {
-    if (status) status.textContent = 'Opening the $19.99 monthly checkout...';
-    const pay = await fetch('/api/account/broker-checkout', { method: 'POST', credentials: 'include' });
-    const payData = await pay.json().catch(function () { return {}; });
-    if (payData.url) { window.location = payData.url; return; }
-    if (payData.already) { window.location.reload(); return; }
-    if (status) status.textContent = payData.message || 'A solo broker account is $19.99 a month. Checkout is not connected yet.';
-}
-
-document.getElementById('profile-form').addEventListener('submit', async function (e) {
-    e.preventDefault();
-    const status = document.getElementById('profile-save-status');
-    const body = {};
-    new FormData(this).forEach(function (value, key) { body[key] = value; });
-    if (profileImages.profile_photo_url) body.profile_photo_url = profileImages.profile_photo_url;
-    if (profileImages.company_logo_url) body.company_logo_url = profileImages.company_logo_url;
-    status.textContent = 'Saving...';
-    const resp = await fetch('/api/profile', {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    if (resp.status === 401) { window.location.href = '/login?next=/profile'; return; }
-    const data = await resp.json().catch(function () { return {}; });
-    if (!resp.ok) {
-        status.textContent = data.message || 'Could not save profile.';
-        return;
-    }
-    if (data.broker_checkout_required) {
-        await startBrokerCheckout(status);
-        return;
-    }
-    status.textContent = 'Profile saved.';
-    setTimeout(function () { window.location.reload(); }, 400);
-});
-
-const becomeBroker = document.getElementById('become-broker');
-if (becomeBroker) {
-    becomeBroker.addEventListener('click', function () { startBrokerCheckout(document.getElementById('profile-save-status')); });
-}
-
-const startTeam = document.getElementById('start-team');
-if (startTeam) {
-    startTeam.addEventListener('click', async function () {
-        const status = document.getElementById('profile-save-status');
-        status.textContent = 'Opening the $19.99 team checkout...';
-        const resp = await fetch('/api/account/team-checkout', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: document.getElementById('team-name').value,
-                city: document.getElementById('team-city').value,
-                state: document.getElementById('team-state').value,
-            }),
-        });
-        const data = await resp.json().catch(function () { return {}; });
-        if (data.url) { window.location = data.url; return; }
-        status.textContent = data.message || 'A team is $19.99 a month. Checkout is not connected yet.';
-    });
-}
-
-const requestJoin = document.getElementById('request-join');
-if (requestJoin) {
-    requestJoin.addEventListener('click', async function () {
-        const status = document.getElementById('profile-save-status');
-        const teamId = document.getElementById('join-team').value;
-        status.textContent = 'Sending your request...';
-        const resp = await fetch('/api/broker-teams/' + teamId + '/join', { method: 'POST', credentials: 'include' });
-        const data = await resp.json().catch(function () { return {}; });
-        status.textContent = resp.ok ? 'Request sent. The team admin allows you in.' : (data.message || 'Could not join that team.');
-        if (resp.ok) setTimeout(function () { window.location.reload(); }, 500);
-    });
-}
-
-document.querySelectorAll('.allow-member').forEach(function (button) {
-    button.addEventListener('click', async function () {
-        const status = document.getElementById('profile-save-status');
-        const resp = await fetch('/api/broker-teams/' + button.getAttribute('data-team') + '/members/' + button.getAttribute('data-user') + '/allow', {
-            method: 'POST',
-            credentials: 'include',
-        });
-        status.textContent = resp.ok ? 'They are on the team.' : 'Could not allow that person.';
-        if (resp.ok) setTimeout(function () { window.location.reload(); }, 400);
-    });
-});
-
 (function confirmBrokerReturn() {
     const params = new URLSearchParams(window.location.search);
     if ((params.get('broker') !== '1' && params.get('team') !== '1') || !params.get('session_id')) return;
@@ -709,7 +456,7 @@ document.querySelectorAll('.allow-member').forEach(function (button) {
         if (!r.ok) throw new Error('failed');
         const saved = (await r.json()).saved || [];
         if (!saved.length) {
-            statusEl.textContent = 'Nothing saved yet. On the aircraft search page, use "Watch this aircraft".';
+            statusEl.textContent = 'No saved aircraft.';
             return;
         }
         statusEl.textContent = saved.length + ' saved aircraft';

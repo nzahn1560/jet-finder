@@ -9,12 +9,12 @@
 {% block content %}
 <div class="section-page">
     <h1>Broker map</h1>
-    <p class="section-lead">Teams appear on the map. Open a company, then choose an individual broker and their listings.</p>
+    <p class="section-lead">Brokerages appear on the map. Open one, then choose a broker and their listings.</p>
 
     <div class="broker-shell">
         <aside class="broker-list-wrap">
-            <label class="broker-search-label" for="broker-search">Find a team</label>
-            <input id="broker-search" class="form-control" type="search" placeholder="Team or city" autocomplete="off">
+            <label class="broker-search-label" for="broker-search">Find a brokerage</label>
+            <input id="broker-search" class="form-control" type="search" placeholder="Brokerage or city" autocomplete="off">
             <div id="broker-list" class="broker-list"></div>
         </aside>
         <div class="broker-stage">
@@ -25,9 +25,9 @@
 
     <p class="section-note mt-3">
         {% if get_current_user_info() %}
-        <a href="{{ url_for('dashboard') }}">Your profile</a> is where you start a team for $19.99 a month or request to join one for free.
+        <a href="{{ url_for('dashboard') }}">Your profile</a>
         {% else %}
-        <a href="{{ url_for('register') }}">Create an account</a>. A team is $19.99 a month. Brokers on a team pay nothing.
+        <a href="{{ url_for('register') }}">Create an account</a>.
         {% endif %}
     </p>
 </div>
@@ -79,9 +79,10 @@
 
     function listingHtml(listing) {
         const place = listing.place || [listing.city, listing.state].filter(Boolean).join(', ');
-        const serial = listing.serial_number ? 'S/N ' + esc(listing.serial_number) : 'S/N —';
+        const serial = listing.serial_number ? 'S/N ' + listing.serial_number : '';
+        const bits = [place, serial, money(listing.price)].filter(Boolean).join(' · ');
         return '<li><strong>' + esc(listing.title || 'Aircraft') + '</strong>'
-            + '<span>' + esc(place) + ' · ' + serial + ' · ' + money(listing.price) + '</span></li>';
+            + (bits ? '<span>' + esc(bits) + '</span>' : '') + '</li>';
     }
 
     function showTeam(team, detail) {
@@ -90,7 +91,7 @@
             const listings = (broker.listings || []).map(listingHtml).join('');
             return '<article class="broker-person" style="cursor:default;">'
                 + '<span class="broker-person__photo" style="' + photoStyle(broker.photo) + '">' + (broker.photo ? '' : esc((broker.name || 'B').slice(0, 1))) + '</span>'
-                + '<span><strong>' + esc(broker.name) + (broker.is_admin ? ' · Admin' : '') + '</strong>'
+                + '<span><strong><a href="/people/' + broker.user_id + '" style="color:inherit;text-decoration:none;">' + esc(broker.name) + '</a>' + (broker.is_admin ? ' · Admin' : '') + '</strong>'
                 + (broker.specialties ? '<em>' + esc(broker.specialties) + '</em>' : '')
                 + (listings ? '<ul style="margin:0.35rem 0 0; padding-left:1rem;">' + listings + '</ul>' : '<em>No public listings yet.</em>')
                 + '</span></article>';
@@ -126,14 +127,14 @@
             return [team.display_name, team.place].join(' ').toLowerCase().indexOf(needle) >= 0;
         });
         if (!shown.length) {
-            listEl.innerHTML = '<p class="broker-empty">No team matches that search.</p>';
+            listEl.innerHTML = '<p class="broker-empty">No brokerage matches that search.</p>';
             return;
         }
         listEl.innerHTML = shown.map(function (team) {
             return '<button type="button" class="broker-person' + (team.id === activeId ? ' is-selected' : '') + '" data-id="' + team.id + '">'
                 + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'T').slice(0, 1))) + '</span>'
                 + '<span><strong>' + esc(team.display_name) + '</strong>'
-                + '<em>' + esc(team.place || 'Team') + '</em></span>'
+                + '<em>' + esc(team.place || 'Brokerage') + '</em></span>'
                 + '</button>';
         }).join('');
         listEl.querySelectorAll('.broker-person').forEach(function (button) {
@@ -167,7 +168,7 @@
         bounds.push([team.lat, team.lon]);
     });
     if (!teams.length) {
-        listEl.innerHTML = '<p class="broker-empty">No teams are on the map yet.</p>';
+        listEl.innerHTML = '<p class="broker-empty">No brokerages are on the map yet.</p>';
     } else {
         renderList('');
     }

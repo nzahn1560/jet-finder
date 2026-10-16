@@ -115,7 +115,7 @@ def api_broker_profile():
         if not user.get('is_admin') and not (authz.has_role(user, 'broker') and (on_team or paid)):
             return jsonify({
                 'error': 'broker_subscription_required',
-                'message': 'A solo broker account is $19.99 a month. On a team, the individual pays nothing.',
+                'message': 'Broker access is required.',
             }), 402
         data['profile_role'] = 'broker'
         db_module.update_user_profile(user['id'], data)
@@ -253,7 +253,7 @@ def charter_fleet_page():
     return render_template(
         'coming_soon.html',
         product='Charter',
-        summary='Shop a route and see the aircraft that can fly it. The bookable charter market is still being built, so this section stays closed.',
+        summary='Shop a route and see the aircraft that can fly it.',
     )
     user, err = _require_user()
     if err:
