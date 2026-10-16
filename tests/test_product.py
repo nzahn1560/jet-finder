@@ -27,6 +27,7 @@ class ProductTests(unittest.TestCase):
         cls.buyer = cls._signup('buyer@example.com', 'buyer-pass-1', 'buyer')
         cls.broker = cls._signup('broker@example.com', 'broker-pass-1', 'broker')
         db_module.update_user_profile(cls.broker['id'], {'profile_role': 'broker'})
+        cls.team_id = db_module.create_broker_team(cls.broker['id'], 'Northstar', 'Teterboro', 'NJ', active=True)
         cls.operator = cls._signup('operator@example.com', 'operator-pass-1', 'charter_operator')
         cls.admin = cls._signup('admin@example.com', 'admin-pass-1', 'seller')
         db_module.set_user_admin(cls.admin['id'], True)
@@ -123,12 +124,77 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
         self.assertEqual(checkout.status_code, 503)
+        self.assertIn(b'19.99', checkout.data)
+
+    def test_role_alone_does_not_open_off_market(self):
+        labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
+        db_module.update_user_profile(labeled['id'], {'profile_role': 'broker'})
+        self._login('solo-label@example.com', 'broker-pass-1')
+        blocked = self.client.get('/off-market')
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_team_admin_allows_a_broker_who_pays_nothing(self):
+        self._login('buyer@example.com', 'buyer-pass-1')
+        joined = self.client.post(f'/api/broker-teams/{self.team_id}/join')
+        self.assertEqual(joined.status_code, 200, joined.get_json())
+        self.assertEqual(joined.get_json().get('status'), 'pending')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        self._login('broker@example.com', 'broker-pass-1')
+        allowed = self.client.post(f'/api/broker-teams/{self.team_id}/members/{self.buyer["id"]}/allow')
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        self._login('buyer@example.com', 'buyer-pass-1')
+        page = self.client.get('/off-market')
+        self.assertEqual(page.status_code, 200)
+        detail = self.client.get(f'/api/broker-teams/{self.team_id}')
+        names = [person.get('name') for person in detail.get_json().get('brokers', [])]
+        self.assertIn('Buyer', names)
+        checkout = self.client.post('/api/account/broker-checkout')
+        self.assertEqual(checkout.status_code, 200)
+        self.assertTrue(checkout.get_json().get('already'))
 
     def test_charter_and_mechanics_are_coming_soon(self):
         for path in ('/charter', '/charter-search', '/mechanics', '/charter/fleet'):
             page = self.client.get(path)
             self.assertEqual(page.status_code, 200, path)
             self.assertIn(b'Coming soon', page.data)
+
+    def test_off_market_listing_needs_only_name_profile_and_year(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json={
+            'profile_id': self.profile_id,
+            'title': 'Quiet Name',
+            'year': 2016,
+            'market': 'broker_only',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        row = db_module.get_listing_with_owner(created.get_json()['id'])
+        self.assertEqual(row['title'], 'Quiet Name')
+        self.assertEqual(row['year'], 2016)
+
+    def test_editing_a_live_listing_is_sent_back_as_an_amendment(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Amend Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        patched = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1800000})
+        self.assertEqual(patched.status_code, 200, patched.get_json())
+        note = patched.get_json().get('amendment') or ''
+        self.assertIn('Amendment', note)
+        self.assertIn('Price', note)
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'pending')
+        self.assertIn('Price', row.get('amendment_note') or '')
+
+    def test_public_profile_hides_edit_from_visitors(self):
+        visitor = self.client.get(f"/people/{self.buyer['id']}")
+        self.assertEqual(visitor.status_code, 200)
+        self.assertNotIn(b'Member since', visitor.data)
+        self.assertNotIn(b'id="open-profile-edit"', visitor.data)
+        self._login('buyer@example.com', 'buyer-pass-1')
+        owner = self.client.get(f"/people/{self.buyer['id']}")
+        self.assertIn(b'id="open-profile-edit"', owner.data)
+        self.assertIn(b'id="profile-edit"', owner.data)
+        self.assertIn(b'hidden', owner.data)
 
     def test_owner_cannot_edit_someone_elses_listing(self):
         self._login('seller@example.com', 'seller-pass-1')

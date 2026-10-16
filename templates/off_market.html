@@ -9,24 +9,66 @@
 {% block content %}
 <div class="section-page">
     <h1>Off market <span class="nav-tag">Brokers only</span></h1>
-    <p class="section-lead">This inventory is for accounts labeled as a broker. These aircraft stay off the public marketplace.</p>
-    <p class="section-note"><a href="{{ url_for('create_listing') }}?market=off_market">Submit an off-market listing</a>. It still waits for approval before it shows here.</p>
-
-    {% if listings %}
-    <div class="section-grid mt-3">
-        {% for item in listings %}
-        <article class="section-card">
-            <h2>{{ item.title }}</h2>
-            <p class="section-price">${{ '{:,.0f}'.format(item.price or 0) }}</p>
-            <p>{{ item.manufacturer or '' }}{% if item.year %} · {{ item.year }}{% endif %}{% if item.hours is not none %} · {{ '{:,.0f}'.format(item.hours) }} hrs{% endif %}</p>
-            <p class="section-meta">{{ item.location }}</p>
-            {% if item.description %}<p>{{ item.description }}</p>{% endif %}
-            {% if item.email %}<p>Contact: <a href="mailto:{{ item.email }}">{{ item.email }}</a></p>{% endif %}
-        </article>
-        {% endfor %}
+    <div class="om-tools">
+        <select id="om-make" class="form-select" aria-label="Manufacturer"></select>
+        <input id="om-model" class="form-control" type="search" placeholder="Model" autocomplete="off">
+        <a class="section-btn" href="{{ url_for('create_listing') }}?market=off_market">New listing</a>
     </div>
-    {% else %}
-    <div class="section-empty mt-3">No off-market aircraft are approved right now.</div>
-    {% endif %}
+    <div id="om-grid" class="om-grid"></div>
+    <p id="om-empty" class="section-empty" hidden>No aircraft match that manufacturer and model.</p>
 </div>
+<script>
+(function () {
+    const listings = {{ listings|tojson }};
+    const makeEl = document.getElementById('om-make');
+    const modelEl = document.getElementById('om-model');
+    const grid = document.getElementById('om-grid');
+    const empty = document.getElementById('om-empty');
+    const makes = [...new Set(listings.map(function (item) { return item.manufacturer || ''; }).filter(Boolean))].sort();
+    makeEl.innerHTML = '<option value="">All manufacturers</option>' + makes.map(function (name) {
+        return '<option value="' + name.replace(/"/g, '&quot;') + '">' + name + '</option>';
+    }).join('');
+
+    function money(value) {
+        const amount = Number(value);
+        if (!Number.isFinite(amount) || amount <= 0) return '';
+        return '$' + amount.toLocaleString();
+    }
+
+    function esc(value) {
+        return String(value || '').replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    function render() {
+        const make = (makeEl.value || '').toLowerCase();
+        const model = (modelEl.value || '').trim().toLowerCase();
+        const shown = listings.filter(function (item) {
+            const itemMake = (item.manufacturer || '').toLowerCase();
+            const itemModel = ((item.model || '') + ' ' + (item.title || '')).toLowerCase();
+            if (make && itemMake !== make) return false;
+            if (model && itemModel.indexOf(model) < 0) return false;
+            return true;
+        });
+        empty.hidden = shown.length > 0;
+        grid.innerHTML = shown.map(function (item) {
+            const price = money(item.price);
+            const hours = Number(item.hours) > 0 ? Number(item.hours).toLocaleString() + ' hrs' : '';
+            const serial = item.serial_number ? 'S/N ' + item.serial_number : '';
+            const meta = [item.manufacturer, item.model, item.year, hours].filter(Boolean).join(' · ');
+            const place = [item.location, serial].filter(Boolean).join(' · ');
+            return '<article class="om-card">'
+                + '<h2>' + esc(item.title || 'Aircraft') + '</h2>'
+                + '<p>' + esc(meta) + '</p>'
+                + (place ? '<p class="om-card__meta">' + esc(place) + '</p>' : '')
+                + (price ? '<p class="om-card__price">' + esc(price) + '</p>' : '')
+                + (item.email ? '<a href="mailto:' + esc(item.email) + '">Contact</a>' : '')
+                + '</article>';
+        }).join('');
+    }
+    makeEl.addEventListener('change', render);
+    modelEl.addEventListener('input', render);
+    render();
+})();
+</script>
 {% endblock %}

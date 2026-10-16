@@ -121,6 +121,7 @@ async function loadAdminListings() {
                 + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
                 + '    </div>'
                 + '  </div>'
+                + (l.amendment_note ? '<div class="ap__col" style="margin-top:0.5rem;color:#f4f4f4;">' + esc(l.amendment_note) + '</div>' : '')
                 + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
                 + '</div>';
         }).join('');

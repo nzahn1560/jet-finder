@@ -272,7 +272,6 @@
     <div class="row">
         <div class="col-12 text-center mb-5">
             <h1 class="display-4 text-white mb-3">Create Listing</h1>
-            <p class="lead text-muted">List an aircraft for <span style="text-decoration: line-through;">$70</span> <strong class="text-white">$49</strong> — 30% off</p>
         </div>
     </div>
 
@@ -352,8 +351,6 @@
                                     <label class="form-label">Listing Name *</label>
                                     <input type="text" class="form-control" id="listingName" name="listing_name"
                                         required placeholder="Auto-filled from selected profile">
-                                    <small class="text-muted">Automatically copied from the selected performance
-                                        profile.</small>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Serial Number</label>
@@ -363,12 +360,12 @@
                             </div>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Price ($) *</label>
+                                    <label class="form-label">Price ($) <span data-public-star>*</span></label>
                                     <input type="number" class="form-control" id="price" name="price" required
                                         placeholder="e.g., 5500000" min="1" step="any">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Engine Type *</label>
+                                    <label class="form-label">Engine Type <span data-public-star>*</span></label>
                                     <select class="form-select" id="engineType" name="engine_type" required>
                                         <option value="">Select engine type</option>
                                         <option value="Piston">Piston</option>
@@ -379,12 +376,12 @@
                             </div>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Total Time (Hours) *</label>
+                                    <label class="form-label">Total Time (Hours) <span data-public-star>*</span></label>
                                     <input type="number" class="form-control" id="totalTime" name="total_time" required
                                         placeholder="e.g., 1200" min="0" step="1">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Manufacturer *</label>
+                                    <label class="form-label">Manufacturer <span data-public-star>*</span></label>
                                     <input type="text" class="form-control" id="manufacturerInput" name="manufacturer"
                                         required placeholder="e.g., Cessna, Bombardier">
                                 </div>
@@ -408,10 +405,15 @@
                                     <label class="form-label">Interior year</label>
                                     <input type="number" class="form-control" id="interiorYear" name="interior_year" min="1950" max="2099">
                                 </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Location (Airport Code) *</label>
-                                    <input type="text" class="form-control" id="location" name="location"
-                                        placeholder="KVNY" required>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">City <span data-public-star>*</span></label>
+                                    <input type="text" class="form-control" id="listingCity" name="city"
+                                        placeholder="Dallas" required>
+                                </div>
+                                <div class="col-md-2 mb-3">
+                                    <label class="form-label">State <span data-public-star>*</span></label>
+                                    <input type="text" class="form-control" id="listingState" name="state"
+                                        placeholder="TX" required>
                                 </div>
                             </div>
                             <div class="row">
@@ -421,7 +423,7 @@
                                         placeholder="e.g., 2018" min="1950" max="2099">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Contact Email *</label>
+                                    <label class="form-label">Contact Email <span data-public-star>*</span></label>
                                     <input type="email" class="form-control" id="email" name="email"
                                         placeholder="you@example.com" required>
                                 </div>
@@ -433,7 +435,6 @@
                                     <label><input type="radio" name="market" value="broker_only" {% if request.args.get('market') in ['off_market', 'broker_only'] %}checked{% endif %}> Broker only</label>
                                     <label><input type="radio" name="market" value="private" {% if request.args.get('market') == 'private' %}checked{% endif %}> Private</label>
                                 </div>
-                                <small class="text-muted">Broker-only aircraft stay off the public site and are visible to broker accounts after approval. Private listings stay with you and admin.</small>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
@@ -501,7 +502,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">Submit sends this aircraft for approval. It shows on your dashboard right away, and on the marketplace only after it is approved. An off-market choice stays off the public marketplace.</p>
+                        <p id="listing-next-step" class="text-white mb-3">Submitted listings go to approval.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -517,6 +518,19 @@
 
 <script>
     const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
+    function syncOffMarketFields() {
+        const picked = document.querySelector('[name="market"]:checked');
+        const off = picked && picked.value === 'broker_only';
+        ['price', 'engineType', 'totalTime', 'manufacturerInput', 'listingCity', 'listingState', 'email'].forEach(function (id) {
+            const field = document.getElementById(id);
+            if (field) field.required = !off;
+        });
+        document.querySelectorAll('[data-public-star]').forEach(function (star) { star.hidden = off; });
+    }
+    document.querySelectorAll('[name="market"]').forEach(function (radio) {
+        radio.addEventListener('change', syncOffMarketFields);
+    });
+    syncOffMarketFields();
     fetch('/api/pricing/listing').then(function (response) { return response.json(); }).then(function (price) {
         const box = document.getElementById('listing-price-box');
         const note = document.getElementById('listing-price-note');
@@ -633,7 +647,9 @@
             profile_id: get('profile_id'),
             title: get('listing_name') || undefined,
             price: parseFloat(get('price') || '0'),
-            location: get('location').toUpperCase(),
+            city: get('city'),
+            state: get('state'),
+            location: [get('city'), get('state')].filter(Boolean).join(', '),
             email: get('email'),
             year: parseInt(get('year_model') || '0', 10) || undefined,
             hours: parseInt(get('total_time') || '0', 10) || 0,
@@ -723,6 +739,7 @@
             const payload = buildListingPayload();
             let listingId = EDIT_LISTING_ID;
             let paymentRequired = false;
+            let amended = false;
 
             if (EDIT_LISTING_ID) {
                 const resp = await fetch(`/api/listings/${EDIT_LISTING_ID}`, {
@@ -732,8 +749,10 @@
                     body: JSON.stringify(payload),
                 });
                 if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search); return; }
-                if (resp.status === 403) { const d = await resp.json().catch(() => ({})); return fail(d.message || 'You cannot edit this listing.'); }
-                if (!resp.ok && resp.status !== 400) return fail('Failed to save changes. Please try again.');
+                const data = await resp.json().catch(() => ({}));
+                if (resp.status === 403) return fail(data.message || 'You cannot edit this listing.');
+                if (!resp.ok && resp.status !== 400) return fail(data.message || 'Failed to save changes. Please try again.');
+                if (resp.ok && data.amendment) amended = true;
             } else {
                 const resp = await fetch('/api/listings', {
                     method: 'POST',
@@ -744,7 +763,7 @@
                 if (resp.status === 401) { window.location.href = '/login?next=' + encodeURIComponent('/create-listing'); return; }
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.id) {
-                    return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, airport, and email, then try again.');
+                    return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, city, state, and email, then try again.');
                 }
                 listingId = data.id;
                 paymentRequired = !!data.payment_required;
@@ -759,7 +778,7 @@
             localStorage.removeItem('listing_draft');
 
             if (EDIT_LISTING_ID) {
-                window.location.href = '/dashboard?updated=1';
+                window.location.href = amended ? '/dashboard?updated=amendment' : '/dashboard?updated=1';
                 return;
             }
 
@@ -808,7 +827,9 @@
             setVal('engineType', listing.engine_type);
             setVal('totalTime', listing.hours);
             setVal('manufacturerInput', listing.manufacturer);
-            setVal('location', listing.location);
+            setVal('listingCity', listing.city || '');
+            setVal('listingState', listing.state || '');
+            setVal('serialNumber', listing.serial_number || '');
             setVal('yearModel', listing.year);
             setVal('email', listing.email);
             setVal('description', listing.description);

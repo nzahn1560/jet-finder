@@ -204,16 +204,16 @@
     align-items: center;
     width: 100%;
     text-align: left;
-    background: rgba(0, 0, 0, 0.72);
+    background: transparent;
     color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 0.55rem 0.65rem;
+    border: 0;
+    padding: 0.45rem 0.15rem;
     cursor: pointer;
 }
 
-.broker-person.is-selected,
-.broker-person:hover {
-    border-color: #F05545;
+.broker-person.is-selected strong,
+.broker-person:hover strong {
+    color: #F05545;
 }
 
 .broker-person strong,
@@ -251,14 +251,17 @@
 
 .broker-selected {
     position: absolute;
-    left: 12px;
-    bottom: 12px;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
     z-index: 500;
-    width: min(280px, calc(100% - 24px));
-    background: rgba(12, 12, 14, 0.94);
-    border: 1px solid rgba(240, 85, 69, 0.45);
+    width: auto;
+    max-width: 420px;
+    background: rgba(12, 12, 14, 0.92);
+    border: 0;
+    box-shadow: none;
     color: #f4f4f4;
-    padding: 0.75rem;
+    padding: 0.9rem 1rem 1rem;
 }
 
 .broker-selected p {
@@ -313,6 +316,58 @@
 .broker-empty {
     color: #c8c8c8;
     margin: 0;
+}
+
+.om-tools {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(180px, 1fr) auto;
+    gap: 0.6rem;
+    align-items: center;
+    margin: 1rem 0 1.25rem;
+}
+
+.om-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.8rem;
+}
+
+.om-card {
+    background: linear-gradient(145deg, #1a1a1a, #2d2d2d);
+    border-radius: 12px;
+    padding: 0.85rem 0.9rem;
+    color: #f4f4f4;
+    min-height: 132px;
+}
+
+.om-card h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    color: #fff;
+}
+
+.om-card p {
+    margin: 0 0 0.25rem;
+    color: #d0d0d0;
+    font-size: 0.9rem;
+}
+
+.om-card__price {
+    color: #fff;
+    font-weight: 700;
+}
+
+.om-card a {
+    color: #F05545;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 992px) {
+    .om-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+    .om-tools, .om-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 860px) {
