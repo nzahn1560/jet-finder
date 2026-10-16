@@ -24,6 +24,24 @@
     .ap__filter { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
     .ap__filter select, .ap__filter input { padding: 0.5rem 0.75rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-family: 'Rajdhani', sans-serif; }
     .ap__empty { color: #8e8e93; padding: 1rem; text-align: center; }
+    .ap__card { cursor: pointer; }
+    #review-screen { position: fixed; inset: 0; z-index: 80; background: #0c0c0c; overflow: auto; color: #f4f4f4; }
+    #review-screen[hidden] { display: none; }
+    .review { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; font-family: 'Rajdhani', sans-serif; }
+    .review__top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
+    .review__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .review__panel { background: #161616; border: 1px solid #2e2e2e; padding: 1.25rem; }
+    .review h2 { margin: 0 0 0.4rem; font-size: 2rem; color: #fff; }
+    .review .ask { font-size: 2.6rem; font-weight: 800; color: #F05545; margin: 0.4rem 0; }
+    .review p { font-size: 1.2rem; margin: 0.25rem 0; color: #e8e8e8; }
+    .review table { width: 100%; border-collapse: collapse; font-size: 1.15rem; }
+    .review th, .review td { text-align: left; padding: 0.65rem 0.4rem; border-bottom: 1px solid #333; vertical-align: top; }
+    .review th { color: #bdbdbd; font-weight: 600; }
+    .review .flag { color: #fbbf24; }
+    .review textarea { width: 100%; min-height: 120px; margin-top: 0.5rem; background: #111; color: #fff; border: 1px solid #444; padding: 0.75rem; font-size: 1.1rem; font-family: inherit; }
+    .review label { display: block; margin-top: 1.25rem; font-size: 1.15rem; }
+    .review__actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
+    @media (max-width: 860px) { .review__grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
 
@@ -61,6 +79,27 @@
         <div id="tab-users" style="display:none;">
             <div id="users-list"></div>
         </div>
+    </div>
+</div>
+
+<div id="review-screen" hidden>
+    <div class="review">
+        <div class="review__top">
+            <h2 id="review-heading">Listing</h2>
+            <button type="button" class="ap__btn ap__btn--secondary" id="review-close">Close</button>
+        </div>
+        <div class="review__grid">
+            <section class="review__panel" id="review-listing"></section>
+            <section class="review__panel" id="review-data"></section>
+        </div>
+        <label for="review-message">Message to the seller. Approval stays pending.</label>
+        <textarea id="review-message" placeholder="What they need to fix"></textarea>
+        <div class="review__actions">
+            <button type="button" class="ap__btn ap__btn--secondary" id="review-send">Send message</button>
+            <button type="button" class="ap__btn ap__btn--approve" id="review-approve">Approve</button>
+            <button type="button" class="ap__btn ap__btn--reject" id="review-reject">Reject</button>
+        </div>
+        <p id="review-status"></p>
     </div>
 </div>
 
@@ -122,11 +161,16 @@ async function loadAdminListings() {
                 + '    </div>'
                 + '  </div>'
                 + (l.amendment_note ? '<div class="ap__col" style="margin-top:0.5rem;color:#f4f4f4;">' + esc(l.amendment_note) + '</div>' : '')
+                + (l.review_message ? '<div class="ap__col" style="margin-top:0.5rem;color:#fbbf24;">' + esc(l.review_message) + '</div>' : '')
                 + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
                 + '</div>';
         }).join('');
+        target.querySelectorAll('.ap__card').forEach(function (card) {
+            card.addEventListener('click', function () { openReview(card.getAttribute('data-id')); });
+        });
         target.querySelectorAll('button[data-act]').forEach(function (btn) {
-            btn.addEventListener('click', async function () {
+            btn.addEventListener('click', async function (event) {
+                event.stopPropagation();
                 const id = btn.getAttribute('data-id');
                 const act = btn.getAttribute('data-act');
                 let resp;
@@ -207,6 +251,119 @@ document.querySelectorAll('.ap__tab').forEach(function (t) {
         document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
         if (tab === 'users') loadAdminUsers();
     });
+});
+
+function money(value) {
+    const number = Number(value);
+    if (!number) return '—';
+    return '$' + number.toLocaleString();
+}
+
+let reviewId = null;
+
+function reviewRow(label, left, right, flagged) {
+    return '<tr' + (flagged ? ' class="flag"' : '') + '><th>' + esc(label) + '</th><td>' + esc(left || '—') + '</td><td>' + esc(right || '—') + '</td></tr>';
+}
+
+async function openReview(id) {
+    reviewId = id;
+    const screen = document.getElementById('review-screen');
+    const listing = document.getElementById('review-listing');
+    const data = document.getElementById('review-data');
+    document.getElementById('review-status').textContent = '';
+    document.getElementById('review-message').value = '';
+    listing.innerHTML = '<p>Loading</p>';
+    data.innerHTML = '';
+    screen.hidden = false;
+    const response = await fetch('/api/admin/listings/' + id + '/review', { credentials: 'include' });
+    if (!response.ok) {
+        listing.innerHTML = '<p>Could not open this listing.</p>';
+        return;
+    }
+    const body = await response.json();
+    const ask = body.listing || {};
+    const ref = body.aircraft_data || {};
+    const place = [ask.city, ask.state].filter(Boolean).join(', ') || ask.location || '';
+    document.getElementById('review-heading').textContent = ask.title || 'Listing';
+    document.getElementById('review-message').value = ask.review_message || '';
+    listing.innerHTML = ''
+        + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">This listing</p>'
+        + '<h2>' + esc(ask.title || '') + '</h2>'
+        + '<div class="ask">' + money(ask.price) + '</div>'
+        + '<p>' + esc(ask.year || 'Year not set') + ' · ' + (Number(ask.hours) || 0).toLocaleString() + ' hours</p>'
+        + '<p>' + esc(place || 'Location not set') + (ask.serial_number ? ' · S/N ' + esc(ask.serial_number) : '') + '</p>'
+        + '<p>' + esc(ask.manufacturer || '') + '</p>'
+        + '<p>' + esc(ask.description || '') + '</p>'
+        + '<p style="color:#bdbdbd;">Seller ' + esc(ask.email || '') + '</p>'
+        + (ask.amendment_note ? '<p class="flag">' + esc(ask.amendment_note) + '</p>' : '');
+    const yearRange = [ref.year_from, ref.year_to].filter(Boolean).join('–');
+    const checks = (body.checks || []).map(function (line) { return '<p class="flag">' + esc(line) + '</p>'; }).join('');
+    data.innerHTML = ''
+        + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">Aircraft data</p>'
+        + '<h2>' + esc(ref.model || 'No matching profile') + '</h2>'
+        + checks
+        + '<table><thead><tr><th></th><th>Aircraft data</th><th>Listing</th></tr></thead><tbody>'
+        + reviewRow('Price', money(ref.price), money(ask.price), true)
+        + reviewRow('Year', yearRange, ask.year)
+        + reviewRow('Hours', '', ask.hours)
+        + reviewRow('Manufacturer', ref.manufacturer, ask.manufacturer)
+        + reviewRow('Model', ref.model, ask.title)
+        + reviewRow('Location', '', place)
+        + reviewRow('Serial', '', ask.serial_number)
+        + reviewRow('Range', ref.range ? ref.range + ' nm' : '', '')
+        + reviewRow('Speed', ref.speed ? ref.speed + ' kts' : '', '')
+        + reviewRow('Passengers', ref.passengers, '')
+        + reviewRow('Wingspan', ref.wingspan, '')
+        + reviewRow('Length', ref.length, '')
+        + reviewRow('Height', ref.height, '')
+        + '</tbody></table>';
+}
+
+function closeReview() {
+    document.getElementById('review-screen').hidden = true;
+    reviewId = null;
+}
+
+document.getElementById('review-close').addEventListener('click', closeReview);
+document.getElementById('review-send').addEventListener('click', async function () {
+    if (!reviewId) return;
+    const message = document.getElementById('review-message').value.trim();
+    const status = document.getElementById('review-status');
+    if (!message) {
+        status.textContent = 'Write what they need to fix.';
+        return;
+    }
+    const response = await fetch('/api/admin/listings/' + reviewId + '/message', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message }),
+    });
+    const body = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+        status.textContent = body.message || 'Message was not sent.';
+        return;
+    }
+    status.textContent = body.emailed
+        ? 'Approval stays pending. The seller has the message.'
+        : 'Approval stays pending. The seller will see this on their listings.';
+    loadAdminListings();
+});
+document.getElementById('review-approve').addEventListener('click', async function () {
+    if (!reviewId) return;
+    const response = await fetch('/api/admin/listings/' + reviewId + '/approve', { method: 'POST', credentials: 'include' });
+    if (response.ok) { closeReview(); loadAdminListings(); }
+});
+document.getElementById('review-reject').addEventListener('click', async function () {
+    if (!reviewId) return;
+    const reason = prompt('Reason for rejection?') || '';
+    const response = await fetch('/api/admin/listings/' + reviewId + '/reject', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason }),
+    });
+    if (response.ok) { closeReview(); loadAdminListings(); }
 });
 
 document.getElementById('status-filter').addEventListener('change', loadAdminListings);

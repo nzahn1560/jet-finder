@@ -5231,23 +5231,31 @@ def _notify_admins_charter(inquiry_id, name, email, departure, arrival, aircraft
 
 
 def _mail_listing_status(email, title, outcome, reason):
-    """Tell the seller a listing was approved or rejected. Skips when mail is not configured."""
+    """Tell the seller a listing was approved, rejected, or still pending. Skips when mail is not configured."""
     if not email:
-        return
+        return False
     try:
         import email_service
         if not email_service.is_configured():
             logger.info('Listing %s %s. Email is not configured.', title, outcome)
-            return
+            return False
         if outcome == 'approved':
             subject = 'Your JetSchool listing is live'
             text = f'{title or "Your listing"} is approved and visible according to the visibility you chose.'
+        elif outcome == 'pending':
+            subject = 'Approval pending on your JetSchool listing'
+            text = (
+                f'Approval is pending for {title or "your listing"}.\n\n'
+                f'{reason or "Please update the listing and send it back."}'
+            )
         else:
             subject = 'Your JetSchool listing needs changes'
             text = f'{title or "Your listing"} was not approved. Reason: {reason or "No reason provided"}. You can edit it and send it back without paying again.'
-        email_service.send_email(email, subject, f'<p>{text}</p>', text)
+        email_service.send_email(email, subject, f'<p>{text.replace(chr(10), "<br>")}</p>', text)
+        return True
     except Exception:
         logger.exception('listing status email failed')
+        return False
 
 
 def _notify_admins_new_listing(listing_id, title, seller_email, market='public'):
@@ -5512,6 +5520,7 @@ def api_listings_me():
                 'pricing_plan': row.get('pricing_plan'),
                 'rejection_reason': row.get('rejection_reason'),
                 'amendment_note': row.get('amendment_note'),
+                'review_message': row.get('review_message'),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
                 'photo_count': sum(1 for m in media if m.get('media_type') == 'photo'),
@@ -6338,6 +6347,8 @@ def api_admin_listings():
                 'market': sections_module.normalize_market(row.get('market')),
                 'payment_status': row.get('payment_status'),
                 'rejection_reason': row.get('rejection_reason'),
+                'amendment_note': row.get('amendment_note'),
+                'review_message': row.get('review_message'),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'name': combined.get('name'),
                 'manufacturer': combined.get('manufacturer'),
@@ -6383,6 +6394,114 @@ def admin_delete_listing(listing_id):
 def admin_listings():
     """One admin screen. The queue lives at /admin."""
     return redirect(url_for('admin_index'))
+
+
+def _money(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _admin_listing_review(row):
+    """Listing ask next to the aircraft-data profile it was built from."""
+    aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
+    profile = aircraft_map.get(row.get('profile_id')) or {}
+    asking_price = _money(row.get('price'))
+    reference_price = _money(profile.get('price'))
+    year = row.get('year')
+    low = profile.get('lowest_year')
+    high = profile.get('highest_year')
+    year_note = ''
+    try:
+        year_number = int(year) if year not in (None, '') else None
+        low_number = int(low) if low not in (None, '') else None
+        high_number = int(high) if high not in (None, '') else None
+    except (TypeError, ValueError):
+        year_number = low_number = high_number = None
+    if year_number and low_number and high_number and not (low_number <= year_number <= high_number):
+        year_note = f'Year {year_number} is outside the aircraft data range {low_number}–{high_number}.'
+    price_note = ''
+    if asking_price and reference_price:
+        gap = asking_price - reference_price
+        share = abs(gap) / reference_price * 100
+        side = 'above' if gap > 0 else 'below'
+        price_note = f'Asking price is {share:.0f}% {side} the aircraft data price (${reference_price:,.0f}).'
+    listing_make = (row.get('manufacturer') or '').strip()
+    reference_make = (profile.get('manufacturer') or '').strip()
+    make_note = ''
+    if listing_make and reference_make and listing_make.lower() != reference_make.lower():
+        make_note = 'Manufacturer on the listing does not match the aircraft data.'
+    return {
+        'listing': {
+            'id': row.get('id'),
+            'title': row.get('title'),
+            'status': row.get('status'),
+            'market': row.get('market'),
+            'price': asking_price,
+            'year': row.get('year'),
+            'hours': row.get('hours'),
+            'city': row.get('city'),
+            'state': row.get('state'),
+            'location': row.get('location'),
+            'serial_number': row.get('serial_number'),
+            'manufacturer': row.get('manufacturer'),
+            'description': row.get('description'),
+            'email': row.get('email'),
+            'amendment_note': row.get('amendment_note'),
+            'review_message': row.get('review_message'),
+            'image': row.get('images'),
+        },
+        'aircraft_data': {
+            'manufacturer': profile.get('manufacturer'),
+            'model': profile.get('aircraft_name') or profile.get('model') or profile.get('name'),
+            'price': reference_price,
+            'year_from': low,
+            'year_to': high,
+            'range': profile.get('range'),
+            'speed': profile.get('speed'),
+            'passengers': profile.get('passengers'),
+            'wingspan': profile.get('wingspan'),
+            'length': profile.get('aircraft_length'),
+            'height': profile.get('aircraft_height'),
+            'category': profile.get('category') or profile.get('engine_type'),
+        },
+        'checks': [note for note in (price_note, year_note, make_note) if note],
+    }
+
+
+@app.route('/api/admin/listings/<int:listing_id>/review')
+@require_admin
+def admin_listing_review(listing_id):
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify(_admin_listing_review(row))
+
+
+@app.route('/api/admin/listings/<int:listing_id>/message', methods=['POST'])
+@require_admin
+def admin_listing_message(listing_id):
+    """Keep the listing pending and tell the seller what to fix."""
+    admin = request.current_user  # type: ignore[attr-defined]
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message') or '').strip()
+    if not message:
+        return jsonify({'error': 'message_required'}), 400
+    existing = db_module.get_listing_with_owner(listing_id)
+    if not existing:
+        return jsonify({'error': 'not_found'}), 404
+    previous = existing.get('status')
+    if not db_module.set_listing_review_message(listing_id, message):
+        return jsonify({'error': 'server_error'}), 500
+    db_module.record_listing_audit(
+        listing_id, admin['id'], 'request_changes', previous, 'pending', message,
+    )
+    mailed = _mail_listing_status(existing.get('email'), existing.get('title'), 'pending', message)
+    return jsonify({'ok': True, 'status': 'pending', 'emailed': bool(mailed)})
 
 
 @app.route('/api/admin/listings/<int:listing_id>/approve', methods=['POST'])
