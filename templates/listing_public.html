@@ -11,8 +11,11 @@
     .showroom__nav {
         position: absolute; top: 50%; transform: translateY(-50%);
         width: 44px; height: 44px; border: 0; border-radius: 999px;
-        background: rgba(12,12,12,0.82); color: #fff;
+        background: rgba(12,12,12,0.82); color: #fff; z-index: 2;
+        opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
     }
+    .showroom__hero:hover .showroom__nav,
+    .showroom__hero:focus-within .showroom__nav { opacity: 1; pointer-events: auto; }
     .showroom__nav--prev { left: 16px; }
     .showroom__nav--next { right: 16px; }
     .showroom__sheet { max-width: 980px; margin: -72px auto 0; padding: 0 1.25rem 3rem; position: relative; }
@@ -32,7 +35,10 @@
     }
     .showroom__stat span { color: #c8c8c8; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
     .showroom__stat b { color: #F05545; font-size: 1.2rem; }
+    .showroom__crew { text-transform: none; letter-spacing: 0; font-style: normal; color: #9a9a9a; font-size: 0.68rem; }
     .showroom__notes { color: #ddd; margin-top: 1rem; line-height: 1.55; }
+    .showroom__notes summary { cursor: pointer; color: #f4f4f4; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.85rem; }
+    .showroom__notes p { margin: 0.55rem 0 0; white-space: pre-wrap; }
     .showroom__send { margin-top: 1.25rem; display: grid; gap: 0.55rem; }
     .showroom__send textarea, .showroom__send select {
         background: #111; color: #fff; border: 1px solid #404040; border-radius: 8px; padding: 0.6rem 0.7rem;
@@ -52,6 +58,8 @@
         {% if not media %}
         <img src="/static/images/aircraft_placeholder.jpg" alt="{{ listing.title }}">
         {% endif %}
+        <button class="showroom__nav showroom__nav--prev" type="button" id="showroom-prev" hidden aria-label="Previous photo">&lsaquo;</button>
+        <button class="showroom__nav showroom__nav--next" type="button" id="showroom-next" hidden aria-label="Next photo">&rsaquo;</button>
     </div>
     <div class="showroom__sheet">
         <div class="showroom__panel">
@@ -68,12 +76,17 @@
             <div class="showroom__stats">
                 <div class="showroom__stat"><span>Range (seats full)</span><b>{{ profile.range or '—' }} nm</b></div>
                 <div class="showroom__stat"><span>Speed</span><b>{{ profile.speed or '—' }} kts</b></div>
-                <div class="showroom__stat"><span>Passengers</span><b>{{ profile.passengers or '—' }}</b></div>
+                <div class="showroom__stat"><span>Passengers{% if profile.min_crew == 1 %} <em class="showroom__crew">(includes one flight-deck seat in place of a second pilot)</em>{% endif %}</span><b>{{ profile.passengers or '—' }}</b></div>
                 <div class="showroom__stat"><span>Cabin</span><b>{{ profile.cabin_volume or '—' }} cu ft</b></div>
                 {% if listing.hours is not none %}<div class="showroom__stat"><span>Airframe</span><b>{{ '{:,.0f}'.format(listing.hours or 0) }} hrs</b></div>{% endif %}
                 {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}
             </div>
-            {% if listing.description %}<p class="showroom__notes">{{ listing.description }}</p>{% endif %}
+            {% if listing.description %}
+            <details class="showroom__notes">
+                <summary>Seller notes</summary>
+                <p>{{ listing.description }}</p>
+            </details>
+            {% endif %}
             {% if listing.avionics or listing.paint_year or listing.interior_year %}
             <p class="showroom__notes">
                 {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}
@@ -98,6 +111,24 @@
         </div>
     </div>
 </article>
+<script>
+(function () {
+    const photos = Array.from(document.querySelectorAll('[data-showroom-photo]'));
+    const prev = document.getElementById('showroom-prev');
+    const next = document.getElementById('showroom-next');
+    if (photos.length < 2 || !prev || !next) return;
+    let index = 0;
+    prev.hidden = false;
+    next.hidden = false;
+    function show(step) {
+        photos[index].hidden = true;
+        index = (index + step + photos.length) % photos.length;
+        photos[index].hidden = false;
+    }
+    prev.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); show(-1); });
+    next.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); show(1); });
+})();
+</script>
 {% if viewer and brokers %}
 <script>
 document.getElementById('send-listing').addEventListener('submit', async function (event) {

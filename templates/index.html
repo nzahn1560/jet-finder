@@ -3460,6 +3460,60 @@
         background: rgba(12, 12, 12, 0.82);
         color: #fff;
         z-index: 2;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+
+    .listing-photos:hover .listing-photo-nav,
+    .listing-photos:focus-within .listing-photo-nav {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .aircraft-name a,
+    .listing-photo-link {
+        color: #fff;
+        text-decoration: none;
+        cursor: pointer;
+    }
+
+    .listing-photo-link {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+
+    .stat-note,
+    .stat-pct {
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 600;
+    }
+
+    .stat-note {
+        color: #9a9a9a;
+        font-size: 0.62rem;
+    }
+
+    .seller-notes {
+        margin-top: 0.65rem;
+    }
+
+    .seller-notes summary {
+        cursor: pointer;
+        color: #f4f4f4;
+        font-size: 0.78rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .seller-notes p {
+        color: #c8c8c8;
+        font-size: 0.95rem;
+        line-height: 1.45;
+        margin: 0.4rem 0 0;
+        white-space: pre-wrap;
     }
 
     .listing-photo-nav--prev { left: 8px; }
@@ -4743,12 +4797,13 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=4"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=5"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <!-- Real-Time Aircraft Filtering System -->
 <script>
+    window.SHEET_SCALE = {{ sheet_scale|default({}, true)|tojson }};
     console.log('Aircraft filtering system initialized');
 
     // Real-time filtering system initialized
@@ -4767,56 +4822,62 @@
         { base: '#a855f7', rgba: 'rgba(168, 85, 247, ALPHA)' },
         { base: '#f97316', rgba: 'rgba(249, 115, 22, ALPHA)' }
     ];
+    function sheetField(aircraft, key) {
+        const value = Number(aircraft?.[key]);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    function liveColumn(metrics, key) {
+        const value = Number(metrics?.columnValues?.[key]);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    function dateSpan(aircraft) {
+        const low = Number(aircraft?.lowest_year);
+        const high = Number(aircraft?.highest_year);
+        if (Number.isFinite(low) && Number.isFinite(high) && high >= low && low > 0) return high - low;
+        const years = String(aircraft?.date_range || '').match(/\d{4}/g);
+        if (years && years.length >= 2) return Math.abs(Number(years[years.length - 1]) - Number(years[0]));
+        return null;
+    }
+
     const COST_METRIC_OPTIONS = [
-        { key: 'L', label: 'Column L – Charter Rate %', type: 'percent', precision: 2, getValue: metrics => metrics.columnValues?.L ?? null },
-        { key: 'M', label: 'Column M – Piston Pilot Pay ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.M ?? null },
-        { key: 'N', label: 'Column N – Turboprop Pilot Pay ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.N ?? null },
-        { key: 'O', label: 'Column O – Business Jet Pilot Pay ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.O ?? null },
-        { key: 'P', label: 'Column P – Planned Passengers', type: 'number', precision: 0, getValue: metrics => metrics.columnValues?.P ?? null },
-        { key: 'Q', label: 'Column Q – Passenger Pay ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.Q ?? null },
-        { key: 'R', label: 'Column R – Charter Rate %', type: 'percent', precision: 2, getValue: metrics => metrics.columnValues?.R ?? null },
-        { key: 'S', label: 'Column S – Avg Charter Trip Length (NM)', type: 'number', precision: 0, getValue: metrics => metrics.columnValues?.S ?? null },
-        { key: 'T', label: 'Column T – Charter Trips per Year', type: 'number', precision: 0, getValue: metrics => metrics.columnValues?.T ?? null },
-        { key: 'AB', label: 'Column AB – Depreciated Price ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AB ?? null },
-        { key: 'AC', label: 'Column AC – Average Trip Time (hrs)', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AC ?? null },
-        { key: 'AD', label: 'Column AD – Total Trip Time (hrs)', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AD ?? null },
-        { key: 'AE', label: 'Column AE – Passenger Revenue ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AE ?? null },
-        { key: 'AF', label: 'Column AF – Charter Hourly Cost ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.AF ?? null },
-        { key: 'AG', label: 'Column AG – Charter Leg Time (hrs)', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AG ?? null },
-        { key: 'AH', label: 'Column AH – Charter Hours (hrs)', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AH ?? null },
-        { key: 'AI', label: 'Column AI – Charter Revenue ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AI ?? null },
-        { key: 'AJ', label: 'Column AJ – Total Fixed Cost ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AJ ?? null },
-        { key: 'AK', label: 'Column AK – Total Variable Cost ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AK ?? null },
-        { key: 'AL', label: 'Column AL – Fuel Cost ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AL ?? null },
-        { key: 'AM', label: 'Column AM – Total Operating Cost ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AM ?? null },
-        { key: 'AN', label: 'Column AN – Annual Budget ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AN ?? null },
-        { key: 'AO', label: 'Column AO – Multi-Year Total Cost ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AO ?? null },
-        { key: 'AP', label: 'Column AP – Net Cost After Sale ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AP ?? null },
-        { key: 'AQ', label: 'Column AQ – Cost to Charter ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AQ ?? null },
-        { key: 'AR', label: 'Column AR – Own vs Charter Ratio', type: 'ratio', precision: 2, getValue: metrics => metrics.columnValues?.AR ?? null },
-        { key: 'AS', label: 'Column AS – Ownership Advantage ($)', type: 'currency', precision: 0, getValue: metrics => metrics.columnValues?.AS ?? null },
-        { key: 'AT', label: 'Column AT – Speed per Dollar', type: 'number', precision: 4, getValue: metrics => metrics.columnValues?.AT ?? null },
-        { key: 'AU', label: 'Column AU – Normalized Speed', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AU ?? null },
-        { key: 'AV', label: 'Column AV – Speed per Dollar per Seat', type: 'number', precision: 4, getValue: metrics => metrics.columnValues?.AV ?? null },
-        { key: 'AW', label: 'Column AW – Range per Dollar', type: 'number', precision: 4, getValue: metrics => metrics.columnValues?.AW ?? null },
-        { key: 'AX', label: 'Column AX – Normalized Range', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AX ?? null },
-        { key: 'AY', label: 'Column AY – Range per Dollar per Seat', type: 'number', precision: 4, getValue: metrics => metrics.columnValues?.AY ?? null },
-        { key: 'AZ', label: 'Column AZ – Performance Score', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.AZ ?? null },
-        { key: 'BA', label: 'Column BA – Normalized Performance', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BA ?? null },
-        { key: 'BB', label: 'Column BB – Performance per Seat', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BB ?? null },
-        { key: 'BC', label: 'Column BC – Efficiency Score', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BC ?? null },
-        { key: 'BD', label: 'Column BD – Normalized Efficiency', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BD ?? null },
-        { key: 'BE', label: 'Column BE – Efficiency per Seat', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BE ?? null },
-        { key: 'BF', label: 'Column BF – All-Around Score', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BF ?? null },
-        { key: 'BG', label: 'Column BG – All-Around per Seat', type: 'number', precision: 2, getValue: metrics => metrics.columnValues?.BG ?? null },
-        { key: 'BH', label: 'Column BH – Total Hourly Cost ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BH ?? null },
-        { key: 'BI', label: 'Column BI – Hourly Cost per Seat ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BI ?? null },
-        { key: 'BJ', label: 'Column BJ – Cost per NM ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BJ ?? null },
-        { key: 'BK', label: 'Column BK – Cost per Seat NM ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BK ?? null },
-        { key: 'BL', label: 'Column BL – Hourly Variable Cost ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BL ?? null },
-        { key: 'BM', label: 'Column BM – Variable Cost per Seat ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BM ?? null },
-        { key: 'BN', label: 'Column BN – Variable Cost per NM ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BN ?? null },
-        { key: 'BO', label: 'Column BO – Variable Cost per Seat NM ($)', type: 'currency', precision: 2, getValue: metrics => metrics.columnValues?.BO ?? null }
+        { key: 'G', label: 'Date Range', type: 'number', precision: 0, getValue: aircraft => dateSpan(aircraft) },
+        { key: 'K', label: 'Min Crew Required', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'min_crew') },
+        { key: 'L', label: 'Max Operating Altitude (ft)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'max_altitude') },
+        { key: 'M', label: 'Balanced Field Length (ft)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'runway_length') },
+        { key: 'N', label: 'Aircraft Height (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'aircraft_height') },
+        { key: 'O', label: 'Wingspan (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'wingspan') },
+        { key: 'P', label: 'Aircraft Length (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'aircraft_length') },
+        { key: 'Q', label: 'Aircraft Volume (cubic ft)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'aircraft_volume') },
+        { key: 'R', label: 'Cabin Height (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'cabin_height') },
+        { key: 'S', label: 'Cabin Width (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'cabin_width') },
+        { key: 'T', label: 'Cabin Length (ft)', type: 'number', precision: 1, getValue: aircraft => sheetField(aircraft, 'cabin_length') },
+        { key: 'U', label: 'Cabin Volume (cubic ft)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'cabin_volume') },
+        { key: 'V', label: 'Baggage Volume (cubic ft)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'baggage_volume') },
+        { key: 'W', label: 'Cabin/Aircraft Volume', type: 'number', precision: 2, getValue: function (aircraft) {
+            const cabin = sheetField(aircraft, 'cabin_volume');
+            const hull = sheetField(aircraft, 'aircraft_volume');
+            return hull ? cabin / hull : null;
+        } },
+        { key: 'X', label: 'Range(NM)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'range') },
+        { key: 'Y', label: 'Speed(KTS)', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'speed') },
+        { key: 'Z', label: 'Passengers', type: 'number', precision: 0, getValue: aircraft => sheetField(aircraft, 'passengers') },
+        { key: 'AC', label: 'Average Trip Time', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AC') },
+        { key: 'AD', label: '# of Hours', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AD') },
+        { key: 'AN', label: 'Adjusted Annual Budget', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AN') },
+        { key: 'AO', label: 'Multi-Year Total Cost', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AO') },
+        { key: 'AQ', label: 'Cost To Charter', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AQ') },
+        { key: 'AS', label: 'Own/Charter Savings', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AS') },
+        { key: 'AT', label: 'Best Speed/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AT') },
+        { key: 'AV', label: 'Best Seat Speed/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AV') },
+        { key: 'AW', label: 'Best Range/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AW') },
+        { key: 'AY', label: 'Best Seat Range/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AY') },
+        { key: 'AZ', label: 'Best Performance/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AZ') },
+        { key: 'BB', label: 'Best Seat Performance/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BB') },
+        { key: 'BC', label: 'Best Efficiency/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BC') },
+        { key: 'BE', label: 'Best Seat Efficiency/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BE') },
+        { key: 'BF', label: 'Best All Around/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BF') }
     ];
     const DEFAULT_COST_METRIC_KEYS = ['AN', 'AO', 'AQ'];
     let compareSelections = []; // [{ id, colorIndex }]
@@ -4847,6 +4908,18 @@
             name: name,
             listing_title: ac.listing_title || ac.title || name,
             price: num(ac.price || ac.listing_price),
+            catalog_price: num(ac.catalog_price != null && ac.catalog_price !== '' ? ac.catalog_price : (ac.price || ac.listing_price)),
+            sheet_speed_dollar: num(ac.best_speed_dollar),
+            sheet_range_dollar: num(ac.best_range_dollar),
+            sheet_performance_dollar: num(ac.best_performance_dollar),
+            sheet_efficiency_dollar: num(ac.best_efficiency_dollar),
+            sheet_all_around_dollar: num(ac.best_all_around_dollar),
+            aircraft_volume: num(ac.aircraft_volume),
+            cabin_width: num(ac.cabin_width),
+            cabin_length: num(ac.cabin_length),
+            lowest_year: num(ac.lowest_year),
+            highest_year: num(ac.highest_year),
+            date_range: ac.date_range || '',
             range: num(ac.range),
             speed: num(ac.speed || ac.cruise_speed),
             passengers: num(ac.passengers || ac.seats),
@@ -5633,25 +5706,9 @@
     // Update aircraft display based on filtered results with pagination
     function stampOverallScores() {
         const pool = allAircraftData.length ? allAircraftData : filteredAircraftData;
-        const rows = pool.map(function (ac) {
-            const metrics = calculateDynamicMetrics(ac, getUserInputs());
-            const raw = Number(metrics.bestAllAroundDollar);
-            return { ac: ac, raw: Number.isFinite(raw) ? raw : 0 };
+        pool.forEach(function (ac) {
+            ac.overall_score = sheetDollarPercent(ac, 'allAround');
         });
-        const ranked = rows.filter(function (row) { return Number.isFinite(row.raw); }).sort(function (a, b) { return a.raw - b.raw; });
-        const rankOf = new Map();
-        ranked.forEach(function (row, index) {
-            const key = row.raw.toFixed(3);
-            if (!rankOf.has(key)) rankOf.set(key, index + 1);
-        });
-        const total = ranked.length;
-        rows.forEach(function (row) {
-            const rank = rankOf.get(row.raw.toFixed(3));
-            row.ac.overall_score = rank ? Math.round(Math.max(1, Math.min(100, 101 - rank))) : null;
-        });
-        if (!total) {
-            pool.forEach(function (ac) { ac.overall_score = null; });
-        }
     }
 
     function updateAircraftDisplay() {
@@ -5975,6 +6032,8 @@
         buttons.forEach(button => {
             if (!button.dataset.compareListenerAttached) {
                 button.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
                     const target = event.currentTarget;
                     const aircraftId = target.dataset.compareId;
                     toggleCompareSelection(aircraftId);
@@ -6043,8 +6102,8 @@
             const canvas = chartCard.querySelector('canvas');
             const ctx = canvas.getContext('2d');
 
-            const rawValues = selectionData.map(({ metrics }) =>
-                option.getValue ? option.getValue(metrics) : null
+            const rawValues = selectionData.map(({ aircraft, metrics }) =>
+                option.getValue ? option.getValue(aircraft, metrics) : null
             );
             const numericValues = rawValues.map(value => Number.isFinite(value) ? value : 0);
             const colors = selectionData.map(({ colorIndex }) => getCompareColor(colorIndex, 0.6));
@@ -6250,64 +6309,39 @@
         updateCompareButtonStates();
     }
 
-    // Helper functions for performance score display - RANK-BASED PERCENTAGE
-    function getPerformancePercentage(score, metricType, allVisibleAircraft) {
-        // Use ALL aircraft data for consistent percentage calculations, not just visible aircraft
-        const aircraftToCompare = allAircraftData.length > 0 ? allAircraftData : (allVisibleAircraft || filteredAircraftData);
+    // Spreadsheet per-dollar score. Lower raw values are better. Listing price replaces column AA.
+    function sheetDollarPercent(aircraft, metricType) {
+        const fields = {
+            speed: 'sheet_speed_dollar',
+            range: 'sheet_range_dollar',
+            performance: 'sheet_performance_dollar',
+            efficiency: 'sheet_efficiency_dollar',
+            allAround: 'sheet_all_around_dollar'
+        };
+        const field = fields[metricType];
+        const scale = (window.SHEET_SCALE || {})[metricType] || {};
+        const raw = Number(aircraft?.[field]);
+        const min = Number(scale.min);
+        const max = Number(scale.max);
+        if (!field || !(raw > 0) || !(max > min)) return null;
+        const ask = Number(aircraft.price) || 0;
+        const catalog = Number(aircraft.catalog_price) || ask;
+        const ratio = catalog > 0 ? ask / catalog : 1;
+        const adjusted = raw * (ratio > 0 ? ratio : 1);
+        const norm = ((adjusted - min) / (max - min)) * 1000;
+        const clamped = Math.max(0, Math.min(1000, norm));
+        return Math.round(Math.max(0, Math.min(100, 100 - (clamped / 10))));
+    }
 
-        // Get all scores for this metric from ALL aircraft with aircraft reference
-        const allScoresWithAircraft = [];
-
-        aircraftToCompare.forEach(aircraft => {
-            const metrics = calculateDynamicMetrics(aircraft, getUserInputs());
-            let metricScore;
-
-            switch (metricType) {
-                case 'speed': metricScore = metrics.bestSpeedDollar; break;
-                case 'range': metricScore = metrics.bestRangeDollar; break;
-                case 'performance': metricScore = metrics.bestPerformanceDollar; break;
-                case 'efficiency': metricScore = metrics.bestEfficiencyDollar; break;
-                case 'allAround': metricScore = metrics.bestAllAroundDollar; break;
-                default: metricScore = 0;
-            }
-
-            const usable = metricType === 'allAround'
-                ? Number.isFinite(metricScore)
-                : metricScore && metricScore > 0 && !isNaN(metricScore);
-            if (usable) {
-                allScoresWithAircraft.push({
-                    score: metricScore,
-                    aircraft: aircraft,
-                    aircraftName: aircraft.aircraft_name || aircraft.name || 'Unknown'
-                });
-            }
-        });
-
-        if (allScoresWithAircraft.length === 0) return 50;
-
-        // Sort scores in ascending order (lowest scores first, since lower is better)
-        allScoresWithAircraft.sort((a, b) => a.score - b.score);
-
-        // Find the rank of the current score
-        let rank = 1;
-        for (let i = 0; i < allScoresWithAircraft.length; i++) {
-            if (Math.abs(allScoresWithAircraft[i].score - score) < 0.001) {
-                rank = i + 1;
-                break;
-            }
-        }
-
-        // Calculate percentage based on rank
-        // Best aircraft (rank 1) gets 100%, next best gets 99%, etc.
-        const totalAircraft = allScoresWithAircraft.length;
-        const percentage = Math.max(1, 101 - rank);
-
-        // Debug logging for percentage calculation
-        if (metricType === 'performance' || metricType === 'allAround') {
-            console.log(`📊 ${metricType} Rank Calc: Score=${score.toFixed(2)}, Rank=${rank}/${totalAircraft}, Percentage=${percentage}%`);
-        }
-
-        return Math.round(Math.max(1, Math.min(100, percentage)));
+    function marketStatPercent(value, values, higherIsBetter) {
+        const current = Number(value);
+        const nums = (values || []).map(Number).filter(function (n) { return Number.isFinite(n); });
+        if (!Number.isFinite(current) || !nums.length) return null;
+        const min = Math.min.apply(null, nums);
+        const max = Math.max.apply(null, nums);
+        if (max === min) return 100;
+        const span = (current - min) / (max - min);
+        return Math.round((higherIsBetter ? span : 1 - span) * 100);
     }
 
     function scoreColor(score) {
@@ -6322,9 +6356,6 @@
     function populateRelativePerformanceScores(currentPageAircraft) {
         const metrics = ['speed', 'range', 'performance', 'efficiency', 'allAround'];
         const metricLabels = ['Best Speed/$', 'Best Range/$', 'Best Performance/$', 'Best Efficiency/$', 'Best All-Around/$'];
-
-        // Use ALL aircraft for consistent comparison
-        const allAircraft = filteredAircraftData.length > 0 ? filteredAircraftData : allAircraftData;
 
         currentPageAircraft.forEach((aircraft, index) => {
             const performanceContainer = document.getElementById(`performance-scores-${index}`);
@@ -6350,49 +6381,13 @@
             }
 
             metrics.forEach((metricType, i) => {
-                let score, percentage;
-
-                switch (metricType) {
-                    case 'speed':
-                        score = displayMetrics.bestSpeedDollar;
-                        percentage = getPerformancePercentage(score, metricType, allAircraft);
-                        break;
-                    case 'range':
-                        score = displayMetrics.bestRangeDollar;
-                        percentage = getPerformancePercentage(score, metricType, allAircraft);
-                        break;
-                    case 'performance':
-                        // Performance/$ needs relative comparison using raw AZ2 values
-                        score = displayMetrics.bestPerformanceDollar;
-                        percentage = getPerformancePercentage(score, metricType, allAircraft);
-                        // Ensure percentage is logical (not 50% for all)
-                        if (percentage === 50 && score > 0) {
-                            percentage = Math.min(100, Math.max(0, score * 2)); // Simple scaling
-                        }
-                        break;
-                    case 'efficiency':
-                        score = displayMetrics.bestEfficiencyDollar;
-                        percentage = getPerformancePercentage(score, metricType, allAircraft);
-                        // Ensure percentage is logical
-                        if (percentage === 50 && score > 0) {
-                            percentage = Math.min(100, Math.max(0, score * 10)); // Simple scaling
-                        }
-                        break;
-                    case 'allAround':
-                        // All-Around/$ needs relative comparison using raw BF2 values
-                        score = displayMetrics.bestAllAroundDollar;
-                        percentage = getPerformancePercentage(score, metricType, allAircraft);
-                        // Ensure percentage is logical
-                        if (percentage === 50 && score > 0) {
-                            percentage = Math.min(100, Math.max(0, score * 2)); // Simple scaling
-                        }
-                        break;
-                }
-
+                const percentage = sheetDollarPercent(aircraft, metricType);
+                const shown = percentage == null ? '—' : percentage + '%';
+                const color = percentage == null ? '#F05545' : scoreColor(percentage);
                 html += `
-                    <div class="perf-bar">
+                    <div class="perf-bar" style="box-shadow: inset 3px 0 0 ${color}">
                         <div class="perf-bar__label">${metricLabels[i]}</div>
-                        <div class="perf-bar__value">${percentage}</div>
+                        <div class="perf-bar__value" style="color:${color}">${shown}</div>
                     </div>
             `;
             });
@@ -6458,6 +6453,26 @@
         const sellerId = Number(aircraft.seller_id) || 0;
         const sellerName = escCard(aircraft.seller_name || 'Seller');
         const overallScore = aircraft.overall_score == null ? '—' : aircraft.overall_score;
+        const listingHref = aircraft.is_user_listing && aircraft.id ? '/listing/' + aircraft.id : '';
+        const peers = filteredAircraftData.length ? filteredAircraftData : allAircraftData;
+        const peerMetrics = peers.map(function (item) { return calculateDynamicMetrics(item, getUserInputs()); });
+        const statValue = function (text, pct) {
+            if (pct == null) return text;
+            return text + ' <span class="stat-pct" style="color:' + scoreColor(pct) + '">(' + pct + '%)</span>';
+        };
+        const passengerLabel = Number(aircraft.min_crew) === 1
+            ? 'Passengers <span class="stat-note">(includes one flight-deck seat in place of a second pilot)</span>'
+            : 'Passengers';
+        const specRows = [
+            ['Range (seats full)', statValue(`${aircraft.range || 0} nm`, marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true))],
+            ['Speed', statValue(`${aircraft.speed || 0} kts`, marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true))],
+            [passengerLabel, statValue(`${aircraft.passengers || 0}`, marketStatPercent(aircraft.passengers, peers.map(function (item) { return item.passengers; }), true))],
+            ['Cabin', statValue(`${aircraft.cabin_volume || 0} cu ft`, marketStatPercent(aircraft.cabin_volume, peers.map(function (item) { return item.cabin_volume; }), true))],
+            ['Hours / year', statValue(`${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, marketStatPercent(displayMetrics.totalTripTime, peerMetrics.map(function (item) { return item.totalTripTime; }), false))],
+            ['Average leg', statValue(`${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, marketStatPercent(displayMetrics.averageTripTime, peerMetrics.map(function (item) { return item.averageTripTime; }), false))],
+            ['Annual budget', statValue(`$${displayMetrics.annualBudget.toLocaleString()}`, marketStatPercent(displayMetrics.annualBudget, peerMetrics.map(function (item) { return item.annualBudget; }), false))],
+            ['Multi-year cost', statValue(`$${displayMetrics.multiYearTotalCost.toLocaleString()}`, marketStatPercent(displayMetrics.multiYearTotalCost, peerMetrics.map(function (item) { return item.multiYearTotalCost; }), false))],
+        ];
 
         card.innerHTML = `
             <div class="aircraft-card" id="aircraft-${index}" 
@@ -6482,7 +6497,9 @@
                 style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease;">
                 
                 <div class="aircraft-image listing-photos">
+                    ${listingHref ? `<a class="listing-photo-link" href="${listingHref}">` : ''}
                     <img src="${primaryImage}" alt="${listingTitle}">
+                    ${listingHref ? '</a>' : ''}
                     <div class="listing-score" title="Overall match from all-around value per dollar">
                         <span class="listing-score__value" style="color:${overallScore === '—' ? '#fff' : scoreColor(overallScore)}">${overallScore}${overallScore === '—' ? '' : '%'}</span>
                     </div>
@@ -6502,7 +6519,7 @@
                 
                 <div class="listing-scroll">
                 <div class="aircraft-content" style="padding: 10px;">
-                    <h5 class="aircraft-name">${listingTitle}</h5>
+                    <h5 class="aircraft-name">${listingHref ? `<a href="${listingHref}">${listingTitle}</a>` : listingTitle}</h5>
                     ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 1.05rem;">
@@ -6521,25 +6538,16 @@
                             </div>
                     
                     <div class="spec-bars">
-                        ${[
-                            ['Range (seats full)', `${aircraft.range || 0} nm`],
-                            ['Speed', `${aircraft.speed || 0} kts`],
-                            ['Passengers', `${aircraft.passengers || 0}`],
-                            ['Cabin', `${aircraft.cabin_volume || 0} cu ft`],
-                            ['Hours / year', `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`],
-                            ['Average leg', `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`],
-                            ['Annual budget', `$${displayMetrics.annualBudget.toLocaleString()}`],
-                            ['Multi-year cost', `$${displayMetrics.multiYearTotalCost.toLocaleString()}`],
-                        ].map(function (bar) {
+                        ${specRows.map(function (bar) {
                             return `<div class="stat-box"><div class="stat-box__label">${bar[0]}</div><div class="stat-box__value">${bar[1]}</div></div>`;
                         }).join('')}
                     </div>
                         
                         ${listingDescription ? `
-                        <div class="mt-3">
-                            <span class="spec-label">Seller Notes:</span>
-                            <p class="text-muted mb-0" style="font-size: 0.9rem;">${listingDescription}</p>
-                        </div>` : ''}
+                        <details class="seller-notes">
+                            <summary>Seller notes</summary>
+                            <p>${listingDescription}</p>
+                        </details>` : ''}
                         
                         <div class="listing-actions">
                             <button class="btn add-to-compare-btn" type="button"
@@ -6576,16 +6584,6 @@
         const nextPhoto = card.querySelector('.listing-photo-nav--next');
         if (prevPhoto) prevPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(-1); });
         if (nextPhoto) nextPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(1); });
-        if (aircraft.is_user_listing && aircraft.id) {
-            const openListing = card.querySelector('.aircraft-card');
-            if (openListing) {
-                openListing.style.cursor = 'pointer';
-                openListing.addEventListener('click', function (event) {
-                    if (event.target.closest('button, a, input, select, textarea')) return;
-                    window.location.href = '/listing/' + aircraft.id;
-                });
-            }
-        }
 
         // Add hover effects
         card.addEventListener('mouseenter', function () {
@@ -8089,6 +8087,19 @@
             paintWatchButtons();
         });
     }
+
+    let refreshingListings = false;
+    window.refreshListingNumbers = function () {
+        if (refreshingListings || !Array.isArray(allAircraftData) || !allAircraftData.length) return;
+        refreshingListings = true;
+        try {
+            updateUserInputs();
+            recalculateAll();
+            applyRealTimeFiltering();
+        } finally {
+            refreshingListings = false;
+        }
+    };
 
 </script>
 

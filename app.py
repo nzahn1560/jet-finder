@@ -502,20 +502,28 @@ def service_providers():
     )
 
 
+def _point_geography(place, lat=None, lon=None, city='', state=''):
+    """City, airport code, and coordinates for a broker pin and its search text."""
+    airport = sections_module.resolve_place(place, country='US') if place else None
+    airport = airport or {}
+    return {
+        'lat': lat if lat is not None else airport.get('lat'),
+        'lon': lon if lon is not None else airport.get('lon'),
+        'iata': airport.get('iata') or '',
+        'icao': airport.get('icao') or '',
+        'airport_name': airport.get('name') or '',
+        'city': city or airport.get('city') or '',
+        'region': state or '',
+        'country': airport.get('country') or '',
+    }
+
+
 def _team_map_point(team):
     place = team.get('location') or ', '.join(part for part in [team.get('city'), team.get('state')] if part)
-    lat = team.get('latitude')
-    lon = team.get('longitude')
-    if lat is None or lon is None:
-        airport = sections_module.resolve_place(place, country='US')
-        if airport:
-            lat = airport.get('lat')
-            lon = airport.get('lon')
+    geography = _point_geography(place, team.get('latitude'), team.get('longitude'), team.get('city') or '', team.get('state') or '')
     members = db_module.list_team_members(team['id'], status='active')
     return {
         'id': team.get('id'),
-        'lat': lat,
-        'lon': lon,
         'display_name': team.get('name') or 'Team',
         'place': place,
         'logo': team.get('logo_url') or '',
@@ -523,6 +531,7 @@ def _team_map_point(team):
         'member_count': len(members),
         'category': team.get('category') or '',
         'leader': next((' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) for member in members if member.get('is_admin')), ''),
+        **geography,
     }
 
 
@@ -535,20 +544,20 @@ def brokers_page():
         team['pin_id'] = f"team-{team.get('id')}"
     people = []
     for broker in db_module.list_approved_brokers():
+        geography = _point_geography(broker.get('place') or '', broker.get('lat'), broker.get('lon'))
         people.append({
             'kind': 'broker',
             'pin_id': f"broker-{broker['id']}",
             'id': broker['id'],
             'user_id': broker['id'],
-            'lat': broker.get('lat'),
-            'lon': broker.get('lon'),
             'display_name': broker.get('name') or 'Broker',
             'place': broker.get('place') or '',
             'logo': broker.get('photo') or '',
             'bio': broker.get('bio') or '',
             'member_count': 1,
             'category': broker.get('company') or 'Broker',
-            'leader': '',
+            'leader': broker.get('name') or '',
+            **geography,
         })
     return render_template('brokers.html', map_points=teams + people)
 
@@ -960,6 +969,29 @@ def get_unified_aircraft_data() -> list[dict[str, Any]]:
 
 
 
+def _sheet_scale(rows):
+    """Fleet min and max for the spreadsheet per-dollar columns. Lower is better."""
+    fields = {
+        'speed': 'best_speed_dollar',
+        'range': 'best_range_dollar',
+        'performance': 'best_performance_dollar',
+        'efficiency': 'best_efficiency_dollar',
+        'allAround': 'best_all_around_dollar',
+    }
+    scale = {}
+    for name, field in fields.items():
+        values = []
+        for row in rows or []:
+            try:
+                number = float(row.get(field) or 0)
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                values.append(number)
+        scale[name] = {'min': min(values) if values else 0, 'max': max(values) if values else 0}
+    return scale
+
+
 @app.route('/')
 @app.route('/jet-finder')
 def home():
@@ -1032,7 +1064,9 @@ def home():
             user_priorities[key] = user_priorities.get(key, 0) + value
     
     # Start with unified data (CSV + marketplace)
-    filtered_aircraft = get_unified_aircraft_data()
+    catalog = get_unified_aircraft_data()
+    sheet_scale = _sheet_scale(catalog)
+    filtered_aircraft = catalog
 
     
     # Apply search filter (manufacturer/model/name)
@@ -1171,7 +1205,8 @@ def home():
         'priority_5th': priority_5th
     }
     
-    return render_template('index.html', 
+    return render_template('index.html',
+                         sheet_scale=sheet_scale,
                          filtered_aircraft=aircraft_page,
                          pagination=pagination,
                          total_aircraft=total,
@@ -5356,11 +5391,14 @@ def get_match_explanation(listing, preferences):
 _PUBLIC_LISTING_KEYS = (
     'id', 'listing_id', 'is_user_listing', 'aircraft_name', 'name', 'title', 'listing_title',
     'manufacturer', 'category', 'engine_type', 'model',
-    'price', 'listing_price', 'year', 'hours', 'location',
+    'price', 'listing_price', 'catalog_price', 'year', 'hours', 'location',
     'description', 'listing_description', 'image', 'images',
     'wingspan', 'speed', 'range', 'passengers', 'min_crew', 'multi_engine',
-    'cabin_volume', 'baggage_volume', 'runway_length', 'max_altitude', 'altitude',
+    'cabin_volume', 'baggage_volume', 'aircraft_volume', 'cabin_width', 'cabin_length',
+    'runway_length', 'max_altitude', 'altitude',
     'aircraft_length', 'aircraft_height', 'cabin_height',
+    'best_speed_dollar', 'best_range_dollar', 'best_performance_dollar',
+    'best_efficiency_dollar', 'best_all_around_dollar',
     'total_hourly_cost', 'total_fixed_cost', 'total_variable_cost',
     'annual_budget', 'multi_year_total_cost',
     'email', 'contact_email', 'date_range', 'lowest_year', 'highest_year', 'status',
@@ -5556,6 +5594,7 @@ def _row_to_combined_listing(row, aircraft_map):
     if not profile:
         return None
     profile_copy = dict(profile)
+    catalog_price = profile_copy.get('price')
     image_list = [img.strip() for img in (images or '').split(',') if img.strip()]
     document_list = [doc.strip() for doc in (documents or '').split(',') if doc.strip()]
     resolved_manufacturer = listing_manufacturer or profile_copy.get('manufacturer') or 'Unknown'
@@ -5571,6 +5610,7 @@ def _row_to_combined_listing(row, aircraft_map):
         'listing_title': listing_title,
         'price': price,
         'listing_price': price,
+        'catalog_price': catalog_price,
         'hours': hours,
         'location': location,
         'city': row.get('city') or '',
