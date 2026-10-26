@@ -320,6 +320,19 @@ class AuthRateHit(Base):
     created_at = Column(DateTime, nullable=False, index=True)
 
 
+class BrokerMessage(Base):
+    """A buyer or seller note sent to an approved broker."""
+    __tablename__ = 'broker_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    to_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    listing_id = Column(Integer, ForeignKey('user_listings.id'))
+    kind = Column(String(20), nullable=False)
+    aircraft_name = Column(String(200))
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class CharterOperator(Base):
     __tablename__ = 'charter_operators'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -1014,6 +1027,8 @@ def update_user_profile(user_id, fields):
                 safe.pop(image_key, None)
             else:
                 safe[image_key] = cleaned
+    if isinstance(safe.get('broker_bio'), str):
+        safe['broker_bio'] = safe['broker_bio'][:1000]
     if 'broker_years' in safe and safe['broker_years'] not in (None, ''):
         try:
             safe['broker_years'] = int(safe['broker_years'])
@@ -2051,6 +2066,86 @@ def _send_notice_email(email, title, body):
         return bool(email_service.send_email(email, title, f'<p>{text.replace(chr(10), "<br>")}</p>', text))
     except Exception:
         return False
+
+
+def list_approved_brokers():
+    """Approved brokers for the map and for buyer or seller messages."""
+    with get_session() as s:
+        rows = (
+            s.query(User)
+            .filter(User.broker_application_status == 'approved')
+            .order_by(User.first_name.asc(), User.last_name.asc())
+            .all()
+        )
+        out = []
+        for user in rows:
+            name = ' '.join(part for part in [user.first_name, user.last_name] if part) or 'Broker'
+            out.append({
+                'id': int(user.id),
+                'name': name,
+                'company': user.company or '',
+                'place': user.profile_location or '',
+                'photo': user.profile_photo_url or '',
+                'bio': (user.broker_bio or '')[:1000],
+                'lat': user.broker_lat,
+                'lon': user.broker_lon,
+            })
+        return out
+
+
+def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_name='', listing_id=None):
+    kind = (kind or '').strip().lower()
+    if kind not in ('request', 'listing', 'message'):
+        raise ValueError('invalid_kind')
+    notes = (notes or '').strip()[:2000]
+    aircraft_name = (aircraft_name or '').strip()[:200]
+    if kind == 'request' and not aircraft_name:
+        raise ValueError('aircraft_required')
+    if kind == 'message' and not notes:
+        raise ValueError('notes_required')
+    if kind == 'listing' and not listing_id:
+        raise ValueError('listing_required')
+    with get_session() as s:
+        row = BrokerMessage(
+            from_user_id=int(from_user_id),
+            to_user_id=int(to_user_id),
+            listing_id=int(listing_id) if listing_id else None,
+            kind=kind,
+            aircraft_name=aircraft_name or None,
+            notes=notes or None,
+        )
+        s.add(row)
+        s.flush()
+        return int(row.id)
+
+
+def list_broker_messages(user_id, box='in'):
+    with get_session() as s:
+        column = BrokerMessage.to_user_id if box == 'in' else BrokerMessage.from_user_id
+        rows = (
+            s.query(BrokerMessage)
+            .filter(column == int(user_id))
+            .order_by(BrokerMessage.created_at.desc(), BrokerMessage.id.desc())
+            .limit(100)
+            .all()
+        )
+        out = []
+        for row in rows:
+            other_id = row.from_user_id if box == 'in' else row.to_user_id
+            other = s.query(User).filter(User.id == other_id).first()
+            other_name = ' '.join(part for part in [getattr(other, 'first_name', None), getattr(other, 'last_name', None)] if part) if other else 'Member'
+            out.append({
+                'id': int(row.id),
+                'kind': row.kind,
+                'aircraft_name': row.aircraft_name or '',
+                'notes': row.notes or '',
+                'listing_id': row.listing_id,
+                'from_user_id': int(row.from_user_id),
+                'to_user_id': int(row.to_user_id),
+                'person_name': other_name or 'Member',
+                'created_at': str(row.created_at) if row.created_at else None,
+            })
+        return out
 
 
 def notify_user(user_id, kind, title, body=None, href=None, email=None):

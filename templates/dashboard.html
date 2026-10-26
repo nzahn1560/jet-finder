@@ -294,6 +294,27 @@
         </div>
         {% endif %}
 
+        <section class="fold" id="messages">
+            <button type="button" class="fold__toggle" id="messages-toggle" aria-expanded="false">Broker messages</button>
+            <div class="fold__body" id="messages-body" hidden>
+                <form id="portal-message" style="display:grid; gap:0.55rem; margin-bottom:1rem;">
+                    <p style="color:#d0d0d0; margin:0;">Send a broker an aircraft request, a listing, or a note. Approved brokers receive it as an alert.</p>
+                    <select class="form-select" id="portal-broker"></select>
+                    <select class="form-select" id="portal-kind">
+                        <option value="request">Looking for an aircraft</option>
+                        <option value="listing">Send one of my listings</option>
+                        <option value="message">Message</option>
+                    </select>
+                    <input class="form-control" id="portal-aircraft" maxlength="200" placeholder="Aircraft name">
+                    <input class="form-control" id="portal-listing" placeholder="Listing id, when sending a listing">
+                    <textarea class="form-control" id="portal-notes" maxlength="2000" rows="3" placeholder="Notes"></textarea>
+                    <button type="submit" class="dash__btn dash__btn--primary" style="border:0; width:max-content; cursor:pointer;">Send to broker</button>
+                    <span id="portal-status" style="color:#c8c8c8;"></span>
+                </form>
+                <div id="portal-inbox"></div>
+            </div>
+        </section>
+
         <section class="fold" id="alerts">
             <button type="button" class="fold__toggle" id="alerts-toggle" aria-expanded="false">Alerts</button>
             <div class="fold__body" id="alerts-body" hidden>
@@ -590,6 +611,58 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         button.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
 });
+
+(async function loadBrokerPortal() {
+    const brokerSelect = document.getElementById('portal-broker');
+    const inbox = document.getElementById('portal-inbox');
+    const form = document.getElementById('portal-message');
+    if (!brokerSelect || !form) return;
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    const directory = await fetch('/api/brokers/directory', { credentials: 'include' });
+    const brokers = directory.ok ? ((await directory.json()).brokers || []) : [];
+    brokerSelect.innerHTML = brokers.map(function (broker) {
+        return '<option value="' + broker.id + '">' + esc(broker.name) + (broker.place ? ' · ' + esc(broker.place) : '') + '</option>';
+    }).join('') || '<option value="">No approved brokers yet</option>';
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const status = document.getElementById('portal-status');
+        const brokerId = brokerSelect.value;
+        if (!brokerId) { status.textContent = 'Choose a broker.'; return; }
+        status.textContent = 'Sending...';
+        const response = await fetch('/api/brokers/' + brokerId + '/messages', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: document.getElementById('portal-kind').value,
+                aircraft_name: document.getElementById('portal-aircraft').value,
+                listing_id: document.getElementById('portal-listing').value,
+                notes: document.getElementById('portal-notes').value,
+            }),
+        });
+        const data = await response.json().catch(function () { return {}; });
+        status.textContent = response.ok ? 'Sent.' : (data.error || 'Could not send that.');
+        if (response.ok) loadInbox();
+    });
+    async function loadInbox() {
+        const response = await fetch('/api/broker/messages', { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const rows = (data.inbox || []).concat(data.sent || []);
+        inbox.innerHTML = rows.length ? rows.map(function (row) {
+            const mine = row.from_user_id === {{ user.id }};
+            return '<article class="alert-item"><strong>' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</strong>'
+                + esc(row.aircraft_name || row.kind) + (row.notes ? '<br>' + esc(row.notes) : '') + '</article>';
+        }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
+    }
+    loadInbox();
+    if (location.hash === '#messages') {
+        document.getElementById('messages-body').hidden = false;
+    }
+})();
 
 (async function loadAlerts() {
     const list = document.getElementById('alerts-list');

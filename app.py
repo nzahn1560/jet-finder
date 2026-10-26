@@ -528,9 +528,29 @@ def _team_map_point(team):
 
 @app.route('/brokers')
 def brokers_page():
-    """Map of broker teams. Individuals are opened from the company they belong to."""
+    """Map of approved brokerages and approved brokers."""
     teams = [_team_map_point(team) for team in db_module.list_public_teams()]
-    return render_template('brokers.html', map_points=teams)
+    for team in teams:
+        team['kind'] = 'team'
+        team['pin_id'] = f"team-{team.get('id')}"
+    people = []
+    for broker in db_module.list_approved_brokers():
+        people.append({
+            'kind': 'broker',
+            'pin_id': f"broker-{broker['id']}",
+            'id': broker['id'],
+            'user_id': broker['id'],
+            'lat': broker.get('lat'),
+            'lon': broker.get('lon'),
+            'display_name': broker.get('name') or 'Broker',
+            'place': broker.get('place') or '',
+            'logo': broker.get('photo') or '',
+            'bio': broker.get('bio') or '',
+            'member_count': 1,
+            'category': broker.get('company') or 'Broker',
+            'leader': '',
+        })
+    return render_template('brokers.html', map_points=teams + people)
 
 
 @app.route('/api/broker-teams/<int:team_id>')
@@ -599,13 +619,14 @@ def api_broker_team_allow(team_id, member_id):
         return jsonify({'error': 'forbidden'}), 403
     db_module.update_user_profile(member_id, {'profile_role': 'broker'})
     db_module.set_broker_application(member_id, 'approved')
+    _place_approved_broker(member_id)
     return jsonify({'ok': True}), 200
 
 
 @app.route('/api/account/team-checkout', methods=['POST'])
 @require_auth
 def api_team_checkout():
-    """Start the $19.99/month charge for a new broker team."""
+    """Start the $20/month charge for a new broker team."""
     user = request.current_user  # type: ignore[attr-defined]
     data = request.get_json(silent=True) or {}
     current = db_module.team_membership(user['id'])
@@ -650,7 +671,7 @@ def api_team_checkout():
                     'recurring': {'interval': 'month'},
                     'product_data': {
                         'name': f'JetSchool broker team — {name}',
-                        'description': 'One team subscription. Brokers on the team pay nothing. $19.99 per month.',
+                        'description': 'Broker access to the broker map and the off-market section. $20 per month.',
                     },
                 },
                 'quantity': 1,
@@ -3041,12 +3062,28 @@ def _stripe_field(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-BROKER_FEE_CENTS = 1999
-BROKER_FEE_LABEL = '$19.99'
+BROKER_FEE_CENTS = 2000
+BROKER_FEE_LABEL = '$20'
+
+
+def _place_approved_broker(user_id):
+    """Give an approved broker a map pin from the location already on the profile."""
+    person = get_user_by_id(user_id) or {}
+    if person.get('broker_lat') is not None and person.get('broker_lon') is not None:
+        return
+    place = (person.get('profile_location') or '').strip()
+    airport = sections_module.resolve_place(place, country='US') if place else None
+    if not airport or airport.get('lat') is None:
+        return
+    with db_module.get_session() as session:
+        session.query(db_module.User).filter(db_module.User.id == user_id).update({
+            'broker_lat': airport.get('lat'),
+            'broker_lon': airport.get('lon'),
+        }, synchronize_session=False)
 
 
 def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
-    """Turn on an individual broker after the $19.99 monthly checkout completes."""
+    """Turn on broker access after approval or the $20 monthly checkout."""
     update_user_subscription(
         user_id,
         subscription_type,
@@ -3057,6 +3094,7 @@ def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subsc
     )
     db_module.update_user_profile(user_id, {'profile_role': 'broker'})
     db_module.set_broker_application(user_id, 'approved')
+    _place_approved_broker(user_id)
 
 
 def _broker_market_access(user) -> bool:
@@ -3119,7 +3157,7 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
 @app.route('/api/account/broker-checkout', methods=['POST'])
 @require_auth
 def api_broker_checkout():
-    """Start a $19.99/month Stripe subscription for a broker who is not on a team."""
+    """Start the $20/month broker subscription. It opens the broker map and off-market listings."""
     user = request.current_user  # type: ignore[attr-defined]
     if db_module.user_on_active_team(user['id']):
         return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
@@ -3131,7 +3169,7 @@ def api_broker_checkout():
         return jsonify({
             'error': 'payment_not_ready',
             'application': 'pending',
-            'message': 'Your broker application is waiting for approval. $19.99 a month.',
+            'message': 'Your broker application is waiting for approval. Broker access is $20 a month and includes the broker map and the off-market section.',
         }), 503
     base = request.host_url.rstrip('/')
     try:
@@ -3145,7 +3183,7 @@ def api_broker_checkout():
                     'recurring': {'interval': 'month'},
                     'product_data': {
                         'name': 'JetSchool broker account',
-                        'description': 'Solo broker access, including off-market aircraft. $19.99 per month.',
+                        'description': 'Broker access to the broker map and the off-market section. $20 per month.',
                     },
                 },
                 'quantity': 1,
@@ -3178,6 +3216,69 @@ def api_broker_confirm():
         return jsonify({'error': 'not_confirmed'}), 400
     fresh = get_user_by_id(user['id']) or user
     return jsonify({'ok': True, 'user': _user_public_dict(fresh)}), 200
+
+
+@app.route('/api/brokers/directory')
+def api_broker_directory():
+    """Approved brokers a buyer or seller can contact."""
+    return jsonify({'brokers': db_module.list_approved_brokers()})
+
+
+@app.route('/api/brokers/<int:user_id>/messages', methods=['POST'])
+@require_auth
+def api_broker_message(user_id):
+    """Send a broker an aircraft request, a listing, or a note."""
+    sender = request.current_user  # type: ignore[attr-defined]
+    recipient = get_user_by_id(user_id)
+    if not recipient or recipient.get('broker_application_status') != 'approved':
+        return jsonify({'error': 'not_found'}), 404
+    if int(recipient['id']) == int(sender['id']):
+        return jsonify({'error': 'forbidden'}), 403
+    data = request.get_json(silent=True) or {}
+    kind = (data.get('kind') or 'message').strip().lower()
+    listing_id = data.get('listing_id')
+    if kind == 'listing':
+        try:
+            listing_id = int(listing_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'listing_required'}), 400
+        listing = db_module.get_listing_with_owner(listing_id)
+        if not listing or listing.get('status') not in ('active', 'pending'):
+            return jsonify({'error': 'not_found'}), 404
+        if listing.get('status') != 'active' and listing.get('user_id') != sender['id'] and not sender.get('is_admin'):
+            return jsonify({'error': 'not_found'}), 404
+    try:
+        message_id = db_module.create_broker_message(
+            sender['id'], user_id, kind,
+            notes=data.get('notes') or '',
+            aircraft_name=data.get('aircraft_name') or '',
+            listing_id=listing_id if kind == 'listing' else None,
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    sender_name = ' '.join(part for part in [sender.get('first_name'), sender.get('last_name')] if part) or 'A member'
+    titles = {
+        'request': f'{sender_name} is looking for an aircraft',
+        'listing': f'{sender_name} sent you a listing',
+        'message': f'{sender_name} sent you a message',
+    }
+    db_module.notify_user(
+        user_id, 'broker_message', titles.get(kind, titles['message']),
+        (data.get('notes') or data.get('aircraft_name') or '')[:500],
+        '/dashboard#messages', recipient.get('email'),
+    )
+    return jsonify({'ok': True, 'id': message_id}), 201
+
+
+@app.route('/api/broker/messages')
+@require_auth
+def api_broker_messages():
+    """Messages this account sent, and messages sent to this broker."""
+    user = request.current_user  # type: ignore[attr-defined]
+    return jsonify({
+        'inbox': db_module.list_broker_messages(user['id'], 'in'),
+        'sent': db_module.list_broker_messages(user['id'], 'out'),
+    })
 
 
 def _saved_snapshot_from_request(data: dict) -> dict:
@@ -6858,8 +6959,6 @@ def admin_approve_listing(listing_id):
         existing = db_module.get_listing_with_owner(listing_id)
         if not existing:
             return jsonify({'error': 'not_found'}), 404
-        if existing.get('user_id') == admin['id']:
-            return jsonify({'error': 'forbidden', 'message': 'You cannot approve your own listing.'}), 403
         previous = existing.get('status')
         if not db_module.admin_approve_listing_any(listing_id, admin['id']):
             return jsonify({'error': 'server_error'}), 500

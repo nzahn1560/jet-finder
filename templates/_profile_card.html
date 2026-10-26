@@ -38,9 +38,17 @@
         line-height: 1.05;
     }
     .identity__line {
-        margin: 0.3rem 0;
+        margin: 0.45rem 0;
         color: #f3f3f3;
-        font-size: 1.25rem;
+        font-size: 1.2rem;
+        line-height: 1.4;
+    }
+    .identity__bio {
+        max-width: 62ch;
+        margin: 0.85rem 0 0;
+        color: #ddd;
+        font-size: 1.08rem;
+        line-height: 1.6;
     }
     .identity__line a { color: #fff; }
     .identity__edit-btn {
@@ -129,6 +137,9 @@
             {% if user.email %}
             <p class="identity__line"><a href="mailto:{{ user.email }}">{{ user.email }}</a></p>
             {% endif %}
+            {% if user.broker_bio %}
+            <p class="identity__bio">{{ user.broker_bio }}</p>
+            {% endif %}
             {% if is_owner and user.broker_application_status == 'pending' %}
             <p class="identity__line">Broker application is waiting for approval.</p>
             {% endif %}
@@ -145,6 +156,7 @@
                 <input class="form-control" name="profile_city" placeholder="City" value="{{ user.profile_city or '' }}">
                 <input class="form-control" name="profile_state" placeholder="State" value="{{ user.profile_state or '' }}">
                 <input class="form-control" name="phone" placeholder="Phone" value="{{ user.phone or '' }}">
+                <textarea class="form-control" name="broker_bio" maxlength="1000" rows="4" placeholder="Bio, up to 1000 characters" style="grid-column: 1 / -1;">{{ user.broker_bio or '' }}</textarea>
                 <select class="form-select" name="profile_role">
                     {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
                     <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|replace('_', ' ')|title }}</option>
@@ -178,20 +190,13 @@
                 </ul>
                 {% endif %}
                 {% elif membership and membership.is_admin %}
-                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Brokerage · $19.99/month</button>
-                <input type="hidden" id="team-name" value="{{ membership.name or '' }}">
-                <input type="hidden" id="team-city" value="{{ membership.city or '' }}">
-                <input type="hidden" id="team-state" value="{{ membership.state or '' }}">
+                <p class="identity__line">Broker · $20/month. Includes the broker map and the off-market section.</p>
+                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $20/month</button>
                 {% elif membership and membership.membership_status == 'pending' %}
                 <p class="identity__line">Request pending with {{ membership.name }}.</p>
                 {% else %}
-                <div class="identity__fields">
-                    <input class="form-control" id="team-name" placeholder="Brokerage name">
-                    <input class="form-control" id="team-city" placeholder="City">
-                    <input class="form-control" id="team-state" placeholder="State">
-                </div>
-                <button type="button" class="dash__btn dash__btn--primary" id="start-team" style="border:0; cursor:pointer;">Start brokerage · $19.99/month</button>
-                <button type="button" class="dash__btn dash__btn--secondary" id="become-broker" style="border:0; cursor:pointer;">Independent · $19.99/month</button>
+                <p class="identity__line">Broker · $20/month. Includes the broker map and the off-market section.</p>
+                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $20/month</button>
                 {% if teams %}
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                     <select class="form-select" id="join-team" style="max-width:280px;">
@@ -208,6 +213,37 @@
         {% endif %}
     </div>
 </article>
+{% if not is_owner and user.broker_application_status == 'approved' and get_current_user_info() %}
+<form id="broker-note" class="identity" style="padding:1.25rem 1.5rem; display:grid; gap:0.6rem;">
+    <strong style="color:#fff;">Send {{ person_name }} a note</strong>
+    <select class="form-select" name="kind">
+        <option value="request">I am looking for an aircraft</option>
+        <option value="message">Message</option>
+    </select>
+    <input class="form-control" name="aircraft_name" maxlength="200" placeholder="Aircraft you are looking for">
+    <textarea class="form-control" name="notes" maxlength="2000" rows="3" placeholder="Notes"></textarea>
+    <button type="submit" class="dash__btn dash__btn--primary" style="border:0; width:max-content; cursor:pointer;">Send</button>
+    <span id="broker-note-status" style="color:#c8c8c8;"></span>
+</form>
+<script>
+document.getElementById('broker-note').addEventListener('submit', async function (event) {
+    event.preventDefault();
+    const status = document.getElementById('broker-note-status');
+    const data = new FormData(this);
+    status.textContent = 'Sending...';
+    const response = await fetch('/api/brokers/{{ user.id }}/messages', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            kind: data.get('kind'),
+            aircraft_name: data.get('aircraft_name') || '',
+            notes: data.get('notes') || '',
+        }),
+    });
+    status.textContent = response.ok ? 'Sent.' : 'Could not send that note.';
+});
+</script>
+{% endif %}
 {% if is_owner %}
 <script>
 (function () {
@@ -297,26 +333,6 @@
     }
     const becomeBroker = document.getElementById('become-broker');
     if (becomeBroker) becomeBroker.addEventListener('click', function () { startBrokerCheckout(document.getElementById('profile-save-status')); });
-    const startTeam = document.getElementById('start-team');
-    if (startTeam) {
-        startTeam.addEventListener('click', async function () {
-            const status = document.getElementById('profile-save-status');
-            status.textContent = 'Opening checkout...';
-            const resp = await fetch('/api/account/team-checkout', {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: document.getElementById('team-name').value,
-                    city: document.getElementById('team-city').value,
-                    state: document.getElementById('team-state').value,
-                }),
-            });
-            const data = await resp.json().catch(function () { return {}; });
-            if (data.url) { window.location = data.url; return; }
-            status.textContent = data.message || 'Checkout is unavailable.';
-        });
-    }
     const requestJoin = document.getElementById('request-join');
     if (requestJoin) {
         requestJoin.addEventListener('click', async function () {
