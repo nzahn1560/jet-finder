@@ -3421,26 +3421,16 @@
         top: 8px;
         left: 8px;
         z-index: 2;
-        min-width: 72px;
-        padding: 6px 8px 5px;
-        border-radius: 12px;
-        background: #F05545;
-        color: #fff;
-        text-align: center;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: rgba(18, 18, 18, 0.78);
+        line-height: 1.2;
     }
 
     .listing-score__value {
         display: block;
-        font-size: 1.7rem;
-        font-weight: 900;
-        line-height: 1;
-    }
-
-    .listing-score__label {
-        display: block;
-        font-size: 0.62rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        font-size: 0.95rem;
+        font-weight: 800;
     }
 
     .listing-photos {
@@ -3475,25 +3465,30 @@
     .listing-photo-nav--prev { left: 8px; }
     .listing-photo-nav--next { right: 52px; }
 
-    .perf-bar {
+    .perf-bar, .stat-box {
+        background: #2a2a2a;
         color: #fff;
-        text-align: center;
-        padding: 0.55rem 0.5rem;
         border-radius: 8px;
-        margin: 0.35rem 0;
+        margin: 0.22rem 0;
+        padding: 0.28rem 0.55rem;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
     }
 
-    .perf-bar__label {
-        font-size: 0.72rem;
-        letter-spacing: 0.08em;
+    .perf-bar__label, .stat-box__label {
+        font-size: 0.68rem;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        opacity: 0.95;
+        color: #c8c8c8;
     }
 
-    .perf-bar__value {
-        font-size: 1.7rem;
-        font-weight: 900;
-        line-height: 1.05;
+    .perf-bar__value, .stat-box__value {
+        font-size: 1.15rem;
+        font-weight: 800;
+        line-height: 1.1;
+        color: #F05545;
     }
 
     .listing-seller {
@@ -4748,7 +4743,7 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=3"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=4"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -6115,6 +6110,17 @@
         });
     }
 
+    function paintCompareRanges(selectionData) {
+        if (typeof window.drawCompareRanges !== 'function') return;
+        window.drawCompareRanges((selectionData || []).map(function (item) {
+            return {
+                range: item.aircraft.range,
+                name: getAircraftShortLabel(item.aircraft),
+                color: getCompareColor(item.colorIndex, 1),
+            };
+        }));
+    }
+
     function updateCompareUI() {
         const countElement = document.getElementById('compareSelectedCount');
         const clearButton = document.getElementById('clearCompareBtn');
@@ -6147,6 +6153,7 @@
             container.innerHTML = '';
             destroyCompareCharts();
             updateCompareButtonStates();
+            paintCompareRanges([]);
             return;
         }
 
@@ -6169,6 +6176,7 @@
             })
             .filter(Boolean);
 
+        paintCompareRanges(selectionData);
         container.innerHTML = '';
 
         selectionData.forEach(({ aircraft, metrics, colorIndex }) => {
@@ -6302,13 +6310,12 @@
         return Math.round(Math.max(1, Math.min(100, percentage)));
     }
 
-    function getPerformanceColor(percentage) {
-        // Color gradient from red (bad) to green (good)
-        if (percentage >= 80) return 'linear-gradient(135deg, #28a745, #20c997)';  // Green - Excellent
-        if (percentage >= 60) return 'linear-gradient(135deg, #17a2b8, #28a745)';  // Blue-Green - Good
-        if (percentage >= 40) return 'linear-gradient(135deg, #ffc107, #17a2b8)';  // Yellow-Blue - Fair
-        if (percentage >= 20) return 'linear-gradient(135deg, #fd7e14, #ffc107)';  // Orange-Yellow - Poor
-        return 'linear-gradient(135deg, #dc3545, #fd7e14)';  // Red-Orange - Very Poor
+    function scoreColor(score) {
+        const amount = Math.max(0, Math.min(100, Number(score) || 0)) / 100;
+        const red = Math.round(240 - (200 * amount));
+        const green = Math.round(69 + (111 * amount));
+        const blue = Math.round(69 + (1 * amount));
+        return 'rgb(' + red + ',' + green + ',' + blue + ')';
     }
 
     // Populate relative performance scores for all visible aircraft
@@ -6382,18 +6389,8 @@
                         break;
                 }
 
-                const color = getPerformanceColor(percentage);
-
-                // Debug logging for M600 and first few aircraft
-                if (aircraft.aircraft_name && aircraft.aircraft_name.toUpperCase().includes('M600')) {
-                    console.log(`🎯 M600 ${metricLabels[i]}: Value=${score.toFixed(2)}, Percentage=${percentage}%`);
-                }
-                if (index < 3) {
-                    console.log(`🎯 Aircraft ${index + 1} (${aircraft.aircraft_name}) - ${metricLabels[i]}: Value=${score.toFixed(2)}, Percentage=${percentage}%`);
-                }
-
                 html += `
-                    <div class="perf-bar" style="background:${color};">
+                    <div class="perf-bar">
                         <div class="perf-bar__label">${metricLabels[i]}</div>
                         <div class="perf-bar__value">${percentage}</div>
                     </div>
@@ -6437,7 +6434,7 @@
 
         // ALWAYS calculate dynamically using the Excel formulas with current user inputs
         // This ensures all displayed metrics match the user's specific scenario
-        const displayMetrics = calculateDynamicMetrics(aircraft, userInputs);
+        const displayMetrics = calculateDynamicMetrics(aircraft, getUserInputs());
 
         card.className = 'aircraft-card-wrapper';
         card.style.cssText = 'margin: 0; padding: 0;';
@@ -6487,8 +6484,7 @@
                 <div class="aircraft-image listing-photos">
                     <img src="${primaryImage}" alt="${listingTitle}">
                     <div class="listing-score" title="Overall match from all-around value per dollar">
-                        <span class="listing-score__value">${overallScore}</span>
-                        <span class="listing-score__label">Overall</span>
+                        <span class="listing-score__value" style="color:${overallScore === '—' ? '#fff' : scoreColor(overallScore)}">${overallScore}${overallScore === '—' ? '' : '%'}</span>
                     </div>
                     ${photoUrls.length > 1 ? `<button class="listing-photo-nav listing-photo-nav--prev" type="button" aria-label="Previous photo"><i class="fas fa-chevron-left"></i></button><button class="listing-photo-nav listing-photo-nav--next" type="button" aria-label="Next photo"><i class="fas fa-chevron-right"></i></button>` : ''}
                     <button class="btn save-aircraft-btn listing-save" type="button"
@@ -6526,17 +6522,16 @@
                     
                     <div class="spec-bars">
                         ${[
-                            ['Range', `${aircraft.range || 0} nm`, '#0e7490'],
-                            ['Speed', `${aircraft.speed || 0} kts`, '#F05545'],
-                            ['Passengers', `${aircraft.passengers || 0}`, '#6d28d9'],
-                            ['Cabin', `${aircraft.cabin_volume || 0} cu ft`, '#0f766e'],
-                            ['Annual budget', `$${displayMetrics.annualBudget.toLocaleString()}`, '#1d4ed8'],
-                            ['Multi-year cost', `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, '#9f1239'],
+                            ['Range (seats full)', `${aircraft.range || 0} nm`],
+                            ['Speed', `${aircraft.speed || 0} kts`],
+                            ['Passengers', `${aircraft.passengers || 0}`],
+                            ['Cabin', `${aircraft.cabin_volume || 0} cu ft`],
+                            ['Hours / year', `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`],
+                            ['Average leg', `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`],
+                            ['Annual budget', `$${displayMetrics.annualBudget.toLocaleString()}`],
+                            ['Multi-year cost', `$${displayMetrics.multiYearTotalCost.toLocaleString()}`],
                         ].map(function (bar) {
-                            return `<div style="background:${bar[2]}; color:#fff; text-align:center; padding:0.7rem 0.6rem; border-radius:8px; margin:0.45rem 0;">
-                                <div style="font-size:0.8rem; letter-spacing:0.08em; text-transform:uppercase; opacity:0.9;">${bar[0]}</div>
-                                <div style="font-size:1.7rem; font-weight:900; line-height:1.15;">${bar[1]}</div>
-                            </div>`;
+                            return `<div class="stat-box"><div class="stat-box__label">${bar[0]}</div><div class="stat-box__value">${bar[1]}</div></div>`;
                         }).join('')}
                     </div>
                         
@@ -6581,6 +6576,16 @@
         const nextPhoto = card.querySelector('.listing-photo-nav--next');
         if (prevPhoto) prevPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(-1); });
         if (nextPhoto) nextPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(1); });
+        if (aircraft.is_user_listing && aircraft.id) {
+            const openListing = card.querySelector('.aircraft-card');
+            if (openListing) {
+                openListing.style.cursor = 'pointer';
+                openListing.addEventListener('click', function (event) {
+                    if (event.target.closest('button, a, input, select, textarea')) return;
+                    window.location.href = '/listing/' + aircraft.id;
+                });
+            }
+        }
 
         // Add hover effects
         card.addEventListener('mouseenter', function () {

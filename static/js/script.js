@@ -21,6 +21,38 @@ let allRouteLines = new Map();
 let aircraftRangeCircles = new Map();
 let homeAirport = null;
 let rangeCircle = null;
+let compareRangeLayers = [];
+window.__compareRangeItems = [];
+
+function drawCompareRanges(items) {
+    window.__compareRangeItems = Array.isArray(items) ? items : [];
+    if (typeof map === 'undefined' || !map || !map.getPane('rangeCirclePane')) return;
+    compareRangeLayers.forEach(function (layer) {
+        try { map.removeLayer(layer); } catch (error) { /* layer already gone */ }
+    });
+    compareRangeLayers = [];
+    if (!homeAirport || homeAirport.lat == null || homeAirport.lon == null) return;
+    window.__compareRangeItems.forEach(function (item) {
+        const range = Number(item.range);
+        if (!range) return;
+        const circle = L.circle([homeAirport.lat, homeAirport.lon], {
+            radius: range * 1852,
+            color: item.color || '#F05545',
+            weight: 2,
+            fillColor: item.color || '#F05545',
+            fillOpacity: 0.06,
+            dashArray: '4, 6',
+            interactive: false,
+            pane: 'rangeCirclePane'
+        }).addTo(map);
+        circle.bindTooltip((item.name || 'Aircraft') + ': ' + Math.round(range) + ' nm (seats full)', {
+            sticky: true,
+            className: 'range-tooltip'
+        });
+        compareRangeLayers.push(circle);
+    });
+}
+window.drawCompareRanges = drawCompareRanges;
 let avgTripRangeCircle = null;
 let longestLegRangeCircle = null;
 let currentRange = 500;
@@ -272,6 +304,7 @@ function updateRangeRings() {
     // Check if home airport is set
     if (!homeAirport) {
         console.log('No home airport set, cannot create range rings');
+        drawCompareRanges(window.__compareRangeItems || []);
         return;
     }
 
@@ -319,6 +352,7 @@ function updateRangeRings() {
 
     // Add range legend
     addRangeLegend();
+    drawCompareRanges(window.__compareRangeItems || []);
 }
 
 // Helper function to create range display (circle or polygon)

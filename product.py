@@ -99,7 +99,15 @@ def public_listing(listing_id):
     profiles = {item.get('id'): item for item in db_module.get_all_aircraft_profiles()}
     profile = profiles.get(row.get('profile_id')) or {}
     media = db_module.list_listing_media(listing_id)
-    return render_template('listing_public.html', listing=row, profile=profile, media=media)
+    owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
+    seller_name = ''
+    if owner:
+        seller_name = ' '.join(part for part in [owner.get('first_name'), owner.get('last_name')] if part)
+    brokers = [broker for broker in db_module.list_approved_brokers() if broker.get('id') != row.get('user_id')]
+    return render_template(
+        'listing_public.html', listing=row, profile=profile, media=media,
+        seller_name=seller_name or 'Seller', brokers=brokers,
+    )
 
 
 @product.route('/api/broker/profile', methods=['GET', 'PATCH'])

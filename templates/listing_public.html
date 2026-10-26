@@ -4,40 +4,115 @@
 {% block extra_head %}
 <meta property="og:title" content="{{ listing.title }} for sale">
 <meta property="og:description" content="{{ listing.title }} in {{ listing.location }}.">
+<style>
+    .showroom { background: #111; color: #f4f4f4; min-height: calc(100vh - 88px); }
+    .showroom__hero { position: relative; height: min(72vh, 760px); background: #1a1a1a; }
+    .showroom__hero img, .showroom__hero video { width: 100%; height: 100%; object-fit: cover; }
+    .showroom__nav {
+        position: absolute; top: 50%; transform: translateY(-50%);
+        width: 44px; height: 44px; border: 0; border-radius: 999px;
+        background: rgba(12,12,12,0.82); color: #fff;
+    }
+    .showroom__nav--prev { left: 16px; }
+    .showroom__nav--next { right: 16px; }
+    .showroom__sheet { max-width: 980px; margin: -72px auto 0; padding: 0 1.25rem 3rem; position: relative; }
+    .showroom__panel { background: #1a1a1a; border-radius: 16px; padding: 1.5rem 1.5rem 1.75rem; }
+    .showroom h1 { color: #fff; font-size: clamp(2rem, 4vw, 3.2rem); margin: 0 0 0.35rem; }
+    .showroom__seller { color: #f4f4f4; font-size: 1.15rem; text-decoration: none; }
+    .showroom__seller:hover { color: #F05545; }
+    .showroom__price {
+        background: #2a2a2a; border-radius: 10px; text-align: center;
+        padding: 0.7rem 1rem; margin: 1rem 0 0.8rem;
+    }
+    .showroom__price strong { color: #F05545; font-size: 2.4rem; letter-spacing: 0.02em; }
+    .showroom__stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.45rem; }
+    .showroom__stat {
+        background: #2a2a2a; border-radius: 8px; padding: 0.45rem 0.7rem;
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem;
+    }
+    .showroom__stat span { color: #c8c8c8; font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .showroom__stat b { color: #F05545; font-size: 1.2rem; }
+    .showroom__notes { color: #ddd; margin-top: 1rem; line-height: 1.55; }
+    .showroom__send { margin-top: 1.25rem; display: grid; gap: 0.55rem; }
+    .showroom__send textarea, .showroom__send select {
+        background: #111; color: #fff; border: 1px solid #404040; border-radius: 8px; padding: 0.6rem 0.7rem;
+    }
+    .showroom__send button { background: #F05545; color: #fff; border: 0; border-radius: 8px; padding: 0.7rem 1rem; font-weight: 700; }
+</style>
 {% endblock %}
-{% block additional_css %}<link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">{% endblock %}
 {% block content %}
-<div class="section-page">
-    <h1>{{ listing.title }}</h1>
-    <p class="section-price">${{ '{:,.0f}'.format(listing.price or 0) }}</p>
-    <p>{{ listing.manufacturer or profile.manufacturer or '' }}{% if listing.year %} · {{ listing.year }}{% endif %}{% if listing.hours is not none %} · {{ '{:,.0f}'.format(listing.hours or 0) }} hours{% endif %}</p>
-    <p class="section-meta">{{ listing.location }}{% if listing.registration %} · {{ listing.registration }}{% endif %}</p>
-    {% if profile %}
-    <div class="section-panel">
-        <h2 class="h5 text-white">From the aircraft profile</h2>
-        <p class="mb-0">Range {{ profile.range or 'n/a' }} nm · Speed {{ profile.speed or 'n/a' }} kt · Seats {{ profile.passengers or 'n/a' }} · {{ profile.category or '' }}</p>
+{% set photos = [] %}
+<article class="showroom">
+    <div class="showroom__hero" id="showroom-hero">
+        {% if media %}
+            {% for item in media if item.media_type == 'photo' %}
+            <img src="{{ item.url or item.thumbnail_url }}" alt="{{ listing.title }}" {% if not loop.first %}hidden{% endif %} data-showroom-photo>
+            {% endfor %}
+        {% endif %}
+        {% if not media %}
+        <img src="/static/images/aircraft_placeholder.jpg" alt="{{ listing.title }}">
+        {% endif %}
     </div>
-    {% endif %}
-    {% if listing.description %}<p>{{ listing.description }}</p>{% endif %}
-    {% if listing.avionics or listing.paint_year or listing.interior_year or listing.engine_hours %}
-    <p class="section-meta">
-        {% if listing.engine_hours %}Engines {{ listing.engine_hours }} hrs. {% endif %}
-        {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}
-        {% if listing.paint_year %}Paint {{ listing.paint_year }}. {% endif %}
-        {% if listing.interior_year %}Interior {{ listing.interior_year }}.{% endif %}
-    </p>
-    {% endif %}
-    {% if listing.email %}<p>Contact: <a href="mailto:{{ listing.email }}">{{ listing.email }}</a></p>{% endif %}
-    {% if media %}
-    <div class="section-grid">
-        {% for item in media %}
-            {% if item.media_type == 'photo' %}
-            <img src="{{ item.thumbnail_url or item.url }}" alt="{{ listing.title }}" loading="lazy" style="width:100%;height:220px;object-fit:cover;">
-            {% elif item.media_type == 'video' %}
-            <video controls preload="none" style="width:100%;"><source src="{{ item.url }}"></video>
+    <div class="showroom__sheet">
+        <div class="showroom__panel">
+            <h1>{{ listing.title }}</h1>
+            {% if listing.user_id %}
+            <a class="showroom__seller" href="/people/{{ listing.user_id }}">{{ seller_name }}</a>
             {% endif %}
-        {% endfor %}
+            <p style="color:#c8c8c8; margin:0.35rem 0 0;">
+                {{ listing.city or '' }}{% if listing.state %}{% if listing.city %}, {% endif %}{{ listing.state }}{% endif %}
+                {% if not listing.city and not listing.state %}{{ listing.location }}{% endif %}
+                {% if listing.year %} · {{ listing.year }}{% endif %}
+            </p>
+            <div class="showroom__price"><strong>${{ '{:,.0f}'.format(listing.price or 0) }}</strong></div>
+            <div class="showroom__stats">
+                <div class="showroom__stat"><span>Range (seats full)</span><b>{{ profile.range or '—' }} nm</b></div>
+                <div class="showroom__stat"><span>Speed</span><b>{{ profile.speed or '—' }} kts</b></div>
+                <div class="showroom__stat"><span>Passengers</span><b>{{ profile.passengers or '—' }}</b></div>
+                <div class="showroom__stat"><span>Cabin</span><b>{{ profile.cabin_volume or '—' }} cu ft</b></div>
+                {% if listing.hours is not none %}<div class="showroom__stat"><span>Airframe</span><b>{{ '{:,.0f}'.format(listing.hours or 0) }} hrs</b></div>{% endif %}
+                {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}
+            </div>
+            {% if listing.description %}<p class="showroom__notes">{{ listing.description }}</p>{% endif %}
+            {% if listing.avionics or listing.paint_year or listing.interior_year %}
+            <p class="showroom__notes">
+                {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}
+                {% if listing.paint_year %}Paint {{ listing.paint_year }}. {% endif %}
+                {% if listing.interior_year %}Interior {{ listing.interior_year }}.{% endif %}
+            </p>
+            {% endif %}
+            {% set viewer = get_current_user_info() %}
+            {% if viewer and brokers %}
+            <form class="showroom__send" id="send-listing">
+                <strong>Send this listing to a broker</strong>
+                <select name="broker_id" required>
+                    {% for broker in brokers %}
+                    <option value="{{ broker.id }}">{{ broker.name }}{% if broker.place %} · {{ broker.place }}{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <textarea name="notes" maxlength="2000" rows="3" placeholder="Notes for the broker"></textarea>
+                <button type="submit">Send listing</button>
+                <span id="send-listing-status" style="color:#c8c8c8;"></span>
+            </form>
+            {% endif %}
+        </div>
     </div>
-    {% endif %}
-</div>
+</article>
+{% if viewer and brokers %}
+<script>
+document.getElementById('send-listing').addEventListener('submit', async function (event) {
+    event.preventDefault();
+    const status = document.getElementById('send-listing-status');
+    const data = new FormData(this);
+    status.textContent = 'Sending...';
+    const response = await fetch('/api/brokers/' + data.get('broker_id') + '/messages', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'listing', listing_id: {{ listing.id }}, notes: data.get('notes') || '' }),
+    });
+    status.textContent = response.ok ? 'Sent to the broker.' : 'Could not send that listing.';
+});
+</script>
+{% endif %}
 {% endblock %}

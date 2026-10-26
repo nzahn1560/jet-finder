@@ -123,7 +123,9 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
         self.assertEqual(checkout.status_code, 503)
-        self.assertIn(b'19.99', checkout.data)
+        self.assertIn(b'$20 a month', checkout.data)
+        self.assertIn(b'broker map', checkout.data)
+        self.assertIn(b'off-market', checkout.data)
 
     def test_role_alone_does_not_open_off_market(self):
         labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
@@ -220,14 +222,15 @@ class ProductTests(unittest.TestCase):
         patched = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1})
         self.assertEqual(patched.status_code, 403)
 
-    def test_buyer_cannot_open_admin_and_admin_cannot_approve_own_listing(self):
+    def test_buyer_cannot_open_admin_and_admin_can_approve_own_listing(self):
         self._login('buyer@example.com', 'buyer-pass-1')
         self.assertEqual(self.client.get('/api/admin/listings').status_code, 403)
         self._login('admin@example.com', 'admin-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Admin Jet', 'public'))
         listing_id = created.get_json()['id']
         approved = self.client.post(f'/api/admin/listings/{listing_id}/approve')
-        self.assertEqual(approved.status_code, 403)
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        self.assertEqual(approved.get_json()['status'], 'active')
 
     def test_admin_can_approve_a_broker_and_a_watch_creates_an_alert(self):
         created = self.client.post('/api/auth/signup', json={
@@ -559,6 +562,58 @@ class ProductTests(unittest.TestCase):
         checkout = self.client.post(f'/api/listings/{listing_id}/checkout', json={'amount': 1, 'amount_cents': 1})
         self.assertEqual(checkout.status_code, 200)
         self.assertTrue(checkout.get_json().get('skip'))
+
+    def test_approved_broker_gets_off_market_and_the_map(self):
+        person = self._signup('map-broker@example.com', 'broker-pass-1', 'seller')
+        db_module.update_user_profile(person['id'], {'first_name': 'Mapbroker', 'profile_location': 'KTEB'})
+        self._login('admin@example.com', 'admin-pass-1')
+        approved = self.client.post(f"/api/admin/brokers/{person['id']}/approve")
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        directory = self.client.get('/brokers')
+        self.assertEqual(directory.status_code, 200)
+        self.assertIn(b'Mapbroker', directory.data)
+        self._login('map-broker@example.com', 'broker-pass-1')
+        opened = self.client.get('/off-market')
+        self.assertEqual(opened.status_code, 200)
+        listed = self.client.post('/api/listings', json=self._payload('Quiet Map Jet', 'broker_only'))
+        self.assertEqual(listed.status_code, 201, listed.get_json())
+        self._login('seller@example.com', 'seller-pass-1')
+        blocked = self.client.post('/api/listings', json=self._payload('Seller Off Market', 'broker_only'))
+        self.assertEqual(blocked.status_code, 403)
+
+    def test_buyer_can_send_a_broker_a_request_and_a_listing(self):
+        self._login('buyer@example.com', 'buyer-pass-1')
+        missing = self.client.post(f"/api/brokers/{self.seller['id']}/messages", json={
+            'kind': 'request', 'aircraft_name': 'Citation', 'notes': 'Looking now',
+        })
+        self.assertEqual(missing.status_code, 404)
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Shared Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        saved = self.client.patch('/api/profile', json={'broker_bio': 'x' * 1001})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertEqual(len(self.client.get('/api/profile').get_json()['user']['broker_bio']), 1000)
+        db_module.set_broker_application(self.broker['id'], 'approved')
+        self._login('buyer@example.com', 'buyer-pass-1')
+        request_note = self.client.post(f"/api/brokers/{self.broker['id']}/messages", json={
+            'kind': 'request', 'aircraft_name': 'Citation Latitude', 'notes': 'Seats for six',
+        })
+        self.assertEqual(request_note.status_code, 201, request_note.get_json())
+        listing_note = self.client.post(f"/api/brokers/{self.broker['id']}/messages", json={
+            'kind': 'listing', 'listing_id': listing_id, 'notes': 'Please take a look',
+        })
+        self.assertEqual(listing_note.status_code, 201, listing_note.get_json())
+        page = self.client.get(f'/listing/{listing_id}')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Range (seats full)', page.data)
+        self.assertIn(b'showroom', page.data)
+        self._login('broker@example.com', 'broker-pass-1')
+        inbox = self.client.get('/api/broker/messages')
+        self.assertEqual(inbox.status_code, 200)
+        kinds = {row['kind'] for row in inbox.get_json()['inbox']}
+        self.assertIn('request', kinds)
+        self.assertIn('listing', kinds)
 
     def _payload(self, title, market):
         return {

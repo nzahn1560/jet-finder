@@ -9,7 +9,7 @@
 {% block content %}
 <div class="section-page">
     <h1>Broker map</h1>
-    <p class="section-lead">Brokerages appear on the map. Open one, then choose a broker and their listings.</p>
+        <p class="section-lead">Approved brokerages and brokers appear on the map.</p>
 
     <div class="broker-shell">
         <aside class="broker-list-wrap">
@@ -104,18 +104,28 @@
             + (people || '<p>No brokers are on this team yet.</p>');
     }
 
+    function selectBroker(broker) {
+        activeId = broker.pin_id;
+        selectedEl.hidden = false;
+        selectedEl.innerHTML = miniHtml(broker)
+            + (broker.bio ? '<p>' + esc(broker.bio) + '</p>' : '')
+            + '<p><a href="/people/' + broker.user_id + '" style="color:#F05545;">Open profile</a></p>';
+        const marker = markers.get(broker.pin_id);
+        if (marker) map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 7), { duration: 0.6 });
+    }
+
     async function selectTeam(team) {
-        activeId = team.id;
+        activeId = team.pin_id;
         document.querySelectorAll('.broker-person[data-id]').forEach(function (node) {
-            node.classList.toggle('is-selected', Number(node.getAttribute('data-id')) === team.id);
+            node.classList.toggle('is-selected', node.getAttribute('data-id') === team.pin_id);
         });
         markers.forEach(function (marker, id) {
-            const on = id === team.id;
+            const on = id === team.pin_id;
             marker.setStyle({ radius: on ? 11 : 8, weight: on ? 3 : 2, color: on ? '#fff' : '#F05545' });
         });
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(team) + '<p>Loading brokers...</p>';
-        const marker = markers.get(team.id);
+        const marker = markers.get(team.pin_id);
         if (marker) map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 7), { duration: 0.6 });
         const resp = await fetch('/api/broker-teams/' + team.id);
         const detail = await resp.json().catch(function () { return {}; });
@@ -133,7 +143,7 @@
             return;
         }
         listEl.innerHTML = shown.map(function (team) {
-            return '<button type="button" class="broker-person' + (team.id === activeId ? ' is-selected' : '') + '" data-id="' + team.id + '">'
+            return '<button type="button" class="broker-person' + (team.pin_id === activeId ? ' is-selected' : '') + '" data-id="' + team.pin_id + '">'
                 + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'T').slice(0, 1))) + '</span>'
                 + '<span><strong>' + esc(team.display_name) + '</strong>'
                 + '<em>' + esc([team.category, team.place || 'Brokerage'].filter(Boolean).join(' · ')) + '</em></span>'
@@ -141,13 +151,15 @@
         }).join('');
         listEl.querySelectorAll('.broker-person').forEach(function (button) {
             button.addEventListener('click', function () {
-                const id = Number(button.getAttribute('data-id'));
-                const team = teams.find(function (item) { return item.id === id; });
-                if (team) selectTeam(team);
+                const id = button.getAttribute('data-id');
+                const team = teams.find(function (item) { return item.pin_id === id; });
+                if (!team) return;
+                if (team.kind === 'broker') selectBroker(team);
+                else selectTeam(team);
             });
         });
         markers.forEach(function (marker, id) {
-            const visible = shown.some(function (team) { return team.id === id; });
+            const visible = shown.some(function (team) { return team.pin_id === id; });
             if (visible) marker.addTo(map);
             else map.removeLayer(marker);
         });
@@ -165,8 +177,11 @@
             className: 'broker-tip',
             offset: [0, -8]
         });
-        marker.on('click', function () { selectTeam(team); });
-        markers.set(team.id, marker);
+        marker.on('click', function () {
+            if (team.kind === 'broker') selectBroker(team);
+            else selectTeam(team);
+        });
+        markers.set(team.pin_id, marker);
         bounds.push([team.lat, team.lon]);
     });
     if (!teams.length) {
