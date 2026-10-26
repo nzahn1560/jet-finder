@@ -3416,6 +3416,159 @@
         line-height: 1.2;
     }
 
+    .listing-score {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 2;
+        min-width: 72px;
+        padding: 6px 8px 5px;
+        border-radius: 12px;
+        background: #F05545;
+        color: #fff;
+        text-align: center;
+    }
+
+    .listing-score__value {
+        display: block;
+        font-size: 1.7rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .listing-score__label {
+        display: block;
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .listing-photos {
+        position: relative;
+        width: 100%;
+        height: 150px;
+        overflow: hidden;
+        background: #1a1a1a;
+        flex-shrink: 0;
+    }
+
+    .listing-photos img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+    }
+
+    .listing-photo-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 32px;
+        height: 32px;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(12, 12, 12, 0.82);
+        color: #fff;
+        z-index: 2;
+    }
+
+    .listing-photo-nav--prev { left: 8px; }
+    .listing-photo-nav--next { right: 52px; }
+
+    .perf-bar {
+        color: #fff;
+        text-align: center;
+        padding: 0.55rem 0.5rem;
+        border-radius: 8px;
+        margin: 0.35rem 0;
+    }
+
+    .perf-bar__label {
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.95;
+    }
+
+    .perf-bar__value {
+        font-size: 1.7rem;
+        font-weight: 900;
+        line-height: 1.05;
+    }
+
+    .listing-seller {
+        display: inline-block;
+        margin-bottom: 0.35rem;
+        color: #f4f4f4;
+        font-size: 1rem;
+        text-decoration: none;
+    }
+
+    .listing-seller:hover { color: #F05545; }
+
+    .aircraft-card .listing-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        padding: 8px 0 0;
+        border-top: 1px solid #404040;
+        background: transparent;
+    }
+
+    .aircraft-card .listing-actions .btn {
+        width: 100%;
+        height: 64px;
+        margin: 0;
+        padding: 6px 4px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        border: 1px solid #F05545;
+        border-radius: 8px;
+        background: #1a1a1a;
+        color: #fff;
+        font-size: 0.78rem;
+        font-weight: 700;
+        line-height: 1.1;
+        text-decoration: none;
+    }
+
+    .aircraft-card .listing-actions .btn i { font-size: 0.95rem; }
+
+    .route-builder { display: flex; flex-direction: column; gap: 0.75rem; }
+    .route-builder__airports {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        gap: 0.5rem;
+        align-items: end;
+    }
+    .route-builder__arrow {
+        color: #F05545;
+        font-size: 1.25rem;
+        padding-bottom: 0.45rem;
+    }
+    .route-builder__commit {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 46px;
+        gap: 0.5rem;
+        align-items: end;
+    }
+    .route-check {
+        width: 46px;
+        height: 38px;
+        border: 0;
+        border-radius: 8px;
+        background: #F05545;
+        color: #fff;
+    }
+
+    @media (max-width: 768px) {
+        .route-builder__airports { grid-template-columns: 1fr; }
+        .route-builder__arrow { justify-self: center; padding: 0; }
+    }
+
     .aircraft-card .aircraft-name {
         margin-bottom: 0.35rem;
         font-size: 1.25rem;
@@ -3748,32 +3901,37 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <!-- Route Selection -->
-                    <div class="row mb-3">
-                        <div class="col-md-5">
-                            <label for="from-airport" class="form-label">From</label>
+                    <div class="route-builder" id="route-builder">
+                        <div class="route-builder__airports">
                             <div class="position-relative">
+                                <label for="from-airport" class="form-label">Departure</label>
                                 <input type="text" class="form-control bg-dark text-white border-secondary"
-                                    id="from-airport" placeholder="Search airports...">
+                                    id="from-airport" placeholder="Departure airport">
                                 <div id="from-airport-results" class="airport-results d-none">
                                     <div id="from-airport-list" class="list-group"></div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end justify-content-center">
-                            <button id="add-route-btn" class="btn btn-danger mb-2" title="Add Route">
-                                <i class="fas fa-plus"></i>
-                            </button>
-                        </div>
-                        <div class="col-md-5">
-                            <label for="to-airport" class="form-label">To</label>
+                            <div class="route-builder__arrow" aria-hidden="true">
+                                <i class="fas fa-arrow-right"></i>
+                            </div>
                             <div class="position-relative">
+                                <label for="to-airport" class="form-label">Destination</label>
                                 <input type="text" class="form-control bg-dark text-white border-secondary"
-                                    id="to-airport" placeholder="Search airports...">
+                                    id="to-airport" placeholder="Destination airport">
                                 <div id="to-airport-results" class="airport-results d-none">
                                     <div id="to-airport-list" class="list-group"></div>
                                 </div>
                             </div>
+                        </div>
+                        <div class="route-builder__commit">
+                            <div>
+                                <label for="route-legs" class="form-label">Legs per year</label>
+                                <input type="number" class="form-control bg-dark text-white border-secondary"
+                                    id="route-legs" min="1" max="365" value="1">
+                            </div>
+                            <button id="add-route-btn" class="route-check" type="button" title="Lock in this route">
+                                <i class="fas fa-check"></i>
+                            </button>
                         </div>
                     </div>
 
@@ -4097,11 +4255,11 @@
                             <i class="fas fa-sort me-1"></i>Sort by:
                         </label>
                         <select id="sortSelect" class="form-select form-select-sm" style="max-width: 200px;">
+                            <option value="best_all_around_dollar" selected>Best All-Around/$</option>
                             <option value="best_speed_dollar">Best Speed/$</option>
                             <option value="best_range_dollar">Best Range/$</option>
                             <option value="best_performance_dollar">Best Performance/$</option>
                             <option value="best_efficiency_dollar">Best Efficiency/$</option>
-                            <option value="best_all_around_dollar">Best All-Around/$</option>
                             <option value="price_low">Price: Low to High</option>
                             <option value="price_high">Price: High to Low</option>
                             <option value="range">Range: High to Low</option>
@@ -4590,7 +4748,7 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=3"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -4846,7 +5004,6 @@
         const chosen = selectedCompares();
         const cache = new Map();
         if (!chosen.length) {
-            list.forEach(function (ac) { ac.match_score = null; });
             renderMarketTable(list, [], cache);
             return;
         }
@@ -4874,9 +5031,9 @@
                     score += metric.dir === 'low' ? (1 - normalized) : normalized;
                 }
             });
-            ac.match_score = Math.round((score / chosen.length) * 100);
+            ac._goal_rank = Math.round((score / chosen.length) * 100);
         });
-        list.sort(function (a, b) { return (b.match_score || 0) - (a.match_score || 0); });
+        list.sort(function (a, b) { return (b._goal_rank || 0) - (a._goal_rank || 0); });
         renderMarketTable(list, chosen, cache);
     }
 
@@ -5479,8 +5636,32 @@
     }
 
     // Update aircraft display based on filtered results with pagination
+    function stampOverallScores() {
+        const pool = allAircraftData.length ? allAircraftData : filteredAircraftData;
+        const rows = pool.map(function (ac) {
+            const metrics = calculateDynamicMetrics(ac, getUserInputs());
+            const raw = Number(metrics.bestAllAroundDollar);
+            return { ac: ac, raw: Number.isFinite(raw) ? raw : 0 };
+        });
+        const ranked = rows.filter(function (row) { return Number.isFinite(row.raw); }).sort(function (a, b) { return a.raw - b.raw; });
+        const rankOf = new Map();
+        ranked.forEach(function (row, index) {
+            const key = row.raw.toFixed(3);
+            if (!rankOf.has(key)) rankOf.set(key, index + 1);
+        });
+        const total = ranked.length;
+        rows.forEach(function (row) {
+            const rank = rankOf.get(row.raw.toFixed(3));
+            row.ac.overall_score = rank ? Math.round(Math.max(1, Math.min(100, 101 - rank))) : null;
+        });
+        if (!total) {
+            pool.forEach(function (ac) { ac.overall_score = null; });
+        }
+    }
+
     function updateAircraftDisplay() {
         console.log('🔄 Updating aircraft display...');
+        stampOverallScores();
         if (window.__goalActive && filteredAircraftData.length) {
             rankAircraftByGoal(filteredAircraftData);
         }
@@ -5814,12 +5995,17 @@
         buttons.forEach(button => {
             const aircraftId = button.dataset.compareId;
             const isSelected = isAircraftInCompare(aircraftId);
+            const stacked = button.closest('.listing-actions');
             if (isSelected) {
                 button.classList.add('active');
-                button.innerHTML = '<i class="fas fa-check me-2"></i>In Compare';
+                button.innerHTML = stacked
+                    ? '<i class="fas fa-check"></i><span>Comparing</span>'
+                    : '<i class="fas fa-check me-2"></i>In Compare';
             } else {
                 button.classList.remove('active');
-                button.innerHTML = '<i class="fas fa-plus me-2"></i>Add to Compare';
+                button.innerHTML = stacked
+                    ? '<i class="fas fa-plus"></i><span>Compare</span>'
+                    : '<i class="fas fa-plus me-2"></i>Add to Compare';
             }
         });
     }
@@ -6059,7 +6245,7 @@
     // Helper functions for performance score display - RANK-BASED PERCENTAGE
     function getPerformancePercentage(score, metricType, allVisibleAircraft) {
         // Use ALL aircraft data for consistent percentage calculations, not just visible aircraft
-        const aircraftToCompare = filteredAircraftData.length > 0 ? filteredAircraftData : allAircraftData;
+        const aircraftToCompare = allAircraftData.length > 0 ? allAircraftData : (allVisibleAircraft || filteredAircraftData);
 
         // Get all scores for this metric from ALL aircraft with aircraft reference
         const allScoresWithAircraft = [];
@@ -6077,7 +6263,10 @@
                 default: metricScore = 0;
             }
 
-            if (metricScore && metricScore > 0 && !isNaN(metricScore)) {
+            const usable = metricType === 'allAround'
+                ? Number.isFinite(metricScore)
+                : metricScore && metricScore > 0 && !isNaN(metricScore);
+            if (usable) {
                 allScoresWithAircraft.push({
                     score: metricScore,
                     aircraft: aircraft,
@@ -6204,15 +6393,42 @@
                 }
 
                 html += `
-                    <div class="performance-score-item" style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin:0 0 3px 0; font-size:0.68rem;">
-                        <span style="color:#cfcfcf; font-weight:600;">${metricLabels[i]}</span>
-                        <span style="background:${color}; color:#fff; border-radius:999px; padding:1px 7px; font-weight:700;">${percentage}%</span>
+                    <div class="perf-bar" style="background:${color};">
+                        <div class="perf-bar__label">${metricLabels[i]}</div>
+                        <div class="perf-bar__value">${percentage}</div>
                     </div>
             `;
             });
 
             performanceContainer.innerHTML = html;
         });
+    }
+
+    function escCard(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+
+    function safeCardImage(value) {
+        const url = String(value || '');
+        if (url.startsWith('/') || url.startsWith('https://') || url.startsWith('http://')) return escCard(url);
+        return '/static/images/aircraft_placeholder.jpg';
+    }
+
+    function cardPhotoUrls(aircraft) {
+        const urls = [];
+        const push = function (value) {
+            const url = String(value || '').trim();
+            if (!url || url.startsWith('javascript:')) return;
+            if (!(url.startsWith('/') || url.startsWith('https://') || url.startsWith('http://'))) return;
+            if (urls.indexOf(url) === -1) urls.push(url);
+        };
+        if (Array.isArray(aircraft.photos)) aircraft.photos.forEach(push);
+        if (Array.isArray(aircraft.images)) aircraft.images.forEach(push);
+        push(aircraft.image);
+        if (!urls.length) urls.push('/static/images/aircraft_placeholder.jpg');
+        return urls;
     }
 
     // Create HTML for an aircraft card
@@ -6226,8 +6442,8 @@
         card.className = 'aircraft-card-wrapper';
         card.style.cssText = 'margin: 0; padding: 0;';
 
-        const listingTitle = (aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim();
-        const listingDescription = aircraft.listing_description || aircraft.description || '';
+        const listingTitle = escCard((aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim());
+        const listingDescription = escCard(aircraft.listing_description || aircraft.description || '');
         const cityName = String(aircraft.city || '').trim();
         const stateName = String(aircraft.state || '').trim();
         let listingPlace = [cityName, stateName].filter(Boolean).join(', ');
@@ -6235,12 +6451,16 @@
             const rawPlace = String(aircraft.location || '').trim();
             listingPlace = /^[A-Za-z]{3,4}$/.test(rawPlace) ? '' : rawPlace;
         }
-        const serialNumber = String(aircraft.serial_number || '').trim();
         const engineType = aircraft.engine_type || aircraft.category || '';
-        const listingLocation = [listingPlace || 'City, state on request', engineType, 'S/N ' + (serialNumber || '—')].filter(Boolean).join(' · ');
+        const listingLocation = escCard([listingPlace || 'City, state on request', engineType].filter(Boolean).join(' · '));
         const priceValue = aircraft.listing_price || aircraft.price || 0;
-        const primaryImage = aircraft.image || '/static/images/aircraft_placeholder.jpg';
-        const contactEmail = aircraft.contact_email || aircraft.email || '';
+        const photoUrls = cardPhotoUrls(aircraft);
+        const primaryImage = safeCardImage(photoUrls[0]);
+        const brokerageName = escCard(aircraft.brokerage_name || '');
+        const brokerageCategory = escCard(aircraft.brokerage_category || '');
+        const sellerId = Number(aircraft.seller_id) || 0;
+        const sellerName = escCard(aircraft.seller_name || 'Seller');
+        const overallScore = aircraft.overall_score == null ? '—' : aircraft.overall_score;
 
         card.innerHTML = `
             <div class="aircraft-card" id="aircraft-${index}" 
@@ -6264,14 +6484,17 @@
                 data-best-efficiency-dollar="${aircraft.best_efficiency_dollar || 0}"
                 style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s ease, box-shadow 0.2s ease;">
                 
-                <!-- Aircraft Image - Fixed Aspect Ratio -->
-                <div class="aircraft-image" style="position: relative; width: 100%; height: 150px; overflow: hidden; background: #1a1a1a; flex-shrink: 0;">
-                    <img src="${primaryImage}" alt="${listingTitle}" 
-                         style="width: 100%; height: 100%; object-fit: cover; object-position: center;">
+                <div class="aircraft-image listing-photos">
+                    <img src="${primaryImage}" alt="${listingTitle}">
+                    <div class="listing-score" title="Overall match from all-around value per dollar">
+                        <span class="listing-score__value">${overallScore}</span>
+                        <span class="listing-score__label">Overall</span>
+                    </div>
+                    ${photoUrls.length > 1 ? `<button class="listing-photo-nav listing-photo-nav--prev" type="button" aria-label="Previous photo"><i class="fas fa-chevron-left"></i></button><button class="listing-photo-nav listing-photo-nav--next" type="button" aria-label="Next photo"><i class="fas fa-chevron-right"></i></button>` : ''}
                     <button class="btn save-aircraft-btn listing-save" type="button"
                             data-kind="${aircraft.is_user_listing ? 'listing' : 'catalog'}"
                             data-id="${aircraft.listing_id || aircraft.id}"
-                            data-title="${listingTitle.replace(/"/g, '&quot;')}"
+                            data-title="${listingTitle}"
                             data-manufacturer="${(aircraft.manufacturer || '').replace(/"/g, '&quot;')}"
                             data-price="${priceValue || 0}"
                             data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
@@ -6283,16 +6506,15 @@
                 
                 <div class="listing-scroll">
                 <div class="aircraft-content" style="padding: 10px;">
-                    <h5 class="aircraft-name">${aircraft.seller_id ? `<a href="/people/${aircraft.seller_id}" style="color:inherit;text-decoration:none;">${listingTitle}</a>` : listingTitle}</h5>
-                    ${aircraft.brokerage_name ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${aircraft.brokerage_name}${aircraft.brokerage_category ? ' · ' + aircraft.brokerage_category : ''}</div>` : ''}
-                    ${aircraft.match_score != null ? `<div style="display:inline-block; margin-bottom:8px; background:#F05545; color:#fff; font-weight:700; font-size:0.75rem; padding:3px 8px; border-radius:999px;">${aircraft.match_score}% match${aircraft.is_user_listing ? ' · For sale' : ''}</div>` : ''}
+                    <h5 class="aircraft-name">${listingTitle}</h5>
+                    ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
+                    ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 1.05rem;">
                         <i class="fas fa-map-marker-alt me-1"></i>${listingLocation}
                     </div>
                     
-                    <!-- PRICE - Directly Under Title -->
-                    <div class="aircraft-price" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 6px 8px; text-align: center; border-radius: 8px; margin: 6px 0; box-shadow: 0 3px 10px rgba(0,0,0,0.2);">
-                        <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px;">
+                    <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
+                        <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px; color:#F05545;">
                             $${(priceValue || 0).toLocaleString()}
                                 </div>
                                 </div>
@@ -6307,7 +6529,6 @@
                             ['Range', `${aircraft.range || 0} nm`, '#0e7490'],
                             ['Speed', `${aircraft.speed || 0} kts`, '#F05545'],
                             ['Passengers', `${aircraft.passengers || 0}`, '#6d28d9'],
-                            ['Wingspan', `${aircraft.wingspan || 0} ft`, '#b45309'],
                             ['Cabin', `${aircraft.cabin_volume || 0} cu ft`, '#0f766e'],
                             ['Annual budget', `$${displayMetrics.annualBudget.toLocaleString()}`, '#1d4ed8'],
                             ['Multi-year cost', `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, '#9f1239'],
@@ -6325,34 +6546,41 @@
                             <p class="text-muted mb-0" style="font-size: 0.9rem;">${listingDescription}</p>
                         </div>` : ''}
                         
-                        <!-- Card Actions -->
-                        <div class="card-actions" style="padding: 8px 0 0; border-top: 1px solid #404040; background: transparent;">
+                        <div class="listing-actions">
                             <button class="btn add-to-compare-btn" type="button"
                                     data-compare-id="${aircraft.id}"
-                                    data-compare-name="${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}">
-                                <i class="fas fa-plus me-2"></i>Add to Compare
+                                    data-compare-name="${escCard(aircraft.manufacturer || '')} ${escCard(aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft')}">
+                                <i class="fas fa-plus"></i><span>Compare</span>
                             </button>
                             <button class="btn save-aircraft-btn" type="button"
                                     data-kind="${aircraft.is_user_listing ? 'listing' : 'catalog'}"
                                     data-id="${aircraft.listing_id || aircraft.id}"
-                                    data-title="${listingTitle.replace(/"/g, '&quot;')}"
-                                    data-manufacturer="${(aircraft.manufacturer || '').replace(/"/g, '&quot;')}"
-                                    data-price="${priceValue || 0}"
-                                    data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
-                                    style="width:100%; margin-top:6px; padding:6px; font-weight:600; border-radius:8px; border:1px solid #F05545; background:transparent; color:#F05545;">
-                                <i class="far fa-bookmark me-2"></i>Watch this aircraft
+                                    data-title="${listingTitle}"
+                                    data-manufacturer="${escCard(aircraft.manufacturer || '')}"
+                                    data-price="${Number(priceValue) || 0}"
+                                    data-location="${listingLocation}">
+                                <i class="far fa-bookmark"></i><span>Watch</span>
                             </button>
-                            ${contactEmail ? `
-                            <a class="btn primary-action-btn" href="mailto:${contactEmail}" style="width: 100%; margin-top: 6px; padding: 6px; font-weight: 600; border-radius: 8px; border: none; background: linear-gradient(135deg, #F05545, #d63c2d); color: #ffffff; transition: all 0.2s ease;">
-                                <i class="fas fa-envelope me-2"></i>Contact Seller
-                            </a>` : ''}
-                    </div>
+                            ${sellerId ? `<a class="btn" href="/people/${sellerId}"><i class="fas fa-user"></i><span>Seller</span></a>` : `<span class="btn" aria-disabled="true"><i class="fas fa-user"></i><span>Seller</span></span>`}
+                        </div>
                     </div> <!-- End aircraft-content -->
                     <div class="listing-scroll__bar" aria-hidden="true"><span></span></div>
                 </div>
                 </div> <!-- End aircraft-card -->
             </div> <!-- End aircraft-card-wrapper -->
         `;
+
+        const photoImg = card.querySelector('.listing-photos img');
+        let photoIndex = 0;
+        const showPhoto = function (step) {
+            if (!photoImg || photoUrls.length < 2) return;
+            photoIndex = (photoIndex + step + photoUrls.length) % photoUrls.length;
+            photoImg.src = photoUrls[photoIndex];
+        };
+        const prevPhoto = card.querySelector('.listing-photo-nav--prev');
+        const nextPhoto = card.querySelector('.listing-photo-nav--next');
+        if (prevPhoto) prevPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(-1); });
+        if (nextPhoto) nextPhoto.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); showPhoto(1); });
 
         // Add hover effects
         card.addEventListener('mouseenter', function () {
@@ -6649,10 +6877,13 @@
         currentPage = 1;
         console.log('📄 Reset to page 1 after clearing all filters');
 
-        // Reset filtered data to show all aircraft
+        // Reset filtered data to show all aircraft, still ordered by the chosen sort.
         filteredAircraftData = [...allAircraftData];
-
-        // Update pagination and display
+        const sortBy = document.getElementById('sortSelect')?.value;
+        if (sortBy) {
+            sortAircraft(sortBy);
+            return;
+        }
         updatePagination();
         updateAircraftDisplay();
 
@@ -7618,9 +7849,9 @@
             clearCompareButton.addEventListener('click', clearCompareSelections);
         }
 
-        // Initialize pagination
+        // Initialize pagination. Default order is best all-around value per dollar.
         updatePagination();
-        updateAircraftDisplay();
+        sortAircraft(document.getElementById('sortSelect')?.value || 'best_all_around_dollar');
 
         updateCompareUI();
         initGoalFinder();
@@ -7799,6 +8030,12 @@
                 btn.innerHTML = on ? '<i class="fas fa-bookmark"></i>' : '<i class="far fa-bookmark"></i>';
                 btn.setAttribute('aria-label', on ? 'Watching' : 'Save');
                 btn.style.color = on ? '#F05545' : '#fff';
+                return;
+            }
+            if (btn.closest('.listing-actions')) {
+                btn.innerHTML = on
+                    ? '<i class="fas fa-bookmark"></i><span>Watching</span>'
+                    : '<i class="far fa-bookmark"></i><span>Watch</span>';
                 return;
             }
             btn.innerHTML = on

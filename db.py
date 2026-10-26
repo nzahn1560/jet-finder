@@ -312,6 +312,14 @@ class StripeEvent(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class AuthRateHit(Base):
+    """Shared login/signup hits so every Gunicorn worker sees the same counter."""
+    __tablename__ = 'auth_rate_hits'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bucket_key = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+
 class CharterOperator(Base):
     __tablename__ = 'charter_operators'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -724,8 +732,23 @@ def init_db():
     If you need to change a column type or remove a column, write a separate
     migration script that takes a backup first (see BACKUPS.md) and never put
     DROP/DELETE/TRUNCATE into this function.
+
+    Two Gunicorn workers can start together. If the other worker already
+    created a table, create_all is retried. Existing rows are left in place.
     """
-    Base.metadata.create_all(bind=engine)
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+    last_error = None
+    for _attempt in range(3):
+        try:
+            Base.metadata.create_all(bind=engine)
+            last_error = None
+            break
+        except (OperationalError, ProgrammingError) as exc:
+            if 'already exists' not in str(exc).lower():
+                raise
+            last_error = exc
+    if last_error is not None:
+        raise last_error
     seed_aircraft_and_airports()
     # SQLite: add columns that may be missing in existing DBs (e.g. created by older app)
     if DATABASE_URL.startswith('sqlite'):
@@ -1380,7 +1403,7 @@ def set_listing_payment_session(listing_id, session_id):
         return n > 0
 
 
-def mark_listing_paid_by_session(session_id):
+def mark_listing_paid_by_session(session_id, payment_intent_id=None):
     """Stripe webhook: mark the listing paid and move it to 'pending' review.
 
     Returns the listing_id, or None if no listing matches the checkout session.
@@ -1393,10 +1416,60 @@ def mark_listing_paid_by_session(session_id):
             return None
         lid = int(row.id)  # type: ignore[arg-type]
         updates: dict = {'payment_status': 'paid'}
+        if payment_intent_id:
+            updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
         if row.status in ('unpaid', 'draft'):
             updates['status'] = 'pending'
         s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
         return lid
+
+
+def reconcile_listing_refund(payment_intent_id, payment_status):
+    """Record a refund Stripe has already settled. Listing visibility stays as it is.
+
+    Returns the listing id, or None when there is no matching paid listing.
+    Does not create a Stripe refund and does not decide that a refund is owed.
+    """
+    if not payment_intent_id or payment_status not in ('refunded', 'partially_refunded', 'refund_recorded'):
+        return None
+    with get_session() as s:
+        row = (
+            s.query(UserListing)
+            .filter(UserListing.stripe_payment_intent_id == str(payment_intent_id)[:255])
+            .first()
+        )
+        if not row or row.payment_status not in ('paid', 'partially_refunded', 'refund_recorded', 'refunded'):
+            return None
+        lid = int(row.id)  # type: ignore[arg-type]
+        current = row.payment_status
+        if current == 'refunded':
+            return lid
+        if current == 'partially_refunded' and payment_status == 'refund_recorded':
+            return lid
+        s.query(UserListing).filter(UserListing.id == lid).update(
+            {'payment_status': payment_status}, synchronize_session=False
+        )
+        return lid
+
+
+def consume_auth_rate(bucket_key: str, limit: int = 10, window_seconds: int = 60) -> bool:
+    """True when this key is over the shared limit. The hit is stored for every worker."""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=window_seconds)
+    with get_session() as s:
+        s.query(AuthRateHit).filter(AuthRateHit.created_at < now - timedelta(hours=6)).delete(
+            synchronize_session=False
+        )
+        count = (
+            s.query(AuthRateHit)
+            .filter(AuthRateHit.bucket_key == bucket_key, AuthRateHit.created_at >= cutoff)
+            .count()
+        )
+        if count >= limit:
+            return True
+        s.add(AuthRateHit(bucket_key=bucket_key, created_at=now))
+        return False
 
 
 def get_listings_by_user_id(user_id):

@@ -54,9 +54,8 @@
         grid.innerHTML = shown.map(function (item) {
             const price = money(item.price);
             const hours = Number(item.hours) > 0 ? Number(item.hours).toLocaleString() + ' hrs' : '';
-            const serial = item.serial_number ? 'S/N ' + item.serial_number : '';
             const meta = [item.manufacturer, item.model, item.year, hours].filter(Boolean).join(' · ');
-            const place = [item.location, serial].filter(Boolean).join(' · ');
+            const place = item.location || '';
             return '<article class="om-card">'
                 + '<h2>' + esc(item.title || 'Aircraft') + '</h2>'
                 + '<p>' + esc(meta) + '</p>'
