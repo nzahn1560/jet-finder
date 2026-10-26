@@ -99,6 +99,11 @@ def public_listing(listing_id):
     profiles = {item.get('id'): item for item in db_module.get_all_aircraft_profiles()}
     profile = profiles.get(row.get('profile_id')) or {}
     media = db_module.list_listing_media(listing_id)
+    if not any(item.get('media_type') == 'photo' for item in media):
+        media = [
+            {'media_type': 'photo', 'url': url.strip()}
+            for url in (row.get('images') or '').split(',') if url.strip()
+        ] + media
     owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
     seller_name = ''
     if owner:

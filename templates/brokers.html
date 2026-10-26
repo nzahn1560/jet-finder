@@ -13,8 +13,8 @@
 
     <div class="broker-shell">
         <aside class="broker-list-wrap">
-            <label class="broker-search-label" for="broker-search">Find a brokerage</label>
-            <input id="broker-search" class="form-control" type="search" placeholder="Brokerage or city" autocomplete="off">
+            <label class="broker-search-label" for="broker-search">Find a broker</label>
+            <input id="broker-search" class="form-control" type="search" placeholder="Name, city, or airport code" autocomplete="off">
             <div id="broker-list" class="broker-list"></div>
         </aside>
         <div class="broker-stage">
@@ -121,7 +121,7 @@
         });
         markers.forEach(function (marker, id) {
             const on = id === team.pin_id;
-            marker.setStyle({ radius: on ? 11 : 8, weight: on ? 3 : 2, color: on ? '#fff' : '#F05545' });
+            marker.setStyle({ radius: on ? 9 : 6, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
         });
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(team) + '<p>Loading brokers...</p>';
@@ -132,11 +132,18 @@
         showTeam(team, detail);
     }
 
+    function searchText(team) {
+        return [
+            team.display_name, team.place, team.city, team.region, team.country,
+            team.iata, team.icao, team.airport_name, team.category, team.leader, team.bio
+        ].filter(Boolean).join(' ').toLowerCase();
+    }
+
     function renderList(query) {
         const needle = (query || '').trim().toLowerCase();
         const shown = teams.filter(function (team) {
             if (!needle) return true;
-            return [team.display_name, team.place].join(' ').toLowerCase().indexOf(needle) >= 0;
+            return searchText(team).indexOf(needle) >= 0;
         });
         if (!shown.length) {
             listEl.innerHTML = '<p class="broker-empty">No brokerage matches that search.</p>';
@@ -146,7 +153,7 @@
             return '<button type="button" class="broker-person' + (team.pin_id === activeId ? ' is-selected' : '') + '" data-id="' + team.pin_id + '">'
                 + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'T').slice(0, 1))) + '</span>'
                 + '<span><strong>' + esc(team.display_name) + '</strong>'
-                + '<em>' + esc([team.category, team.place || 'Brokerage'].filter(Boolean).join(' · ')) + '</em></span>'
+                + '<em>' + esc([team.category, team.city || team.place || 'Brokerage', team.iata].filter(Boolean).join(' · ')) + '</em></span>'
                 + '</button>';
         }).join('');
         listEl.querySelectorAll('.broker-person').forEach(function (button) {
@@ -169,7 +176,7 @@
     teams.forEach(function (team) {
         if (team.lat == null || team.lon == null) return;
         const marker = L.circleMarker([team.lat, team.lon], {
-            radius: 8, color: '#F05545', weight: 2, fillColor: '#F05545', fillOpacity: 0.92
+            radius: 6, color: '#F05545', weight: 0, fillColor: '#F05545', fillOpacity: 1
         }).addTo(map);
         marker.bindTooltip(miniHtml(team), {
             direction: 'top',

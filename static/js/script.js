@@ -26,31 +26,43 @@ window.__compareRangeItems = [];
 
 function drawCompareRanges(items) {
     window.__compareRangeItems = Array.isArray(items) ? items : [];
-    if (typeof map === 'undefined' || !map || !map.getPane('rangeCirclePane')) return;
+    if (typeof map === 'undefined' || !map || !map.getPane('rangeCirclePane')) {
+        addRangeLegend();
+        return;
+    }
     compareRangeLayers.forEach(function (layer) {
         try { map.removeLayer(layer); } catch (error) { /* layer already gone */ }
     });
     compareRangeLayers = [];
-    if (!homeAirport || homeAirport.lat == null || homeAirport.lon == null) return;
+    if (!homeAirport || homeAirport.lat == null || homeAirport.lon == null) {
+        addRangeLegend();
+        return;
+    }
     window.__compareRangeItems.forEach(function (item) {
         const range = Number(item.range);
         if (!range) return;
-        const circle = L.circle([homeAirport.lat, homeAirport.lon], {
-            radius: range * 1852,
-            color: item.color || '#F05545',
-            weight: 2,
-            fillColor: item.color || '#F05545',
-            fillOpacity: 0.06,
-            dashArray: '4, 6',
-            interactive: false,
-            pane: 'rangeCirclePane'
-        }).addTo(map);
-        circle.bindTooltip((item.name || 'Aircraft') + ': ' + Math.round(range) + ' nm (seats full)', {
-            sticky: true,
-            className: 'range-tooltip'
+        const ring = createGeodesicCircle([homeAirport.lat, homeAirport.lon], range);
+        const paths = ring && ring.isDateLineCrossing ? [ring.eastPolygon, ring.westPolygon] : [ring && ring.points];
+        const emphasized = window.__rangeFocus && window.__rangeFocus === item.name;
+        const dimmed = window.__rangeFocus && window.__rangeFocus !== item.name;
+        paths.forEach(function (points) {
+            if (!points || points.length < 2) return;
+            const line = L.polyline(points, {
+                color: item.color || '#F05545',
+                weight: emphasized ? 6 : 3,
+                opacity: dimmed ? 0.28 : 0.95,
+                interactive: true,
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+            line.bindTooltip((item.name || 'Aircraft') + ': ' + Math.round(range) + ' nm range (seats full)', {
+                sticky: true,
+                opacity: 1,
+                className: 'range-tooltip'
+            });
+            compareRangeLayers.push(line);
         });
-        compareRangeLayers.push(circle);
     });
+    addRangeLegend();
 }
 window.drawCompareRanges = drawCompareRanges;
 let avgTripRangeCircle = null;
@@ -670,43 +682,65 @@ function splitCircleAtDateLine(points) {
     return [finalEastPolygon, finalWestPolygon];
 }
 
+let rangeLegendControl = null;
+
+function escLegend(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+    });
+}
+
+function focusCompareRange(name) {
+    window.__rangeFocus = window.__rangeFocus === name ? '' : name;
+    drawCompareRanges(window.__compareRangeItems || []);
+}
+window.focusCompareRange = focusCompareRange;
+
 // Function to add a legend to the map
 function addRangeLegend() {
-    // Remove existing legend if present
-    const existingLegend = document.querySelector('.range-legend');
-    if (existingLegend) {
-        existingLegend.remove();
+    if (typeof map === 'undefined' || !map) return;
+    if (rangeLegendControl) {
+        map.removeControl(rangeLegendControl);
+        rangeLegendControl = null;
     }
 
-    // Create new legend
     const legend = L.control({ position: 'bottomleft' });
+    const aircraft = Array.isArray(window.__compareRangeItems) ? window.__compareRangeItems : [];
 
     legend.onAdd = function () {
         const div = L.DomUtil.create('div', 'range-legend');
-        div.innerHTML = `
-            <div class="bg-dark p-2 rounded" style="border: 1px solid rgba(255,255,255,0.2);">
-                <div style="font-weight: bold; margin-bottom: 8px; color: white; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">Range Rings</div>
-                <div class="d-flex align-items-center mb-2">
-                    <div style="width: 18px; height: 3px; background-color: #F05545; margin-right: 8px;"></div>
-                    <span style="color: white; font-size: 12px;">Custom: ${Math.round(currentRange)} nm</span>
-            </div>
-                <div class="d-flex align-items-center mb-2">
-                    <div style="width: 18px; height: 3px; background-color: #FFFFFF; margin-right: 8px;"></div>
-                    <span style="color: white; font-size: 12px;">Average Trip: ${averageTripDistance} nm</span>
-                </div>
-                <div class="d-flex align-items-center">
-                    <div style="width: 18px; height: 3px; background-color: #3498DB; margin-right: 8px;"></div>
-                    <span style="color: white; font-size: 12px;">Longest Leg: ${Math.round(longestLegDistance)} nm</span>
-            </div>
-        </div>
-    `;
-
-        // Add CSS to prevent interaction with the legend so map clicks work
-        div.style.pointerEvents = 'none';
-
+        const rows = [
+            ['#F05545', 'Custom range: ' + Math.round(currentRange) + ' nm'],
+            ['#FFFFFF', 'Average trip: ' + Math.round(averageTripDistance || 0) + ' nm'],
+            ['#3498DB', 'Longest leg: ' + Math.round(longestLegDistance || 0) + ' nm']
+        ].map(function (row) {
+            return '<div class="d-flex align-items-center mb-2"><div style="width:18px;height:3px;background:' + row[0] + ';margin-right:8px;"></div><span style="color:#fff;font-size:12px;">' + escLegend(row[1]) + '</span></div>';
+        }).join('');
+        const compared = aircraft.map(function (item) {
+            const name = item.name || 'Aircraft';
+            const selected = window.__rangeFocus === name;
+            return '<button type="button" data-range-name="' + escLegend(name) + '" style="display:flex;align-items:center;width:100%;margin:0 0 6px;padding:2px 0;border:0;background:transparent;text-align:left;cursor:pointer;' + (selected ? 'outline:1px solid #fff;border-radius:4px;' : '') + '">'
+                + '<span style="width:18px;height:3px;background:' + escLegend(item.color || '#F05545') + ';margin-right:8px;display:inline-block;"></span>'
+                + '<span style="color:#fff;font-size:12px;">' + escLegend(name) + ' · ' + Math.round(Number(item.range) || 0) + ' nm</span></button>';
+        }).join('');
+        div.innerHTML = '<div class="bg-dark p-2 rounded" style="border:1px solid rgba(255,255,255,0.2);min-width:180px;">'
+            + '<div style="font-weight:bold;margin-bottom:8px;color:#fff;text-align:center;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:4px;">Range</div>'
+            + rows
+            + (compared ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,0.1);padding-top:6px;">' + compared + '</div>' : '')
+            + '</div>';
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        div.querySelectorAll('[data-range-name]').forEach(function (button) {
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                focusCompareRange(button.getAttribute('data-range-name'));
+            });
+        });
         return div;
     };
 
+    rangeLegendControl = legend;
     legend.addTo(map);
 }
 
@@ -792,6 +826,8 @@ function setHomeAirport(airport, skipMapCentering = false) {
     if (homeAirportResults) {
         homeAirportResults.classList.add('d-none');
     }
+    window.homeAirport = homeAirport;
+    refreshListingScenario();
 }
 
 // Update range slider and related elements
@@ -829,6 +865,7 @@ function updateRangeSlider(newRange) {
 
     // Provide user feedback
     showToast(`Updated range filter to ${newRange.toLocaleString()} nm`, 'info');
+    refreshListingScenario();
 
     // --- NEW LOGIC: If range filter surpasses longest leg, set range requirement to longest leg ---
     if (typeof window.longestLegDistance === 'number' && newRange >= window.longestLegDistance) {
@@ -1991,6 +2028,7 @@ function updateInputFields() {
         if (rangeInput) rangeInput.value = '';
         if (avgTripInput) avgTripInput.value = '';
         if (numberOfTripsInput) numberOfTripsInput.value = '';
+        refreshListingScenario();
         return;
     }
 
@@ -2045,6 +2083,13 @@ function updateInputFields() {
     // Update global variables for range ring calculations
     window.longestLegDistance = longestLeg;
     window.averageTripDistance = weightedAverageTrip;
+    refreshListingScenario();
+}
+
+function refreshListingScenario() {
+    if (typeof window.refreshListingNumbers === 'function') {
+        window.refreshListingNumbers();
+    }
 }
 
 // Expose functions to window for restoration
