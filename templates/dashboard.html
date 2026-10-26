@@ -261,6 +261,14 @@
     @media (max-width: 992px) {
         .dash__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
+    .fold { margin-top: 2rem; }
+    .fold__toggle { width: 100%; text-align: left; background: transparent; color: #fff; border: 0; border-bottom: 1px solid rgba(255,255,255,0.12); padding: 0.8rem 0; font-size: 1.45rem; font-weight: 700; cursor: pointer; font-family: 'Orbitron', sans-serif; }
+    .fold__body { padding-top: 1rem; }
+    .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
+    .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.6rem 0.75rem; font-size: 1.05rem; }
+    .fold__tools input { flex: 1; }
+    .alert-item { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 0.9rem 1rem; margin-bottom: 0.6rem; color: #f4f4f4; font-size: 1.05rem; }
+    .alert-item strong { display: block; font-size: 1.15rem; margin-bottom: 0.2rem; }
     @media (max-width: 768px) {
         .dash { padding: 1.25rem 0 3rem; }
         .dash__hero { padding: 1.75rem 1.25rem; }
@@ -286,7 +294,16 @@
         </div>
         {% endif %}
 
-        <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're selling</h2>
+        <section class="fold" id="alerts">
+            <button type="button" class="fold__toggle" id="alerts-toggle" aria-expanded="false">Alerts</button>
+            <div class="fold__body" id="alerts-body" hidden>
+                <div id="alerts-list"></div>
+            </div>
+        </section>
+
+        <section class="fold" id="selling-fold">
+            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="false">Aircraft you're selling</button>
+            <div class="fold__body" id="selling-body" hidden>
         {% if request.args.get('submitted') %}
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
             {% if request.args.get('paid') == '0' %}
@@ -309,12 +326,37 @@
             {% endif %}
         </div>
         {% endif %}
-        <div id="my-listings-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading your listings...</div>
+        <div class="fold__tools">
+            <input id="selling-search" type="search" placeholder="Search your aircraft">
+            <select id="selling-sort">
+                <option value="newest">Newest</option>
+                <option value="title">Name</option>
+                <option value="price-desc">Price high</option>
+                <option value="price-asc">Price low</option>
+                <option value="year">Year</option>
+            </select>
+        </div>
+        <div id="my-listings-status" style="color:#c8c8c8; font-family:'Rajdhani', sans-serif; font-size:1.05rem; margin-bottom:1rem;">Loading your listings...</div>
         <div id="my-listings" class="dash__grid" data-admin="{{ 1 if user.is_admin else 0 }}"></div>
+        </div>
+        </section>
 
-        <h2 class="dash__section-title" style="margin-top: 3rem;">Aircraft you're watching</h2>
-        <div id="saved-status" style="color:#8e8e93; font-family:'Rajdhani', sans-serif; margin-bottom:1rem;">Loading saved aircraft...</div>
+        <section class="fold" id="watching-fold">
+            <button type="button" class="fold__toggle" id="watching-toggle" aria-expanded="false">Aircraft you're watching</button>
+            <div class="fold__body" id="watching-body" hidden>
+        <div class="fold__tools">
+            <input id="watching-search" type="search" placeholder="Search watched aircraft">
+            <select id="watching-sort">
+                <option value="newest">Newest</option>
+                <option value="title">Name</option>
+                <option value="price-desc">Price high</option>
+                <option value="price-asc">Price low</option>
+            </select>
+        </div>
+        <div id="saved-status" style="color:#c8c8c8; font-family:'Rajdhani', sans-serif; font-size:1.05rem; margin-bottom:1rem;">Loading saved aircraft...</div>
         <div id="saved-aircraft" class="dash__grid"></div>
+            </div>
+        </section>
     </div>
 </div>
 
@@ -362,7 +404,8 @@
                 : (offMarket && l.status === 'pending'
                     ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
                     : (statusCopy[l.status] || 'Saved.'));
-            return '\n<div class="dash__card">\n'
+            const searchBlob = [l.title, l.name, l.manufacturer, l.category, l.location, l.year].join(' ');
+            return '\n<div class="dash__card" data-search="' + escapeHtml(searchBlob) + '" data-price="' + (Number(l.price) || 0) + '" data-year="' + (Number(l.year) || 0) + '" data-title="' + escapeHtml(l.title || '') + '" data-created="' + escapeHtml(l.created_at || '') + '">\n'
                 + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
@@ -379,6 +422,32 @@
                 + '</div>';
         }).join('');
         listEl.innerHTML = html;
+        const sellingSearch = document.getElementById('selling-search');
+        const sellingSort = document.getElementById('selling-sort');
+        function applySelling() {
+            const needle = sellingSearch.value.trim().toLowerCase();
+            const sort = sellingSort.value;
+            const cards = Array.from(listEl.children);
+            cards.sort(function (a, b) {
+                if (sort === 'price-asc') return Number(a.dataset.price) - Number(b.dataset.price);
+                if (sort === 'price-desc') return Number(b.dataset.price) - Number(a.dataset.price);
+                if (sort === 'year') return Number(b.dataset.year) - Number(a.dataset.year);
+                if (sort === 'title') return (a.dataset.title || '').localeCompare(b.dataset.title || '');
+                return (b.dataset.created || '').localeCompare(a.dataset.created || '');
+            });
+            let visible = 0;
+            cards.forEach(function (card) {
+                const show = !needle || (card.dataset.search || '').toLowerCase().indexOf(needle) >= 0;
+                card.hidden = !show;
+                if (show) visible += 1;
+                listEl.appendChild(card);
+            });
+            statusEl.textContent = visible + ' listing' + (visible === 1 ? '' : 's');
+            document.getElementById('selling-toggle').textContent = 'Aircraft you\'re selling (' + listings.length + ')';
+        }
+        sellingSearch.addEventListener('input', applySelling);
+        sellingSort.addEventListener('change', applySelling);
+        applySelling();
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
                 if (!confirm('Delete this listing? It will leave the marketplace.')) return;
@@ -464,13 +533,38 @@
         listEl.innerHTML = saved.map(function (a) {
             const kindLabel = a.kind === 'listing' ? 'For sale' : 'Model';
             const price = Number(a.price) ? '$' + Number(a.price).toLocaleString() : 'Price on request';
-            return '<div class="dash__card">'
+            return '<div class="dash__card" data-search="' + escapeHtml([a.title, a.manufacturer, a.location].join(' ')) + '" data-price="' + (Number(a.price) || 0) + '" data-title="' + escapeHtml(a.title || '') + '" data-created="' + escapeHtml(a.created_at || '') + '">'
                 + '<h3 class="dash__card-title">' + escapeHtml(a.title || 'Aircraft') + '</h3>'
                 + '<p class="dash__card-desc">' + escapeHtml(a.manufacturer || '') + (a.location ? ' · ' + escapeHtml(a.location) : '') + '<br><strong>' + price + '</strong></p>'
                 + '<span class="dash__badge">' + kindLabel + '</span>'
                 + '<div style="margin-top:0.8rem;"><button class="dash__card-link" data-unsave="' + a.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Remove</button></div>'
                 + '</div>';
         }).join('');
+        const watchingSearch = document.getElementById('watching-search');
+        const watchingSort = document.getElementById('watching-sort');
+        function applyWatching() {
+            const needle = watchingSearch.value.trim().toLowerCase();
+            const sort = watchingSort.value;
+            const cards = Array.from(listEl.children);
+            cards.sort(function (a, b) {
+                if (sort === 'price-asc') return Number(a.dataset.price) - Number(b.dataset.price);
+                if (sort === 'price-desc') return Number(b.dataset.price) - Number(a.dataset.price);
+                if (sort === 'title') return (a.dataset.title || '').localeCompare(b.dataset.title || '');
+                return (b.dataset.created || '').localeCompare(a.dataset.created || '');
+            });
+            let visible = 0;
+            cards.forEach(function (card) {
+                const show = !needle || (card.dataset.search || '').toLowerCase().indexOf(needle) >= 0;
+                card.hidden = !show;
+                if (show) visible += 1;
+                listEl.appendChild(card);
+            });
+            statusEl.textContent = visible + ' saved aircraft';
+            document.getElementById('watching-toggle').textContent = 'Aircraft you\'re watching (' + saved.length + ')';
+        }
+        watchingSearch.addEventListener('input', applyWatching);
+        watchingSort.addEventListener('change', applyWatching);
+        applyWatching();
         listEl.querySelectorAll('[data-unsave]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
                 const resp = await fetch('/api/profile/saved', {
@@ -485,6 +579,43 @@
     } catch (err) {
         statusEl.textContent = 'Could not load saved aircraft.';
         console.error(err);
+    }
+})();
+
+document.querySelectorAll('.fold__toggle').forEach(function (button) {
+    button.addEventListener('click', function () {
+        const body = button.parentElement.querySelector('.fold__body');
+        const open = body.hidden;
+        body.hidden = !open;
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+});
+
+(async function loadAlerts() {
+    const list = document.getElementById('alerts-list');
+    const toggle = document.getElementById('alerts-toggle');
+    const body = document.getElementById('alerts-body');
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    const response = await fetch('/api/notifications', { credentials: 'include' });
+    if (!response.ok) return;
+    const data = await response.json();
+    const notes = data.notifications || [];
+    toggle.textContent = 'Alerts' + (data.unread ? ' (' + data.unread + ')' : '');
+    if (!notes.length) {
+        list.innerHTML = '<p style="color:#d0d0d0;">No alerts yet.</p>';
+    } else {
+        list.innerHTML = notes.map(function (note) {
+            return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + '</article>';
+        }).join('');
+    }
+    if (data.unread || location.hash === '#alerts') {
+        body.hidden = false;
+        toggle.setAttribute('aria-expanded', 'true');
+        if (data.unread) fetch('/api/notifications/read', { method: 'POST', credentials: 'include' });
     }
 })();
 </script>

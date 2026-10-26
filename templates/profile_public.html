@@ -4,7 +4,16 @@
 {% block additional_css %}
 <style>
     .profile-page { background: #0d0d0d; min-height: 70vh; padding: 2rem 0 4rem; }
-    .profile-page__inner { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+    .profile-page__inner { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+    .fold { margin-top: 1.5rem; }
+    .fold__toggle { width: 100%; text-align: left; background: #161616; color: #fff; border: 0; border-bottom: 1px solid #2a2a2a; padding: 1rem 1.1rem; font-size: 1.35rem; font-weight: 700; cursor: pointer; }
+    .fold__body { padding: 1rem 0 0; }
+    .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
+    .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.55rem 0.7rem; font-size: 1.05rem; }
+    .fold__tools input { flex: 1; }
+    .sale-card { background: #161616; color: #f4f4f4; padding: 1rem 1.1rem; margin-bottom: 0.7rem; }
+    .sale-card h3 { margin: 0 0 0.3rem; font-size: 1.35rem; }
+    .sale-card p { margin: 0; font-size: 1.1rem; color: #e4e4e4; }
 </style>
 {% endblock %}
 
@@ -12,6 +21,66 @@
 <div class="profile-page">
     <div class="profile-page__inner">
         {% include '_profile_card.html' %}
+        <section class="fold" id="selling-fold">
+            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="false">Aircraft for sale</button>
+            <div class="fold__body" id="selling-body" hidden>
+                <div class="fold__tools">
+                    <input id="selling-search" type="search" placeholder="Search aircraft">
+                    <select id="selling-sort">
+                        <option value="title">Name</option>
+                        <option value="price-desc">Price high</option>
+                        <option value="price-asc">Price low</option>
+                        <option value="year">Year</option>
+                    </select>
+                </div>
+                <div id="public-listings"></div>
+            </div>
+        </section>
     </div>
 </div>
+<script>
+(function () {
+    const toggle = document.getElementById('selling-toggle');
+    const body = document.getElementById('selling-body');
+    const list = document.getElementById('public-listings');
+    let rows = [];
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    function render() {
+        const needle = document.getElementById('selling-search').value.trim().toLowerCase();
+        const sort = document.getElementById('selling-sort').value;
+        let shown = rows.filter(function (row) {
+            return !needle || [row.title, row.manufacturer, row.place, row.engine_type, row.serial_number].join(' ').toLowerCase().indexOf(needle) >= 0;
+        });
+        shown.sort(function (a, b) {
+            if (sort === 'price-asc') return (Number(a.price) || 0) - (Number(b.price) || 0);
+            if (sort === 'price-desc') return (Number(b.price) || 0) - (Number(a.price) || 0);
+            if (sort === 'year') return (Number(b.year) || 0) - (Number(a.year) || 0);
+            return String(a.title || '').localeCompare(String(b.title || ''));
+        });
+        if (!shown.length) { list.innerHTML = '<p style="color:#d0d0d0;font-size:1.1rem;">No aircraft match.</p>'; return; }
+        list.innerHTML = shown.map(function (row) {
+            const bits = [row.year, row.engine_type, row.place, row.serial_number ? 'S/N ' + row.serial_number : ''].filter(Boolean).join(' · ');
+            const price = Number(row.price) > 0 ? '$' + Number(row.price).toLocaleString() : '';
+            return '<article class="sale-card"><h3>' + esc(row.title || 'Aircraft') + '</h3><p>' + esc(price) + (price && bits ? ' · ' : '') + esc(bits) + '</p></article>';
+        }).join('');
+        toggle.textContent = 'Aircraft for sale (' + rows.length + ')';
+    }
+    toggle.addEventListener('click', function () {
+        const open = body.hidden;
+        body.hidden = !open;
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.getElementById('selling-search').addEventListener('input', render);
+    document.getElementById('selling-sort').addEventListener('change', render);
+    fetch('/api/people/{{ user.id }}/listings').then(function (r) { return r.json(); }).then(function (data) {
+        rows = data.listings || [];
+        toggle.textContent = 'Aircraft for sale (' + rows.length + ')';
+        render();
+    });
+})();
+</script>
 {% endblock %}

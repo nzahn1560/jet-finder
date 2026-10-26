@@ -213,6 +213,43 @@ class ProductTests(unittest.TestCase):
         approved = self.client.post(f'/api/admin/listings/{listing_id}/approve')
         self.assertEqual(approved.status_code, 403)
 
+    def test_admin_can_approve_a_broker_and_a_watch_creates_an_alert(self):
+        created = self.client.post('/api/auth/signup', json={
+            'email': 'apply-broker@example.com',
+            'password': 'broker-pass-1',
+            'first_name': 'Apply',
+            'profile_role': 'broker',
+        })
+        applicant_id = created.get_json()['user']['id']
+        self.assertEqual(created.get_json()['user']['broker_application_status'], 'pending')
+        self._login('buyer@example.com', 'buyer-pass-1')
+        self.assertEqual(self.client.post(f'/api/admin/brokers/{applicant_id}/approve').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        person = db_module.get_user_by_id(applicant_id)
+        self.assertEqual(person['profile_role'], 'broker')
+        self.assertEqual(person['broker_application_status'], 'approved')
+        queue = self.client.get('/api/admin/approvals')
+        self.assertEqual(queue.status_code, 200)
+        self._login('seller@example.com', 'seller-pass-1')
+        listing = self.client.post('/api/listings', json=self._payload('Watched Jet', 'public'))
+        listing_id = listing.get_json()['id']
+        self._login('buyer@example.com', 'buyer-pass-1')
+        saved = self.client.post('/api/profile/saved', json={
+            'kind': 'listing', 'target_id': listing_id, 'title': 'Watched Jet',
+        })
+        self.assertEqual(saved.status_code, 201, saved.get_json())
+        public = self.client.get(f'/people/{self.seller["id"]}')
+        self.assertEqual(public.status_code, 200)
+        self.assertIn(b'Aircraft for sale', public.data)
+        self.assertNotIn(b'id="open-profile-edit"', public.data)
+        self._login('seller@example.com', 'seller-pass-1')
+        notes = self.client.get('/api/notifications')
+        self.assertEqual(notes.status_code, 200)
+        titles = [note['title'] for note in notes.get_json()['notifications']]
+        self.assertIn('Someone is watching your listing', titles)
+
     def test_admin_review_compares_aircraft_data_and_keeps_a_fix_message_pending(self):
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Review Jet', 'public'))

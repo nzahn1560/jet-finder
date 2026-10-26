@@ -128,6 +128,7 @@ class User(Base):
     company = Column(String(200))
     phone = Column(String(20))
     profile_role = Column(String(50), default='other')  # broker, buyer, seller, mechanic, charter_operator, other
+    broker_application_status = Column(String(20))  # pending, approved, denied
     roles = Column(String(200), default='')  # extra roles, comma-separated. Never includes admin.
     profile_location = Column(String(255))  # city, region, or business location
     broker_bio = Column(Text)
@@ -224,6 +225,7 @@ class BrokerTeam(Base):
     longitude = Column(Float)
     logo_url = Column(Text)
     bio = Column(Text)
+    category = Column(String(40))
     subscription_status = Column(String(20), default='inactive', nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -243,6 +245,26 @@ class BrokerTeamMember(Base):
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class UserNotification(Base):
+    """An alert a person sees on their profile, and that can also be emailed."""
+    __tablename__ = 'user_notifications'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    kind = Column(String(40), nullable=False)
+    title = Column(String(200), nullable=False)
+    body = Column(Text)
+    href = Column(String(255))
+    read_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        for key in ('read_at', 'created_at'):
+            if data.get(key) is not None and not isinstance(data[key], str):
+                data[key] = data[key].isoformat()
+        return data
 
 
 class CharterInquiry(Base):
@@ -760,6 +782,7 @@ def init_db():
                 'broker_image_url VARCHAR(500)',
                 'profile_photo_url TEXT',
                 'company_logo_url TEXT',
+                'broker_application_status VARCHAR(20)',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -786,6 +809,7 @@ def init_db():
                 ('broker_image_url', 'VARCHAR(500)'),
                 ('profile_photo_url', 'TEXT'),
                 ('company_logo_url', 'TEXT'),
+                ('broker_application_status', 'VARCHAR(20)'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -818,6 +842,18 @@ def init_db():
                 except Exception:
                     conn.rollback()
                     pass
+            try:
+                conn.execute(text('ALTER TABLE broker_teams ADD COLUMN IF NOT EXISTS category VARCHAR(40)'))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+    if DATABASE_URL.startswith('sqlite'):
+        with engine.connect() as conn:
+            try:
+                conn.execute(text('ALTER TABLE broker_teams ADD COLUMN category VARCHAR(40)'))
+                conn.commit()
+            except Exception:
+                conn.rollback()
 
 
 @contextmanager
@@ -1004,7 +1040,10 @@ def save_aircraft_for_user(user_id, kind, target_id, snapshot=None):
         )
         s.add(row)
         s.flush()
-        return int(row.id)  # type: ignore[arg-type]
+        saved_id = int(row.id)  # type: ignore[arg-type]
+    if kind == 'listing':
+        note_listing_watched(user_id, target_id)
+    return saved_id
 
 
 def remove_saved_aircraft(user_id, kind=None, target_id=None, saved_id=None):
@@ -1737,6 +1776,118 @@ def request_team_join(team_id, user_id):
         return 'pending'
 
 
+BROKERAGE_CATEGORIES = ('Sales', 'Acquisition', 'Management', 'Charter', 'Service')
+
+
+def set_broker_application(user_id, status):
+    with get_session() as s:
+        n = s.query(User).filter(User.id == user_id).update(
+            {'broker_application_status': status}, synchronize_session=False
+        )
+        return n > 0
+
+
+def list_broker_applications(status='pending'):
+    with get_session() as s:
+        rows = (
+            s.query(User)
+            .filter(User.broker_application_status == status)
+            .order_by(User.created_at.desc())
+            .all()
+        )
+        return [{
+            'id': user.id,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'company': user.company,
+            'phone': user.phone,
+            'profile_role': user.profile_role,
+            'profile_location': user.profile_location,
+            'status': user.broker_application_status,
+        } for user in rows]
+
+
+def list_teams_for_admin():
+    with get_session() as s:
+        teams = s.query(BrokerTeam).order_by(BrokerTeam.name.asc()).all()
+        out = []
+        for team in teams:
+            leader = s.query(User).filter(User.id == team.admin_user_id).first()
+            out.append({
+                'id': team.id,
+                'name': team.name,
+                'city': team.city,
+                'state': team.state,
+                'location': team.location,
+                'category': team.category,
+                'subscription_status': team.subscription_status,
+                'leader': {
+                    'id': leader.id,
+                    'name': ' '.join(part for part in [leader.first_name, leader.last_name] if part) or leader.email,
+                    'email': leader.email,
+                } if leader else None,
+            })
+    for team in out:
+        team['members'] = list_team_members(team['id'])
+    return out
+
+
+def list_pending_memberships():
+    with get_session() as s:
+        rows = (
+            s.query(BrokerTeamMember, BrokerTeam, User)
+            .join(BrokerTeam, BrokerTeam.id == BrokerTeamMember.team_id)
+            .join(User, User.id == BrokerTeamMember.user_id)
+            .filter(BrokerTeamMember.status == 'pending')
+            .all()
+        )
+        return [{
+            'team_id': team.id,
+            'team_name': team.name,
+            'user_id': user.id,
+            'name': ' '.join(part for part in [user.first_name, user.last_name] if part) or user.email,
+            'email': user.email,
+        } for _member, team, user in rows]
+
+
+def set_team_category(team_id, category):
+    category = (category or '').strip()
+    if category and category not in BROKERAGE_CATEGORIES:
+        return False
+    with get_session() as s:
+        n = s.query(BrokerTeam).filter(BrokerTeam.id == team_id).update(
+            {'category': category or None}, synchronize_session=False
+        )
+        return n > 0
+
+
+def set_team_leader(team_id, user_id):
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id).first()
+        member = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == user_id,
+        ).first()
+        if not team or not member:
+            return False
+        team.admin_user_id = user_id
+        member.status = 'active'
+        return True
+
+
+def admin_allow_team_member(team_id, member_user_id):
+    with get_session() as s:
+        member = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == member_user_id,
+        ).first()
+        if not member:
+            return False
+        member.status = 'active'
+        return True
+
+
 def allow_team_member(team_id, admin_user_id, member_user_id):
     with get_session() as s:
         team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.admin_user_id == admin_user_id).first()
@@ -1779,6 +1930,115 @@ def list_team_members(team_id, status=None):
         return out
 
 
+def create_notification(user_id, kind, title, body=None, href=None):
+    with get_session() as s:
+        row = UserNotification(user_id=user_id, kind=kind, title=title, body=body, href=href)
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_notifications(user_id, limit=40):
+    with get_session() as s:
+        rows = (
+            s.query(UserNotification)
+            .filter(UserNotification.user_id == user_id)
+            .order_by(UserNotification.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [row.to_dict() for row in rows]
+
+
+def unread_notification_count(user_id):
+    with get_session() as s:
+        return s.query(UserNotification).filter(
+            UserNotification.user_id == user_id,
+            UserNotification.read_at.is_(None),
+        ).count()
+
+
+def mark_notifications_read(user_id):
+    with get_session() as s:
+        s.query(UserNotification).filter(
+            UserNotification.user_id == user_id,
+            UserNotification.read_at.is_(None),
+        ).update({'read_at': datetime.utcnow()}, synchronize_session=False)
+        return True
+
+
+def _send_notice_email(email, title, body):
+    if not email:
+        return False
+    try:
+        import email_service
+        if not email_service.is_configured():
+            return False
+        text = f'{title}\n\n{body or ""}'
+        return bool(email_service.send_email(email, title, f'<p>{text.replace(chr(10), "<br>")}</p>', text))
+    except Exception:
+        return False
+
+
+def notify_user(user_id, kind, title, body=None, href=None, email=None):
+    create_notification(user_id, kind, title, body, href)
+    _send_notice_email(email, title, body)
+
+
+def note_listing_watched(watcher_id, listing_id):
+    try:
+        listing_id = int(listing_id)
+    except (TypeError, ValueError):
+        return
+    listing = get_listing_with_owner(listing_id)
+    if not listing:
+        return
+    owner_id = listing.get('user_id')
+    if not owner_id or int(owner_id) == int(watcher_id):
+        return
+    title = listing.get('title') or 'Your listing'
+    notify_user(
+        owner_id,
+        'watch',
+        'Someone is watching your listing',
+        f'{title} was added to a watchlist.',
+        f'/people/{owner_id}',
+        listing.get('email'),
+    )
+
+
+def notify_watchers_of_listing(listing):
+    """Tell people watching this model that a listing is on the market."""
+    profile_id = str(listing.get('profile_id') or '').strip()
+    if not profile_id:
+        return
+    title = listing.get('title') or 'An aircraft'
+    owner_id = listing.get('user_id')
+    with get_session() as s:
+        rows = (
+            s.query(SavedAircraft)
+            .filter(SavedAircraft.kind == 'catalog', SavedAircraft.target_id == profile_id)
+            .all()
+        )
+        watchers = [(row.user_id,) for row in rows]
+    seen = set()
+    for (user_id,) in watchers:
+        if user_id in seen or user_id == owner_id:
+            continue
+        seen.add(user_id)
+        person = get_user_by_id(user_id)
+        if not person:
+            continue
+        notify_user(
+            user_id,
+            'listing',
+            'A plane you are watching is for sale',
+            f'{title} is on the marketplace.',
+            '/',
+            person.get('email'),
+        )
+
+
 def listings_for_user(user_id, include_off_market=False):
     with get_session() as s:
         rows = (
@@ -1808,6 +2068,8 @@ def listings_for_user(user_id, include_off_market=False):
                 'place': place,
                 'serial_number': row.serial_number or '',
                 'year': row.year,
+                'engine_type': row.engine_type or '',
+                'manufacturer': row.manufacturer or '',
             })
         return out
 

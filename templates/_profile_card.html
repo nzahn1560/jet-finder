@@ -6,36 +6,41 @@
         margin-bottom: 2rem;
     }
     .identity__banner {
-        height: 140px;
+        height: 240px;
         background: #1a1a1a center/cover no-repeat;
     }
     .identity__body {
         display: grid;
-        grid-template-columns: 96px 1fr;
-        gap: 1rem 1.25rem;
-        padding: 0 1.5rem 1.5rem;
-        margin-top: -42px;
+        grid-template-columns: 168px 1fr;
+        gap: 1.25rem 1.75rem;
+        padding: 0 2rem 2rem;
+        margin-top: -72px;
     }
     .identity__photo {
-        width: 96px;
-        height: 96px;
+        width: 168px;
+        height: 168px;
         border-radius: 50%;
-        border: 3px solid #111;
+        border: 4px solid #111;
         background: #2a2a2a center/cover no-repeat;
         display: grid;
         place-items: center;
         color: #fff;
         font-weight: 700;
+        font-size: 2.6rem;
+        letter-spacing: 0.04em;
     }
     .identity__name {
-        margin: 2.6rem 0 0.35rem;
+        margin: 4.2rem 0 0.45rem;
         color: #fff;
-        font-size: 1.7rem;
+        font-size: 2.6rem;
         font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
     }
     .identity__line {
-        margin: 0.15rem 0;
-        color: #d0d0d0;
+        margin: 0.3rem 0;
+        color: #f3f3f3;
+        font-size: 1.25rem;
     }
     .identity__line a { color: #fff; }
     .identity__edit-btn {
@@ -79,9 +84,9 @@
         color: #fff;
         border: 1px solid rgba(255,255,255,0.2);
         border-radius: 999px;
-        padding: 0.35rem 0.75rem;
+        padding: 0.55rem 1rem;
         cursor: pointer;
-        font-size: 0.85rem;
+        font-size: 1.05rem;
     }
     @media (max-width: 640px) {
         .identity__body { grid-template-columns: 1fr; padding: 0 1rem 1.25rem; }
@@ -123,6 +128,9 @@
             {% endif %}
             {% if user.email %}
             <p class="identity__line"><a href="mailto:{{ user.email }}">{{ user.email }}</a></p>
+            {% endif %}
+            {% if is_owner and user.broker_application_status == 'pending' %}
+            <p class="identity__line">Broker application is waiting for approval.</p>
             {% endif %}
             {% if is_owner %}
             <button type="button" class="identity__edit-btn" id="open-profile-edit">Edit</button>

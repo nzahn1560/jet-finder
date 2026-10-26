@@ -518,6 +518,8 @@ def _team_map_point(team):
         'logo': team.get('logo_url') or '',
         'bio': team.get('bio') or '',
         'member_count': len(members),
+        'category': team.get('category') or '',
+        'leader': next((' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) for member in members if member.get('is_admin')), ''),
     }
 
 
@@ -553,6 +555,7 @@ def api_broker_team_detail(team_id):
         'name': team.get('name'),
         'place': team.get('location') or '',
         'logo': team.get('logo_url') or '',
+        'category': team.get('category') or '',
         'brokers': people,
     })
 
@@ -568,6 +571,19 @@ def api_broker_team_join(team_id):
     status = db_module.request_team_join(team_id, user['id'])
     if not status:
         return jsonify({'error': 'not_found'}), 404
+    if status == 'pending':
+        team = db_module.get_broker_team(team_id) or {}
+        leader = get_user_by_id(team.get('admin_user_id')) if team.get('admin_user_id') else None
+        applicant = ' '.join(part for part in [user.get('first_name'), user.get('last_name')] if part) or user.get('email')
+        if leader:
+            db_module.notify_user(
+                leader['id'],
+                'team',
+                'A broker wants to join your brokerage',
+                f'{applicant} asked to join {team.get("name") or "your brokerage"}.',
+                '/dashboard',
+                leader.get('email'),
+            )
     return jsonify({'ok': True, 'status': status}), 200
 
 
@@ -579,6 +595,7 @@ def api_broker_team_allow(team_id, member_id):
     if not db_module.allow_team_member(team_id, user['id'], member_id):
         return jsonify({'error': 'forbidden'}), 403
     db_module.update_user_profile(member_id, {'profile_role': 'broker'})
+    db_module.set_broker_application(member_id, 'approved')
     return jsonify({'ok': True}), 200
 
 
@@ -610,11 +627,13 @@ def api_team_checkout():
             logo_url=user.get('company_logo_url'),
             active=False,
         )
+    db_module.set_broker_application(user['id'], 'pending')
     if not _stripe_configured():
         return jsonify({
             'error': 'payment_not_ready',
             'team_id': team_id,
-            'message': 'A team is $19.99 a month. Card checkout is not connected on this server yet, so the team is not on the map.',
+            'application': 'pending',
+            'message': 'This brokerage is waiting for approval.',
         }), 503
     base = request.host_url.rstrip('/')
     try:
@@ -1255,6 +1274,17 @@ def public_profile(user_id):
         pending_members=pending_members,
         teams=teams,
     )
+
+
+@app.route('/api/people/<int:user_id>/listings')
+def api_public_person_listings(user_id):
+    """Active listings a visitor can see on a seller or broker profile."""
+    person = get_user_by_id(user_id)
+    if not person or person.get('is_suspended'):
+        return jsonify({'error': 'not_found'}), 404
+    viewer = get_current_user_from_request()
+    include_off_market = _broker_market_access(viewer)
+    return jsonify({'listings': db_module.listings_for_user(user_id, include_off_market=include_off_market)})
 
 @app.route('/airplane-stock-market')
 def airplane_stock_market():
@@ -2878,6 +2908,8 @@ def api_auth_signup():
     if user_id is None:
         return jsonify({'error': 'server_error'}), 500
     user_id = cast(int, user_id)
+    if wants_broker:
+        db_module.set_broker_application(user_id, 'pending')
     session['user_id'] = user_id
     token = _start_jet_session(user_id)
     _maybe_promote_admin(user_id, email)
@@ -2962,6 +2994,7 @@ def api_profile():
         on_team = bool(db_module.user_on_active_team(user['id']))
         if requested == 'broker' and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
             data.pop('profile_role', None)
+            db_module.set_broker_application(user['id'], 'pending')
             broker_checkout_required = True
         if 'roles' in data and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
             kept = [role for role in authz.clean_roles(data.get('roles')).split(',') if role and role != 'broker']
@@ -2995,6 +3028,7 @@ def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subsc
         activated_at=datetime.utcnow(),
     )
     db_module.update_user_profile(user_id, {'profile_role': 'broker'})
+    db_module.set_broker_application(user_id, 'approved')
 
 
 def _broker_market_access(user) -> bool:
@@ -3064,10 +3098,12 @@ def api_broker_checkout():
     import authz
     if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
         return jsonify({'already': True}), 200
+    db_module.set_broker_application(user['id'], 'pending')
     if not _stripe_configured():
         return jsonify({
             'error': 'payment_not_ready',
-            'message': 'A broker who is not on a team pays $19.99 a month. Card checkout is not connected on this server yet, so the broker role stays off.',
+            'application': 'pending',
+            'message': 'Your broker application is waiting for approval. $19.99 a month.',
         }), 503
     base = request.host_url.rstrip('/')
     try:
@@ -3162,6 +3198,25 @@ def api_profile_saved():
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     return jsonify({'ok': True, 'id': saved_id, 'kind': kind, 'target_id': str(target_id)}), 201
+
+
+@app.route('/api/notifications', methods=['GET'])
+@require_auth
+def api_notifications():
+    user = request.current_user  # type: ignore[attr-defined]
+    notes = db_module.list_notifications(user['id'])
+    return jsonify({
+        'notifications': notes,
+        'unread': db_module.unread_notification_count(user['id']),
+    })
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@require_auth
+def api_notifications_read():
+    user = request.current_user  # type: ignore[attr-defined]
+    db_module.mark_notifications_read(user['id'])
+    return jsonify({'ok': True})
 
 
 # Pro subscription removed - upgrade route removed
@@ -5200,8 +5255,26 @@ def _active_market_listings():
             continue
         combined = _row_to_combined_listing(row, aircraft_map)
         if combined:
-            listings.append(_public_market_listing(combined))
+            public = _public_market_listing(combined)
+            public.update(_seller_public(row.get('user_id')))
+            listings.append(public)
     return listings
+
+
+def _seller_public(user_id):
+    """Brokerage shown on a listing. The spreadsheet stays off this payload."""
+    if not user_id:
+        return {}
+    person = get_user_by_id(user_id) or {}
+    membership = db_module.team_membership(user_id) or {}
+    on_team = membership.get('membership_status') == 'active' and membership.get('subscription_status') == 'active'
+    name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part)
+    return {
+        'seller_id': user_id,
+        'seller_name': name,
+        'brokerage_name': membership.get('name') if on_team else (person.get('company') or ''),
+        'brokerage_category': membership.get('category') if on_team else '',
+    }
 
 
 def _admin_addresses():
@@ -6377,6 +6450,113 @@ def api_admin_users():
         return jsonify({'error': 'server_error'}), 500
 
 
+@app.route('/api/admin/approvals')
+@require_admin
+def api_admin_approvals():
+    """Everything waiting on the site admin: brokers, brokerages, and team members."""
+    return jsonify({
+        'brokers': db_module.list_broker_applications('pending'),
+        'brokerages': [team for team in db_module.list_teams_for_admin() if team.get('subscription_status') != 'active'],
+        'members': db_module.list_pending_memberships(),
+        'categories': list(db_module.BROKERAGE_CATEGORIES),
+    })
+
+
+@app.route('/api/admin/brokerages')
+@require_admin
+def api_admin_brokerages():
+    return jsonify({
+        'brokerages': db_module.list_teams_for_admin(),
+        'categories': list(db_module.BROKERAGE_CATEGORIES),
+    })
+
+
+@app.route('/api/admin/brokers/<int:user_id>/approve', methods=['POST'])
+@require_admin
+def api_admin_approve_broker(user_id):
+    person = get_user_by_id(user_id)
+    if not person:
+        return jsonify({'error': 'not_found'}), 404
+    _grant_broker_account(user_id)
+    db_module.notify_user(
+        user_id, 'broker', 'Broker access is approved',
+        'Your broker application is approved.', '/dashboard', person.get('email'),
+    )
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/brokers/<int:user_id>/deny', methods=['POST'])
+@require_admin
+def api_admin_deny_broker(user_id):
+    person = get_user_by_id(user_id)
+    if not person:
+        return jsonify({'error': 'not_found'}), 404
+    db_module.set_broker_application(user_id, 'denied')
+    db_module.notify_user(
+        user_id, 'broker', 'Broker application was not approved',
+        'Your broker application was not approved.', '/dashboard', person.get('email'),
+    )
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/brokerages/<int:team_id>/approve', methods=['POST'])
+@require_admin
+def api_admin_approve_brokerage(team_id):
+    team = db_module.get_broker_team(team_id)
+    if not team:
+        return jsonify({'error': 'not_found'}), 404
+    db_module.set_team_subscription(team_id, 'active')
+    _grant_broker_account(team['admin_user_id'], subscription_type='broker_team')
+    leader = get_user_by_id(team['admin_user_id'])
+    if leader:
+        db_module.notify_user(
+            leader['id'], 'brokerage', 'Your brokerage is approved',
+            f'{team.get("name") or "Your brokerage"} is on the broker map.',
+            '/brokers', leader.get('email'),
+        )
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/brokerages/<int:team_id>/category', methods=['POST'])
+@require_admin
+def api_admin_brokerage_category(team_id):
+    category = ((request.get_json(silent=True) or {}).get('category') or '').strip()
+    if not db_module.set_team_category(team_id, category):
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify({'ok': True, 'category': category})
+
+
+@app.route('/api/admin/brokerages/<int:team_id>/leader', methods=['POST'])
+@require_admin
+def api_admin_brokerage_leader(team_id):
+    try:
+        user_id = int((request.get_json(silent=True) or {}).get('user_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'missing_fields'}), 400
+    if not db_module.set_team_leader(team_id, user_id):
+        return jsonify({'error': 'not_found'}), 404
+    db_module.update_user_profile(user_id, {'profile_role': 'broker'})
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/brokerages/<int:team_id>/members/<int:member_id>/approve', methods=['POST'])
+@require_admin
+def api_admin_approve_member(team_id, member_id):
+    if not db_module.admin_allow_team_member(team_id, member_id):
+        return jsonify({'error': 'not_found'}), 404
+    db_module.update_user_profile(member_id, {'profile_role': 'broker'})
+    db_module.set_broker_application(member_id, 'approved')
+    person = get_user_by_id(member_id)
+    team = db_module.get_broker_team(team_id) or {}
+    if person:
+        db_module.notify_user(
+            member_id, 'team', 'You are on the brokerage',
+            f'You are approved for {team.get("name") or "the brokerage"}.',
+            '/dashboard', person.get('email'),
+        )
+    return jsonify({'ok': True})
+
+
 @app.route('/api/admin/listings/<int:listing_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_listing(listing_id):
@@ -6520,6 +6700,7 @@ def admin_approve_listing(listing_id):
             return jsonify({'error': 'server_error'}), 500
         db_module.record_listing_audit(listing_id, admin['id'], 'approve', previous, 'active', None)
         _mail_listing_status(existing.get('email'), existing.get('title'), 'approved', None)
+        db_module.notify_watchers_of_listing(existing)
         return jsonify({'ok': True, 'status': 'active'}), 200
     except Exception:
         logger.exception("Error approving listing")

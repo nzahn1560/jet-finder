@@ -397,14 +397,14 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('my_listings') }}">
-                                <i class="fas fa-list me-2"></i>My listings
+                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#alerts">
+                                <i class="fas fa-bell me-2"></i>Alerts <span id="nav-alert-count"></span>
                             </a>
                         </li>
                         {% if current_user.is_admin %}
                         <li>
                             <a class="dropdown-item" href="{{ url_for('admin_index') }}">
-                                <i class="fas fa-user-shield me-2"></i>Approve listings
+                                <i class="fas fa-user-shield me-2"></i>Approvals
                             </a>
                         </li>
                         {% endif %}
@@ -456,6 +456,14 @@
                 }
             });
         });
+
+        {% if current_user %}
+        fetch('/api/notifications', { credentials: 'include' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+            const slot = document.getElementById('nav-alert-count');
+            if (!slot || !data || !data.unread) return;
+            slot.textContent = '(' + data.unread + ')';
+        }).catch(function () {});
+        {% endif %}
 
         // Universal share helper
         async function universalShare(shareData) {
