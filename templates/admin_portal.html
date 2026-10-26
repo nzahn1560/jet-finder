@@ -57,6 +57,8 @@
 
         <div class="ap__tabs">
             <button class="ap__tab active" data-tab="listings">Listings</button>
+            <button class="ap__tab" data-tab="approvals">Approvals</button>
+            <button class="ap__tab" data-tab="brokerages">Brokerages</button>
             <button class="ap__tab" data-tab="users">Users</button>
         </div>
 
@@ -76,6 +78,12 @@
             <div id="listings-list"></div>
         </div>
 
+        <div id="tab-approvals" style="display:none;">
+            <div id="approvals-list"></div>
+        </div>
+        <div id="tab-brokerages" style="display:none;">
+            <div id="brokerages-list"></div>
+        </div>
         <div id="tab-users" style="display:none;">
             <div id="users-list"></div>
         </div>
@@ -248,8 +256,12 @@ document.querySelectorAll('.ap__tab').forEach(function (t) {
         t.classList.add('active');
         const tab = t.getAttribute('data-tab');
         document.getElementById('tab-listings').style.display = (tab === 'listings') ? '' : 'none';
+        document.getElementById('tab-approvals').style.display = (tab === 'approvals') ? '' : 'none';
+        document.getElementById('tab-brokerages').style.display = (tab === 'brokerages') ? '' : 'none';
         document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
         if (tab === 'users') loadAdminUsers();
+        if (tab === 'approvals') loadApprovals();
+        if (tab === 'brokerages') loadBrokerages();
     });
 });
 
@@ -365,6 +377,112 @@ document.getElementById('review-reject').addEventListener('click', async functio
     });
     if (response.ok) { closeReview(); loadAdminListings(); }
 });
+
+async function postAdmin(url) {
+    const response = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!response.ok) {
+        const err = await response.json().catch(function () { return {}; });
+        alert(err.message || err.error || 'Action failed');
+        return false;
+    }
+    return true;
+}
+
+async function loadApprovals() {
+    const target = document.getElementById('approvals-list');
+    target.innerHTML = '<div class="ap__empty">Loading...</div>';
+    const response = await fetch('/api/admin/approvals', { credentials: 'include' });
+    if (!response.ok) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
+    const data = await response.json();
+    const brokers = (data.brokers || []).map(function (person) {
+        const name = ((person.first_name || '') + ' ' + (person.last_name || '')).trim() || person.email;
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(person.email) + '<br>Broker application</div>'
+            + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
+            + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div>';
+    }).join('');
+    const brokerages = (data.brokerages || []).map(function (team) {
+        const leader = team.leader ? team.leader.name : 'No leader';
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(team.name) + '</strong><br>Leader ' + esc(leader) + '</div>'
+            + '<button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div></div>';
+    }).join('');
+    const members = (data.members || []).map(function (member) {
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' · ' + esc(member.team_name) + '</div>'
+            + '<button class="ap__btn ap__btn--approve" data-approve-member="' + member.team_id + ':' + member.user_id + '">Approve</button></div></div>';
+    }).join('');
+    target.innerHTML = (brokers || brokerages || members) ? (brokers + brokerages + members) : '<div class="ap__empty">Nothing is waiting for approval.</div>';
+    target.querySelectorAll('[data-approve-broker]').forEach(function (btn) {
+        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-approve-broker') + '/approve')) loadApprovals(); });
+    });
+    target.querySelectorAll('[data-deny-broker]').forEach(function (btn) {
+        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals(); });
+    });
+    target.querySelectorAll('[data-approve-team]').forEach(function (btn) {
+        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokerages/' + btn.getAttribute('data-approve-team') + '/approve')) loadApprovals(); });
+    });
+    target.querySelectorAll('[data-approve-member]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+            const parts = btn.getAttribute('data-approve-member').split(':');
+            if (await postAdmin('/api/admin/brokerages/' + parts[0] + '/members/' + parts[1] + '/approve')) loadApprovals();
+        });
+    });
+}
+
+async function loadBrokerages() {
+    const target = document.getElementById('brokerages-list');
+    target.innerHTML = '<div class="ap__empty">Loading...</div>';
+    const response = await fetch('/api/admin/brokerages', { credentials: 'include' });
+    if (!response.ok) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
+    const data = await response.json();
+    const categories = data.categories || [];
+    const teams = data.brokerages || [];
+    if (!teams.length) { target.innerHTML = '<div class="ap__empty">No brokerages yet.</div>'; return; }
+    target.innerHTML = teams.map(function (team) {
+        const options = [''].concat(categories).map(function (category) {
+            return '<option value="' + esc(category) + '"' + (team.category === category ? ' selected' : '') + '>' + esc(category || 'Category') + '</option>';
+        }).join('');
+        const members = (team.members || []).map(function (member) {
+            const name = ((member.first_name || '') + ' ' + (member.last_name || '')).trim() || member.email;
+            const leader = member.is_admin ? ' · Leader' : '';
+            return '<div style="display:flex; gap:0.6rem; align-items:center; margin-top:0.45rem;"><span>' + esc(name) + esc(leader) + ' · ' + esc(member.status) + '</span>'
+                + (member.is_admin ? '' : '<button class="ap__btn ap__btn--secondary" data-leader="' + team.id + ':' + member.user_id + '">Make leader</button>')
+                + (member.status === 'pending' ? '<button class="ap__btn ap__btn--approve" data-approve-member="' + team.id + ':' + member.user_id + '">Approve</button>' : '')
+                + '</div>';
+        }).join('');
+        return '<div class="ap__card"><strong style="color:#fff; font-size:1.2rem;">' + esc(team.name) + '</strong>'
+            + '<div class="ap__col">Leader ' + esc(team.leader ? team.leader.name : '—') + ' · ' + esc(team.subscription_status) + '</div>'
+            + '<div style="margin-top:0.6rem;"><select data-category="' + team.id + '">' + options + '</select></div>'
+            + members
+            + (team.subscription_status === 'active' ? '' : '<div style="margin-top:0.7rem;"><button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div>')
+            + '</div>';
+    }).join('');
+    target.querySelectorAll('[data-category]').forEach(function (select) {
+        select.addEventListener('change', async function () {
+            await fetch('/api/admin/brokerages/' + select.getAttribute('data-category') + '/category', {
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category: select.value }),
+            });
+        });
+    });
+    target.querySelectorAll('[data-leader]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+            const parts = btn.getAttribute('data-leader').split(':');
+            const response = await fetch('/api/admin/brokerages/' + parts[0] + '/leader', {
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: Number(parts[1]) }),
+            });
+            if (response.ok) loadBrokerages();
+        });
+    });
+    target.querySelectorAll('[data-approve-member]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+            const parts = btn.getAttribute('data-approve-member').split(':');
+            if (await postAdmin('/api/admin/brokerages/' + parts[0] + '/members/' + parts[1] + '/approve')) loadBrokerages();
+        });
+    });
+    target.querySelectorAll('[data-approve-team]').forEach(function (btn) {
+        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokerages/' + btn.getAttribute('data-approve-team') + '/approve')) loadBrokerages(); });
+    });
+}
 
 document.getElementById('status-filter').addEventListener('change', loadAdminListings);
 document.getElementById('refresh-listings').addEventListener('click', loadAdminListings);

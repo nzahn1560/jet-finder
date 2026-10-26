@@ -73,6 +73,8 @@
             + '<div class="broker-mini__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : initial) + '</div>'
             + '<strong>' + esc(team.display_name) + '</strong>'
             + '<span>' + count + (count === 1 ? ' broker' : ' brokers') + '</span>'
+            + (team.category ? '<span>' + esc(team.category) + '</span>' : '')
+            + (team.leader ? '<span>Leader · ' + esc(team.leader) + '</span>' : '')
             + (team.place ? '<span class="broker-mini__place">' + esc(team.place) + '</span>' : '')
             + '</div>';
     }
@@ -91,7 +93,7 @@
             const listings = (broker.listings || []).map(listingHtml).join('');
             return '<article class="broker-person" style="cursor:default;">'
                 + '<span class="broker-person__photo" style="' + photoStyle(broker.photo) + '">' + (broker.photo ? '' : esc((broker.name || 'B').slice(0, 1))) + '</span>'
-                + '<span><strong><a href="/people/' + broker.user_id + '" style="color:inherit;text-decoration:none;">' + esc(broker.name) + '</a>' + (broker.is_admin ? ' · Admin' : '') + '</strong>'
+                + '<span><strong><a href="/people/' + broker.user_id + '" style="color:inherit;text-decoration:none;">' + esc(broker.name) + '</a>' + (broker.is_admin ? ' · Leader' : '') + '</strong>'
                 + (broker.specialties ? '<em>' + esc(broker.specialties) + '</em>' : '')
                 + (listings ? '<ul style="margin:0.35rem 0 0; padding-left:1rem;">' + listings + '</ul>' : '<em>No public listings yet.</em>')
                 + '</span></article>';
@@ -134,7 +136,7 @@
             return '<button type="button" class="broker-person' + (team.id === activeId ? ' is-selected' : '') + '" data-id="' + team.id + '">'
                 + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'T').slice(0, 1))) + '</span>'
                 + '<span><strong>' + esc(team.display_name) + '</strong>'
-                + '<em>' + esc(team.place || 'Brokerage') + '</em></span>'
+                + '<em>' + esc([team.category, team.place || 'Brokerage'].filter(Boolean).join(' · ')) + '</em></span>'
                 + '</button>';
         }).join('');
         listEl.querySelectorAll('.broker-person').forEach(function (button) {
