@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app
+from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app, Response
 import os
 import io
 import json
+import hashlib
+import secrets
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any, cast
 
@@ -1522,7 +1525,7 @@ def api_debug():
 
 @app.route('/api/health')
 def api_health():
-    """Health check: db_ok, table counts (incl. accounts), data source (Railway debugging)."""
+    """Public health check. Catalog size only; no account or session counts."""
     try:
         db_status = db_module.get_database_status()
         airports_data = _load_airports_data()
@@ -1532,21 +1535,12 @@ def api_health():
         is_pg = _is_railway_postgres()
         aircraft_src = 'postgres' if (aircraft_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_cache')
         airports_src = 'postgres' if (airports_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_fallback')
-        tc = db_status.get('table_counts', {}) or {}
-        accounts = {
-            'users': tc.get('users', 0),
-            'user_sessions': tc.get('user_sessions', 0),
-            'user_listings': tc.get('user_listings', 0),
-        }
         return jsonify({
             'status': 'ok' if db_status['db_ok'] else 'db_error',
             'timestamp': int(datetime.now().timestamp() * 1000),
             'db_ok': db_status['db_ok'],
             'database_type': db_status['database_type'],
-            'connection_error': db_status.get('connection_error'),
-            'table_counts': tc,
-            'accounts': accounts,
-            'safety': db_module.safety_status(),
+            'db_error': bool(db_status.get('connection_error')),
             'aircraft_count': aircraft_count,
             'airports_count': airports_count,
             'aircraft_source': aircraft_src,
@@ -1556,9 +1550,9 @@ def api_health():
                 'Search data empty - check Postgres seed and Railway logs' if is_pg else 'Using file/cache fallback'
             ),
         }), 200
-    except Exception as e:
+    except Exception:
         logger.exception("Error in /api/health")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'db_error': True}), 500
 
 
 @app.route('/api/data-safety')
@@ -1574,41 +1568,26 @@ def api_data_safety():
     """
     try:
         safety = db_module.safety_status()
-        db_status = db_module.get_database_status()
-        tc = db_status.get('table_counts', {}) or {}
         listings_storage = 'postgres' if safety.get('database_type') == 'postgresql' else 'sqlite_or_other'
         try:
             r2 = _r2.storage_status()
         except Exception:
-            r2 = {'r2_configured': False, 'error': 'r2 module not loaded'}
+            r2 = {'r2_configured': False}
         return jsonify({
             'is_production': safety['is_production'],
             'destructive_ops_blocked': safety['is_production'] and not safety['destructive_ops_override_set'],
-            'destructive_ops_override_set': safety['destructive_ops_override_set'],
             'database_type': safety['database_type'],
             'listings_storage': listings_storage,
             'media_storage': 'cloudflare_r2' if r2.get('r2_configured') else (
                 'local_dev_fallback' if r2.get('local_dev_fallback_active') else 'not_configured'
             ),
-            'r2': r2,
-            'json_file_writes_blocked_in_prod': True,  # enforced in marketplace.py
-            'init_db_is_additive_only': True,           # documented contract in db.py
-            'counts': {
-                'users': tc.get('users', 0),
-                'user_sessions': tc.get('user_sessions', 0),
-                'user_listings': tc.get('user_listings', 0),
-                'listing_media': tc.get('listing_media', 0),
-            },
-            'notes': [
-                'init_db() only does CREATE TABLE IF NOT EXISTS and ADD COLUMN IF NOT EXISTS.',
-                'No code path writes user accounts or listings to JSON/CSV/SQLite in production.',
-                'Listing photos/videos are stored in Cloudflare R2; PostgreSQL only stores metadata.',
-                'See BACKUPS.md before running any destructive operation.',
-            ],
+            'r2_configured': bool(r2.get('r2_configured')),
+            'json_file_writes_blocked_in_prod': True,
+            'init_db_is_additive_only': True,
         }), 200
-    except Exception as e:
+    except Exception:
         logger.exception('api_data_safety failed')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'unavailable'}), 500
 
 
 @app.route('/api/data-source')
@@ -1624,51 +1603,32 @@ def api_data_source():
         return jsonify({
             'database_connected': db_status['db_ok'],
             'database_type': db_status['database_type'],
+            'db_error': bool(db_status.get('connection_error')),
             'aircraft_count': ac_count,
             'airports_count': ap_count,
             'aircraft_source': 'postgres' if (ac_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_cache'),
             'airports_source': 'postgres' if (ap_count and db_status['db_ok']) else ('postgres_empty' if is_pg else 'file_or_fallback'),
-            'table_counts': db_status.get('table_counts', {}),
             'message': 'Search data is served from Postgres' if (db_status['db_ok'] and (ac_count or ap_count)) else (
                 'Search data is empty - check seed and Railway logs' if is_pg else 'Search data from file/cache (local fallback)'
             ),
         }), 200
-    except Exception as e:
+    except Exception:
         logger.exception("Error in /api/data-source")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'unavailable'}), 500
 
 
 @app.route('/api/diagnostic')
 def api_diagnostic():
-    """Railway debugging: DB status, table counts, connection errors, file fallbacks (no secrets)."""
-    _base = Path(__file__).resolve().parent
-    aircraft_candidates = [
-        _base / 'static' / 'data' / 'aircraft_data.csv',
-        _base / 'Aircraft Data - Aircraft Data (1).csv',
-        _base / 'static' / 'data' / 'Aircraft Data - Aircraft Data (1).csv',
-    ]
-    airports_candidates = [
-        _base / 'static' / 'data' / 'airports.json',
-        _base / 'airports.json',
-    ]
-    aircraft_found = next((str(p) for p in aircraft_candidates if p.is_file()), None)
-    airports_found = next((str(p) for p in airports_candidates if p.is_file()), None)
-    db_url = os.environ.get('DATABASE_URL', '')
+    """Public diagnostic. Catalog size and database reachability only."""
     db_status = db_module.get_database_status()
     ap_data = _load_airports_data()
     airports_count = len(ap_data) if isinstance(ap_data, list) else 0
     ac_data = get_unified_aircraft_data()
     return jsonify({
-        'app_root': str(_base),
-        'has_database_url': bool(db_url),
+        'has_database_url': bool(os.environ.get('DATABASE_URL')),
         'database_type': db_status['database_type'],
         'db_ok': db_status['db_ok'],
-        'connection_error': db_status.get('connection_error'),
-        'table_counts': db_status.get('table_counts', {}),
-        'aircraft_paths_tried': [str(p) for p in aircraft_candidates],
-        'aircraft_file_found': aircraft_found,
-        'airports_paths_tried': [str(p) for p in airports_candidates],
-        'airports_file_found': airports_found,
+        'db_error': bool(db_status.get('connection_error')),
         'aircraft_count': len(ac_data),
         'airports_count': airports_count,
     }), 200
@@ -2673,9 +2633,32 @@ def register():
     return render_template('auth/register.html')
 
 
-@app.route('/logout')
+def _csrf_token() -> str:
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return str(token)
+
+
+def _csrf_matches() -> bool:
+    sent = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token') or ''
+    expected = session.get('_csrf_token') or ''
+    if not sent or not expected:
+        return False
+    return secrets.compare_digest(str(expected), str(sent))
+
+
+@app.context_processor
+def _inject_csrf():
+    return {'csrf_token': _csrf_token}
+
+
+@app.route('/logout', methods=['GET', 'POST'])
 def logout():
-    """User logout (clears Flask session AND jet_session cookie)."""
+    """Log out only from a same-session POST. A plain GET cannot clear the cookie."""
+    if request.method != 'POST' or not _csrf_matches():
+        return render_template('logout_confirm.html'), (200 if request.method == 'GET' else 400)
     token = request.cookies.get(JET_SESSION_COOKIE)
     if token:
         try:
@@ -2837,27 +2820,69 @@ def terms():
     return render_template('legal/terms.html')
 
 
+@app.route('/refunds')
+def refunds():
+    return render_template('legal/refunds.html')
+
+
+_SITEMAP_PAGES = ('/', '/privacy', '/terms', '/refunds', '/brokers')
+_ROBOTS_PRIVATE = (
+    '/admin', '/api/', '/dashboard', '/profile', '/my-listings', '/create-listing',
+    '/off-market', '/logout', '/login', '/register', '/forgot-password', '/reset-password',
+)
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    base = request.url_root.rstrip('/')
+    lines = ['User-agent: *', 'Allow: /']
+    lines.extend(f'Disallow: {path}' for path in _ROBOTS_PRIVATE)
+    lines.append(f'Sitemap: {base}/sitemap.xml')
+    return Response('\n'.join(lines) + '\n', mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    """Public pages and approved public listings. Broker-only rows stay out."""
+    base = request.url_root.rstrip('/')
+    locs = [base + '/' if path == '/' else base + path for path in _SITEMAP_PAGES]
+    for row in db_module.get_active_user_listings():
+        if sections_module.normalize_market(row.get('market')) != 'public':
+            continue
+        locs.append(f"{base}/listing/{int(row['id'])}")
+    body = ['<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    body.extend(f'<url><loc>{html_escape(loc)}</loc></url>' for loc in locs)
+    body.append('</urlset>')
+    return Response('\n'.join(body) + '\n', mimetype='application/xml')
+
+
 # =============================================================================
 # /api/auth/* JSON endpoints (used by SPA-style fetch calls).
 # All set/clear the `jet_session` HttpOnly cookie.
 # Frontends MUST call these with `credentials: 'include'`.
 # =============================================================================
 
-# Minimal in-process rate limiter for /api/auth/{signup,login}.
-# (Plenty for current traffic; swap in flask-limiter later if needed.)
-_AUTH_RATE_LIMITS: dict[str, list[float]] = {}
 _AUTH_MAX_PER_MIN = 10
 
 
 def _auth_rate_limited() -> bool:
-    """True if the caller's IP has exceeded the rate budget in the last 60s."""
-    import time
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown').split(',')[0].strip()
-    now = time.time()
-    bucket = [t for t in _AUTH_RATE_LIMITS.get(ip, []) if now - t < 60]
-    bucket.append(now)
-    _AUTH_RATE_LIMITS[ip] = bucket
-    return len(bucket) > _AUTH_MAX_PER_MIN
+    """True when this client is over the shared per-minute budget.
+
+    The counter lives in the database, so both Gunicorn workers share it.
+    In production the closest proxy hop is used. A caller-supplied first hop is not.
+    Local development stays unlimited so a single test process is not locked out.
+    """
+    if not db_module.is_production():
+        return False
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    parts = [part.strip() for part in forwarded.split(',') if part.strip()]
+    if db_module.is_production() and parts:
+        ip = parts[-1]
+    else:
+        ip = request.remote_addr or (parts[0] if parts else 'unknown')
+    bucket = hashlib.sha256(ip.encode('utf-8')).hexdigest()
+    return db_module.consume_auth_rate(bucket, limit=_AUTH_MAX_PER_MIN, window_seconds=60)
 
 
 def _user_public_dict(user) -> dict:
@@ -2947,7 +2972,10 @@ def api_auth_login():
 
 @app.route('/api/auth/logout', methods=['POST'])
 def api_auth_logout():
-    """Delete session row from DB and clear cookie. Always returns 200."""
+    """Delete session row from DB and clear cookie. Cross-site Origin is refused."""
+    origin = (request.headers.get('Origin') or '').rstrip('/')
+    if origin and origin != request.host_url.rstrip('/'):
+        return jsonify({'error': 'csrf'}), 403
     token = request.cookies.get(JET_SESSION_COOKIE)
     if token:
         try:
@@ -3242,20 +3270,21 @@ def aircraft_recommendations():
 @login_required
 def create_listing():
     """Create listing page. A normal form post saves the listing even if page script fails."""
+    user = get_current_user_from_request()
     if request.method == 'POST':
-        user = get_current_user_from_request()
         result, err = _create_listing_for_user(user, _listing_data_from_form(request.form, user))
         if err:
             payload, status = err
             return render_template(
                 'create_listing.html',
                 form_error=payload.get('message') or 'Could not save the listing.',
+                off_market_allowed=_broker_market_access(user),
             ), status
         listing_id = result['id']
         if user and user.get('is_admin'):
             return redirect(url_for('admin_index', highlight=listing_id))
         return redirect(url_for('dashboard', submitted=listing_id))
-    return render_template('create_listing.html')
+    return render_template('create_listing.html', off_market_allowed=_broker_market_access(user))
 
 @app.route('/my-listings')
 @login_required
@@ -5258,6 +5287,7 @@ def _active_market_listings():
             public = _public_market_listing(combined)
             public.update(_seller_public(row.get('user_id')))
             listings.append(public)
+    _attach_listing_photos(listings)
     return listings
 
 
@@ -5664,6 +5694,54 @@ def _listing_data_from_form(form, user):
     }
 
 
+def _listing_market_choice(user, raw):
+    """A listing is public, or off-market for a broker. Private is not a choice."""
+    market = sections_module.normalize_market(raw)
+    if market == 'private':
+        return None, ({
+            'error': 'invalid_market',
+            'message': 'A listing is either public or off market.',
+        }, 400)
+    if market == 'broker_only' and not _broker_market_access(user):
+        return None, ({
+            'error': 'broker_required',
+            'message': 'Off-market listings are available on a broker account.',
+        }, 403)
+    return market, None
+
+
+def _attach_listing_photos(listings):
+    """Photo URLs a buyer can thumb through. Object keys stay off this payload."""
+    ids = []
+    for item in listings:
+        try:
+            ids.append(int(item.get('listing_id') or item.get('id')))
+        except (TypeError, ValueError):
+            continue
+    media_map = db_module.list_media_for_listings(ids) if ids else {}
+    for item in listings:
+        try:
+            listing_id = int(item.get('listing_id') or item.get('id'))
+        except (TypeError, ValueError):
+            listing_id = None
+        photos = []
+        for media in media_map.get(listing_id, []) if listing_id else []:
+            if media.get('media_type') != 'photo':
+                continue
+            url = media.get('url') or media.get('thumbnail_url')
+            if url and url not in photos:
+                photos.append(url)
+        extra = item.get('images') or []
+        if isinstance(extra, str):
+            extra = [part.strip() for part in extra.split(',') if part.strip()]
+        for url in extra:
+            if url and url not in photos:
+                photos.append(url)
+        item['photos'] = photos
+        if photos:
+            item['image'] = photos[0]
+
+
 def _create_listing_for_user(user, data):
     """Save a listing for this account. Pending review, or unpaid when Stripe is required.
 
@@ -5677,7 +5755,11 @@ def _create_listing_for_user(user, data):
         data['location'] = f'{city}, {state}'
         data['city'] = city
         data['state'] = state
-    off_market = sections_module.normalize_market(data.get('market')) == 'broker_only'
+    market, market_err = _listing_market_choice(user, data.get('market'))
+    if market_err:
+        return None, market_err
+    data['market'] = market
+    off_market = market == 'broker_only'
     if off_market:
         if not str(data.get('title') or '').strip() or data.get('profile_id') in (None, '') or data.get('year') in (None, ''):
             return None, ({
@@ -5848,6 +5930,12 @@ def api_listings_patch(listing_id: int):
     if not is_owner and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(silent=True) or {}
+    if 'market' in data:
+        market, market_err = _listing_market_choice(user, data.get('market'))
+        if market_err:
+            payload, status = market_err
+            return jsonify(payload), status
+        data['market'] = market
     city = str(data.get('city') or '').strip()
     state = str(data.get('state') or '').strip()
     if city and state:
@@ -5989,7 +6077,7 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'url': checkout.url}), 200
     except Exception as e:
         logger.exception('Stripe checkout creation failed')
-        return jsonify({'error': 'stripe_error', 'message': str(e)}), 500
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
 
 
 @app.route('/api/stripe/webhook', methods=['POST'])
@@ -6022,13 +6110,19 @@ def api_stripe_webhook():
         return jsonify({'received': True, 'duplicate': True}), 200
 
     event_type = event.get('type') if isinstance(event, dict) else event.type
-    if event_type == 'checkout.session.completed':
+    if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         sess = event['data']['object'] if isinstance(event, dict) else event.data.object
         session_id = sess.get('id') if isinstance(sess, dict) else sess.id
+        paid_state = sess.get('payment_status') if isinstance(sess, dict) else getattr(sess, 'payment_status', None)
+        if paid_state not in ('paid', 'no_payment_required'):
+            logger.info('Stripe webhook: session %s is %s, not applied', session_id, paid_state)
+            return jsonify({'received': True, 'pending': True}), 200
         if _broker_paid_from_checkout(sess):
             logger.info('Stripe webhook: broker account activated from session %s', session_id)
             return jsonify({'received': True}), 200
-        listing_id = db_module.mark_listing_paid_by_session(session_id)
+        intent = sess.get('payment_intent') if isinstance(sess, dict) else getattr(sess, 'payment_intent', None)
+        intent_id = intent.get('id') if isinstance(intent, dict) else intent
+        listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id)
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
             row = db_module.get_listing_with_owner(listing_id)
@@ -6039,7 +6133,63 @@ def api_stripe_webhook():
                 )
         else:
             logger.warning('Stripe webhook: no listing found for session %s', session_id)
+    elif event_type in ('charge.refunded', 'refund.updated', 'refund.created'):
+        obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+        if not isinstance(obj, dict):
+            obj = dict(obj)
+        listing_id, payment_status = _reconcile_stripe_refund(event_type, obj)
+        if listing_id:
+            logger.info('Stripe webhook: listing %s payment_status %s', listing_id, payment_status)
     return jsonify({'received': True}), 200
+
+
+def _stripe_ref(value):
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value.get('id')
+    return value if isinstance(value, str) else getattr(value, 'id', None)
+
+
+def _reconcile_stripe_refund(event_type: str, obj: dict):
+    """Map a settled Stripe refund onto the listing payment record.
+
+    A pending, failed, or unmatched event does not mark a refund and does not
+    change whether the listing is published.
+    """
+    intent_id = _stripe_ref(obj.get('payment_intent'))
+    payment_status = None
+    if event_type == 'charge.refunded':
+        try:
+            amount = int(obj.get('amount') or 0)
+            refunded_amount = int(obj.get('amount_refunded') or 0)
+        except (TypeError, ValueError):
+            return None, None
+        if refunded_amount <= 0 or amount <= 0:
+            return None, None
+        payment_status = 'refunded' if obj.get('refunded') is True or refunded_amount >= amount else 'partially_refunded'
+    elif obj.get('status') == 'succeeded':
+        try:
+            refund_amount = int(obj.get('amount') or 0)
+        except (TypeError, ValueError):
+            return None, None
+        if refund_amount <= 0:
+            return None, None
+        charge = obj.get('charge') if isinstance(obj.get('charge'), dict) else None
+        if charge:
+            try:
+                charge_amount = int(charge.get('amount') or 0)
+                charge_refunded = int(charge.get('amount_refunded') or refund_amount)
+            except (TypeError, ValueError):
+                return None, None
+            if charge_amount <= 0 or charge_refunded <= 0:
+                return None, None
+            payment_status = 'refunded' if charge.get('refunded') is True or charge_refunded >= charge_amount else 'partially_refunded'
+        else:
+            payment_status = 'refund_recorded'
+    if not payment_status:
+        return None, None
+    return db_module.reconcile_listing_refund(intent_id, payment_status), payment_status
 
 
 @app.route('/api/listings/<int:listing_id>/mine', methods=['GET'])
@@ -6053,6 +6203,9 @@ def api_listing_mine(listing_id: int):
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
     out = dict(row)
+    if not user.get('is_admin'):
+        for private_key in ('admin_notes', 'payment_session_id', 'stripe_payment_intent_id', 'approved_by'):
+            out.pop(private_key, None)
     out['created_at'] = str(out.get('created_at')) if out.get('created_at') else None
     out['updated_at'] = str(out.get('updated_at')) if out.get('updated_at') else None
     out['media'] = db_module.list_listing_media(listing_id)
@@ -6079,9 +6232,21 @@ def _listing_owner_or_admin(listing_id: int, user: dict) -> tuple[dict | None, s
 
 @app.route('/api/listings/<int:listing_id>/media', methods=['GET'])
 def api_listings_media_list(listing_id: int):
-    """Public: ordered media metadata for a listing (for galleries/detail page)."""
+    """Media for a listing the viewer is allowed to see. Pending and off-market stay hidden."""
     try:
-        items = db_module.list_listing_media(listing_id)
+        row = db_module.get_listing_with_owner(listing_id)
+        if not row:
+            return jsonify({'error': 'not_found'}), 404
+        viewer = get_current_user_from_request()
+        owner = bool(viewer and (viewer.get('id') == row.get('user_id') or viewer.get('is_admin')))
+        market = sections_module.normalize_market(row.get('market'))
+        public_ok = row.get('status') == 'active' and market == 'public'
+        broker_ok = row.get('status') == 'active' and market != 'public' and _broker_market_access(viewer)
+        if not (owner or public_ok or broker_ok):
+            return jsonify({'error': 'not_found'}), 404
+        items = []
+        for item in db_module.list_listing_media(listing_id):
+            items.append({key: value for key, value in item.items() if key != 'r2_object_key'})
         return jsonify({'media': items, 'total': len(items)}), 200
     except Exception:
         logger.exception('api_listings_media_list failed')

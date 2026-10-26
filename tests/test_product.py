@@ -47,8 +47,6 @@ class ProductTests(unittest.TestCase):
 
     def setUp(self):
         self.client = app.test_client()
-        import app as app_module
-        app_module._AUTH_RATE_LIMITS.clear()
 
     def _login(self, email, password):
         response = self.client.post('/api/auth/login', json={'email': email, 'password': password})
@@ -89,6 +87,7 @@ class ProductTests(unittest.TestCase):
         created = self.client.post('/api/listings', json=self._payload('Public Jet', 'public'))
         self.assertEqual(created.status_code, 201, created.get_json())
         public_id = created.get_json()['id']
+        self._login('broker@example.com', 'broker-pass-1')
         hidden = self.client.post('/api/listings', json=self._payload('Quiet Jet', 'broker_only'))
         hidden_id = hidden.get_json()['id']
         db_module.admin_approve_listing_any(public_id, self.admin['id'])
@@ -158,8 +157,25 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(page.status_code, 200, path)
             self.assertIn(b'Coming soon', page.data)
 
-    def test_off_market_listing_needs_only_name_profile_and_year(self):
+    def test_listing_market_is_public_or_broker_off_market(self):
         self._login('seller@example.com', 'seller-pass-1')
+        page = self.client.get('/create-listing')
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b'value="private"', page.data)
+        self.assertNotIn(b'Off market', page.data)
+        private = self.client.post('/api/listings', json=self._payload('Private Jet', 'private'))
+        self.assertEqual(private.status_code, 400, private.get_json())
+        blocked = self.client.post('/api/listings', json=self._payload('Sneak Jet', 'broker_only'))
+        self.assertEqual(blocked.status_code, 403, blocked.get_json())
+        self._login('broker@example.com', 'broker-pass-1')
+        broker_page = self.client.get('/create-listing')
+        self.assertIn(b'Off market', broker_page.data)
+        self.assertNotIn(b'value="private"', broker_page.data)
+        created = self.client.post('/api/listings', json=self._payload('Broker Quiet', 'broker_only'))
+        self.assertEqual(created.status_code, 201, created.get_json())
+
+    def test_off_market_listing_needs_only_name_profile_and_year(self):
+        self._login('broker@example.com', 'broker-pass-1')
         created = self.client.post('/api/listings', json={
             'profile_id': self.profile_id,
             'title': 'Quiet Name',
@@ -334,6 +350,201 @@ class ProductTests(unittest.TestCase):
         accepted = self.client.post(f'/api/charter/bookings/{booking_id}/status', json={'status': 'confirmed'})
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(db_module.get_charter_booking(booking_id)['status'], 'confirmed')
+
+    def test_hidden_listing_media_and_spreadsheet_stay_private(self):
+        self._login('broker@example.com', 'broker-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Hidden Media Jet', 'broker_only'))
+        listing_id = created.get_json()['id']
+        self._login('buyer@example.com', 'buyer-pass-1')
+        hidden = self.client.get(f'/api/listings/{listing_id}/media')
+        self.assertEqual(hidden.status_code, 404)
+        sheet = self.client.get('/api/aircraft-data')
+        self.assertEqual(sheet.status_code, 404)
+        self._login('broker@example.com', 'broker-pass-1')
+        owner = self.client.get(f'/api/listings/{listing_id}/media')
+        self.assertEqual(owner.status_code, 200)
+        page = self.client.get('/')
+        self.assertIn(b'function escCard', page.data)
+
+    def test_unpaid_checkout_does_not_mark_a_listing_paid(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Unpaid Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.set_listing_payment_session(listing_id, 'cs_test_unpaid')
+        unpaid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_unpaid_1',
+            'type': 'checkout.session.completed',
+            'data': {'object': {'id': 'cs_test_unpaid', 'payment_status': 'unpaid', 'metadata': {}}},
+        })
+        self.assertEqual(unpaid.status_code, 200, unpaid.get_json())
+        self.assertTrue(unpaid.get_json().get('pending'))
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertNotEqual(row.get('payment_status'), 'paid')
+        paid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_paid_1',
+            'type': 'checkout.session.async_payment_succeeded',
+            'data': {'object': {'id': 'cs_test_unpaid', 'payment_status': 'paid', 'metadata': {}}},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('payment_status'), 'paid')
+        self.assertEqual(row.get('status'), 'pending')
+
+    def test_production_webhook_without_a_secret_is_refused(self):
+        import os
+        os.environ['FLASK_ENV'] = 'production'
+        os.environ.pop('STRIPE_WEBHOOK_SECRET', None)
+        try:
+            refused = self.client.post('/api/stripe/webhook', data=b'{}', content_type='application/json')
+            self.assertEqual(refused.status_code, 500)
+        finally:
+            os.environ['FLASK_ENV'] = 'development'
+            os.environ.pop('STRIPE_WEBHOOK_SECRET', None)
+
+    def test_refunds_page_matches_the_terms(self):
+        page = self.client.get('/refunds')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'non-refundable once a listing has been approved and published', page.data)
+        self.assertIn(b'not a promise that a refund will be issued', page.data)
+        terms = self.client.get('/terms')
+        self.assertIn(b'href="/refunds"', terms.data)
+
+    def test_robots_and_sitemap_skip_private_listings(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        public = self.client.post('/api/listings', json=self._payload('Sitemap Public', 'public'))
+        public_id = public.get_json()['id']
+        self._login('broker@example.com', 'broker-pass-1')
+        hidden = self.client.post('/api/listings', json=self._payload('Sitemap Quiet', 'broker_only'))
+        hidden_id = hidden.get_json()['id']
+        db_module.admin_approve_listing_any(public_id, self.admin['id'])
+        db_module.admin_approve_listing_any(hidden_id, self.admin['id'])
+        robots = self.client.get('/robots.txt')
+        self.assertEqual(robots.status_code, 200)
+        self.assertIn(b'Disallow: /off-market', robots.data)
+        self.assertIn(b'Disallow: /api/', robots.data)
+        self.assertIn(b'Sitemap:', robots.data)
+        sitemap = self.client.get('/sitemap.xml')
+        self.assertEqual(sitemap.status_code, 200)
+        self.assertIn(f'/listing/{public_id}'.encode(), sitemap.data)
+        self.assertNotIn(f'/listing/{hidden_id}'.encode(), sitemap.data)
+        self.assertNotIn(b'/off-market', sitemap.data)
+        self.assertNotIn(b'/admin', sitemap.data)
+
+    def test_public_diagnostics_omit_account_counts(self):
+        for path in ('/api/health', '/api/data-safety', '/api/data-source', '/api/diagnostic'):
+            body = self.client.get(path).get_data()
+            self.assertNotIn(b'user_sessions', body)
+            self.assertNotIn(b'"users"', body)
+            self.assertNotIn(b'table_counts', body)
+            self.assertNotIn(b'connection_error', body)
+            self.assertNotIn(b'app_root', body)
+
+    def test_logout_requires_a_post_and_csrf_token(self):
+        self._login('buyer@example.com', 'buyer-pass-1')
+        page = self.client.get('/logout')
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)
+        blocked = self.client.post('/logout', data={'csrf_token': 'not-the-token'})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)
+        import re
+        token = re.search(br'name="csrf_token" value="([^"]+)"', page.data).group(1)
+        done = self.client.post('/logout', data={'csrf_token': token.decode()})
+        self.assertEqual(done.status_code, 302)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+        cross = self.client.post('/api/auth/login', json={'email': 'buyer@example.com', 'password': 'buyer-pass-1'})
+        self.assertEqual(cross.status_code, 200)
+        foreign = self.client.post('/api/auth/logout', headers={'Origin': 'https://evil.example'})
+        self.assertEqual(foreign.status_code, 403)
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 200)
+
+    def test_production_rate_limit_is_shared_across_clients(self):
+        for _ in range(10):
+            self.assertFalse(db_module.consume_auth_rate('shared-test-bucket', limit=10, window_seconds=60))
+        self.assertTrue(db_module.consume_auth_rate('shared-test-bucket', limit=10, window_seconds=60))
+        os.environ['FLASK_ENV'] = 'production'
+        try:
+            for _ in range(10):
+                attempt = self.client.post('/api/auth/login', json={
+                    'email': 'buyer@example.com', 'password': 'wrong-password',
+                })
+                self.assertEqual(attempt.status_code, 401)
+            blocked = self.client.post('/api/auth/login', json={
+                'email': 'buyer@example.com', 'password': 'wrong-password',
+            })
+            self.assertEqual(blocked.status_code, 429)
+            other = app.test_client()
+            again = other.post('/api/auth/login', json={
+                'email': 'buyer@example.com', 'password': 'wrong-password',
+            })
+            self.assertEqual(again.status_code, 429)
+        finally:
+            os.environ['FLASK_ENV'] = 'development'
+
+    def test_settled_stripe_refund_updates_payment_status_only(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Refund Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'payment_status': 'paid', 'stripe_payment_intent_id': 'pi_refund_full'},
+                synchronize_session=False,
+            )
+        pending = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_refund_pending',
+            'type': 'refund.updated',
+            'data': {'object': {
+                'object': 'refund', 'status': 'pending', 'amount': 1499,
+                'payment_intent': 'pi_refund_full',
+            }},
+        })
+        self.assertEqual(pending.status_code, 200)
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['payment_status'], 'paid')
+        self.assertEqual(row['status'], 'active')
+        full = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_refund_full',
+            'type': 'charge.refunded',
+            'data': {'object': {
+                'object': 'charge', 'amount': 1499, 'amount_refunded': 1499,
+                'refunded': True, 'payment_intent': 'pi_refund_full', 'status': 'succeeded',
+            }},
+        })
+        self.assertEqual(full.status_code, 200)
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['payment_status'], 'refunded')
+        self.assertEqual(row['status'], 'active')
+        created = self.client.post('/api/listings', json=self._payload('Partial Jet', 'public'))
+        partial_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(partial_id, self.admin['id'])
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == partial_id).update(
+                {'payment_status': 'paid', 'stripe_payment_intent_id': 'pi_refund_part'},
+                synchronize_session=False,
+            )
+        part = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_refund_part',
+            'type': 'charge.refunded',
+            'data': {'object': {
+                'object': 'charge', 'amount': 1499, 'amount_refunded': 500,
+                'refunded': False, 'payment_intent': 'pi_refund_part',
+            }},
+        })
+        self.assertEqual(part.status_code, 200)
+        row = db_module.get_listing_with_owner(partial_id)
+        self.assertEqual(row['payment_status'], 'partially_refunded')
+        self.assertEqual(row['status'], 'active')
+        unmatched = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_refund_unknown',
+            'type': 'charge.refunded',
+            'data': {'object': {
+                'object': 'charge', 'amount': 1499, 'amount_refunded': 1499,
+                'refunded': True, 'payment_intent': 'pi_does_not_exist',
+            }},
+        })
+        self.assertEqual(unmatched.status_code, 200)
+        self.assertEqual(unmatched.get_json(), {'received': True})
 
     def test_duplicate_stripe_event_is_ignored(self):
         self.assertTrue(db_module.claim_stripe_event('evt_test_once'))

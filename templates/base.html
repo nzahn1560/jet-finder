@@ -412,9 +412,12 @@
                             <hr class="dropdown-divider">
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('logout') }}">
-                                <i class="fas fa-sign-out-alt me-2"></i>Logout
-                            </a>
+                            <form method="post" action="{{ url_for('logout') }}" class="m-0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="dropdown-item">
+                                    <i class="fas fa-sign-out-alt me-2"></i>Logout
+                                </button>
+                            </form>
                         </li>
                     </ul>
                 </div>
@@ -437,6 +440,12 @@
     <!-- Main Content -->
     <main>
         {% block content %}{% endblock %}
+
+        <footer class="py-4 text-center">
+            <a href="{{ url_for('privacy') }}" class="small me-3" style="color:#F05545;">Privacy</a>
+            <a href="{{ url_for('terms') }}" class="small me-3" style="color:#F05545;">Terms</a>
+            <a href="{{ url_for('refunds') }}" class="small" style="color:#F05545;">Refunds</a>
+        </footer>
     </main>
 
     <!-- Bootstrap JS -->

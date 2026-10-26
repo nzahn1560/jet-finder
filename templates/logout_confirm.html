@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Log out - JetSchool{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 520px; color: #ddd;">
+    <h1 class="mb-3" style="color:#fff;">Log out</h1>
+    <p>This signs you out of JetSchool on this browser.</p>
+    <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn" style="background:#F05545;color:#fff;border:0;">Log out</button>
+    </form>
+</div>
+{% endblock %}

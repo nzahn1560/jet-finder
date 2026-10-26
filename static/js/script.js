@@ -907,8 +907,9 @@ function updateAverageLegDistance() {
 }
 
 // Add a route pair between two airports
-function addRoutePair(fromAirport, toAirport) {
+function addRoutePair(fromAirport, toAirport, frequency) {
     if (!fromAirport || !toAirport) return;
+    const legs = Math.max(1, parseInt(frequency, 10) || 1);
 
     // Check if this route already exists
     const existingRoute = routePairs.find(route =>
@@ -917,10 +918,9 @@ function addRoutePair(fromAirport, toAirport) {
     );
 
     if (existingRoute) {
-        // If route exists, just increment the frequency
-        existingRoute.frequency += 1;
+        existingRoute.frequency = legs;
         existingRoute.totalDistance = existingRoute.distance * existingRoute.frequency;
-        showToast(`Increased frequency for ${existingRoute.from.iata}-${existingRoute.to.iata} to ${existingRoute.frequency} legs per year`, 'success');
+        showToast(`Set ${existingRoute.from.iata}-${existingRoute.to.iata} to ${existingRoute.frequency} legs per year`, 'success');
 
         // Update displays without adding new route
         updateRoutesDisplay();
@@ -929,9 +929,6 @@ function addRoutePair(fromAirport, toAirport) {
         return;
     }
 
-    // Default frequency is 1 for new routes
-    const frequency = 1;
-
     const legDistance = calculateDistance(fromAirport.lat, fromAirport.lon, toAirport.lat, toAirport.lon);
 
     const routePair = {
@@ -939,13 +936,13 @@ function addRoutePair(fromAirport, toAirport) {
         from: fromAirport,
         to: toAirport,
         distance: legDistance,
-        frequency: frequency,
-        totalDistance: legDistance * frequency
+        frequency: legs,
+        totalDistance: legDistance * legs
     };
 
     routePairs.push(routePair);
 
-    console.log(`Adding route ${fromAirport.iata}-${toAirport.iata}, distance: ${Math.round(legDistance)} nm, frequency: ${frequency}`);
+    console.log(`Adding route ${fromAirport.iata}-${toAirport.iata}, distance: ${Math.round(legDistance)} nm, frequency: ${legs}`);
 
     // Generate route points for proper great circle path
     const routePoints = generateGreatCirclePath(
@@ -1039,6 +1036,8 @@ function addRoutePair(fromAirport, toAirport) {
     selectedToAirport = null;
     document.getElementById('from-airport').value = '';
     document.getElementById('to-airport').value = '';
+    const legsInput = document.getElementById('route-legs');
+    if (legsInput) legsInput.value = '1';
 
     showToast(`Added route ${fromAirport.iata}-${toAirport.iata} (${Math.round(legDistance)} nm)`, 'success');
 }
@@ -1717,17 +1716,43 @@ function setupAirportSearchEventListeners() {
 }
 
 // Setup route planning event listeners
+function lockRouteSegment() {
+    const legsInput = document.getElementById('route-legs');
+    const legs = legsInput ? legsInput.value : 1;
+    if (selectedFromAirport && selectedToAirport) {
+        addRoutePair(selectedFromAirport, selectedToAirport, legs);
+        return;
+    }
+    showToast('Select a departure and a destination', 'warning');
+}
+
+function pickOpenAirport(type) {
+    const list = document.getElementById(type === 'from' ? 'from-airport-list' : 'to-airport-list');
+    const wrap = document.getElementById(type === 'from' ? 'from-airport-results' : 'to-airport-results');
+    if (!list || !wrap || wrap.classList.contains('d-none')) return false;
+    const choice = list.querySelector('.list-group-item-action:hover') || list.querySelector('.list-group-item-action');
+    if (!choice) return false;
+    choice.click();
+    return true;
+}
+
 function setupRoutePlanningEventListeners() {
     const addRouteBtn = document.getElementById('add-route-btn');
     const clearRoutesBtn = document.getElementById('clear-routes-btn');
+    const builder = document.getElementById('route-builder');
 
     if (addRouteBtn) {
-        addRouteBtn.addEventListener('click', function () {
-            if (selectedFromAirport && selectedToAirport) {
-                addRoutePair(selectedFromAirport, selectedToAirport);
-            } else {
-                showToast('Please select both departure and arrival airports', 'warning');
-            }
+        addRouteBtn.addEventListener('click', lockRouteSegment);
+    }
+
+    if (builder) {
+        builder.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            const active = document.activeElement;
+            if (active && active.id === 'from-airport' && !selectedFromAirport) pickOpenAirport('from');
+            if (active && active.id === 'to-airport' && !selectedToAirport) pickOpenAirport('to');
+            if (selectedFromAirport && selectedToAirport) lockRouteSegment();
         });
     }
 
