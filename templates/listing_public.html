@@ -76,7 +76,7 @@
             <div class="showroom__stats">
                 <div class="showroom__stat"><span>Range (seats full)</span><b>{{ profile.range or '—' }} nm</b></div>
                 <div class="showroom__stat"><span>Speed</span><b>{{ profile.speed or '—' }} kts</b></div>
-                <div class="showroom__stat"><span>Passengers{% if profile.min_crew == 1 %} <em class="showroom__crew">(includes one flight-deck seat in place of a second pilot)</em>{% endif %}</span><b>{{ profile.passengers or '—' }}</b></div>
+                <div class="showroom__stat"><span>Passengers{% if profile.min_crew == 1 %} <em class="showroom__crew">(inc. 1 pilot seat)</em>{% endif %}</span><b>{{ profile.passengers or '—' }}</b></div>
                 <div class="showroom__stat"><span>Cabin</span><b>{{ profile.cabin_volume or '—' }} cu ft</b></div>
                 {% if listing.hours is not none %}<div class="showroom__stat"><span>Airframe</span><b>{{ '{:,.0f}'.format(listing.hours or 0) }} hrs</b></div>{% endif %}
                 {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}

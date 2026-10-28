@@ -3496,6 +3496,11 @@
         font-size: 0.62rem;
     }
 
+    .stat-box.is-scored .stat-note,
+    .perf-bar.is-scored .stat-note {
+        color: rgba(255, 255, 255, 0.88);
+    }
+
     .seller-notes {
         margin-top: 0.65rem;
     }
@@ -3536,6 +3541,15 @@
         letter-spacing: 0.06em;
         text-transform: uppercase;
         color: #c8c8c8;
+    }
+
+    .perf-bar.is-scored .perf-bar__label,
+    .stat-box.is-scored .stat-box__label,
+    .perf-bar.is-scored .perf-bar__value,
+    .stat-box.is-scored .stat-box__value,
+    .perf-bar.is-scored .stat-pct,
+    .stat-box.is-scored .stat-pct {
+        color: #fff;
     }
 
     .perf-bar__value, .stat-box__value {
@@ -3600,9 +3614,16 @@
     }
     .route-builder__commit {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 46px;
+        grid-template-columns: minmax(10rem, 1fr) 46px;
         gap: 0.5rem;
         align-items: end;
+    }
+    #route-legs {
+        width: 100%;
+        min-width: 10rem;
+        font-size: 1.15rem;
+        line-height: 1.4;
+        padding: 0.5rem 0.75rem;
     }
     .route-check {
         width: 46px;
@@ -3974,7 +3995,7 @@
                         </div>
                         <div class="route-builder__commit">
                             <div>
-                                <label for="route-legs" class="form-label">Legs per year</label>
+                                <label for="route-legs" class="form-label">Legs per year (one-way)</label>
                                 <input type="number" class="form-control bg-dark text-white border-secondary"
                                     id="route-legs" min="1" max="365" value="1">
                             </div>
@@ -4358,6 +4379,7 @@
         </div>
 
 
+        <p id="runway-note" class="text-white-50 mb-2" hidden></p>
         <!-- Aircraft Grid -->
         <div class="aircraft-listings-container">
             <div class="aircraft-grid" id="aircraftGrid">
@@ -4797,13 +4819,14 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=5"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=6"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <!-- Real-Time Aircraft Filtering System -->
 <script>
     window.SHEET_SCALE = {{ sheet_scale|default({}, true)|tojson }};
+    window.SHEET_FLEET = {{ sheet_fleet|default([], true)|tojson }};
     console.log('Aircraft filtering system initialized');
 
     // Real-time filtering system initialized
@@ -4867,8 +4890,7 @@
         { key: 'AD', label: '# of Hours', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AD') },
         { key: 'AN', label: 'Adjusted Annual Budget', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AN') },
         { key: 'AO', label: 'Multi-Year Total Cost', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AO') },
-        { key: 'AQ', label: 'Cost To Charter', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AQ') },
-        { key: 'AS', label: 'Own/Charter Savings', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AS') },
+        { key: 'AS', label: 'If chartered', type: 'currency', precision: 0, getValue: (aircraft, metrics) => liveColumn(metrics, 'AS') },
         { key: 'AT', label: 'Best Speed/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AT') },
         { key: 'AV', label: 'Best Seat Speed/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AV') },
         { key: 'AW', label: 'Best Range/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'AW') },
@@ -4879,7 +4901,7 @@
         { key: 'BE', label: 'Best Seat Efficiency/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BE') },
         { key: 'BF', label: 'Best All Around/$', type: 'number', precision: 2, getValue: (aircraft, metrics) => liveColumn(metrics, 'BF') }
     ];
-    const DEFAULT_COST_METRIC_KEYS = ['AN', 'AO', 'AQ'];
+    const DEFAULT_COST_METRIC_KEYS = ['AN', 'AO', 'AS'];
     let compareSelections = []; // [{ id, colorIndex }]
     let compareCostMetricKeys = [...DEFAULT_COST_METRIC_KEYS];
     let costCharts = [];
@@ -5478,6 +5500,14 @@
         };
     }
     // Real-time filtering function
+    function fitsSelectedAirports(aircraft) {
+        const limit = Number(window.airportRunwayLimit);
+        if (!(limit > 0)) return true;
+        const needed = Number(aircraft && (aircraft.runway_length || aircraft.runwayLength) || 0);
+        if (!(needed > 0)) return true;
+        return needed <= limit;
+    }
+
     function applyRealTimeFiltering() {
         console.log('🎯 Applying real-time filtering...');
 
@@ -5520,7 +5550,7 @@
 
         if (!hasActiveFilters) {
             console.log('ℹ️ No active filters - showing all aircraft');
-            filteredAircraftData = [...allAircraftData];
+            filteredAircraftData = allAircraftData.filter(fitsSelectedAirports);
             currentPage = 1;
             const sortBy = document.getElementById('sortSelect')?.value;
             if (sortBy) { sortAircraft(sortBy); return; }
@@ -5659,12 +5689,15 @@
             }
 
             // Runway Length filter (aircraft needs shorter runway than max allowed)
-            if (currentFilters.maxRunway && aircraft.runwayLength > 0) {
-                const maxRunway = parseInt(currentFilters.maxRunway);
-                if (aircraft.runwayLength > maxRunway) {
-                    matches = false;
-                    filterReasons.push(`Runway Length ${aircraft.runwayLength}ft > ${maxRunway}ft`);
-                }
+            const runwayLimit = Number(window.airportRunwayLimit);
+            const runwayCaps = [];
+            if (currentFilters.maxRunway) runwayCaps.push(parseInt(currentFilters.maxRunway, 10));
+            if (runwayLimit > 0) runwayCaps.push(runwayLimit);
+            const shortestRunway = runwayCaps.filter(function (feet) { return feet > 0; });
+            const neededRunway = Number(aircraft.runwayLength || aircraft.runway_length || 0);
+            if (shortestRunway.length && neededRunway > 0 && neededRunway > Math.min.apply(null, shortestRunway)) {
+                matches = false;
+                filterReasons.push(`Balanced field ${neededRunway}ft is longer than the shortest runway`);
             }
 
             // Annual Cost filter
@@ -5718,6 +5751,17 @@
             rankAircraftByGoal(filteredAircraftData);
         }
         const aircraftGrid = document.getElementById('aircraftGrid');
+        const runwayNote = document.getElementById('runway-note');
+        if (runwayNote) {
+            const limit = Number(window.airportRunwayLimit);
+            if (limit > 0) {
+                runwayNote.hidden = false;
+                runwayNote.textContent = 'Showing aircraft whose balanced field length fits the shortest runway (' + Math.round(limit).toLocaleString() + ' ft) at the airports you entered.';
+            } else {
+                runwayNote.hidden = true;
+                runwayNote.textContent = '';
+            }
+        }
         if (!aircraftGrid) return;
 
         // Calculate pagination for current page
@@ -6086,12 +6130,13 @@
         metricOptions.forEach((option, metricIndex) => {
             if (!option) return;
 
+            const charterChart = option.key === 'AS';
             const chartCard = document.createElement('div');
             chartCard.className = 'chart-card';
             chartCard.innerHTML = `
                 <div class="chart-header">
-                    <h6 class="mb-1 text-white">${option.label}</h6>
-                    <small class="text-white-50">Independent scale per metric for apples-to-apples comparison.</small>
+                    <h6 class="mb-1 text-white">${charterChart ? 'If chartered' : option.label}</h6>
+                    <small class="text-white-50">${charterChart ? 'Savings in green. Loss in red.' : 'Independent scale per metric for apples-to-apples comparison.'}</small>
                 </div>
                 <div class="chart-wrapper">
                     <canvas id="compareCostChart-${metricIndex}"></canvas>
@@ -6106,8 +6151,32 @@
                 option.getValue ? option.getValue(aircraft, metrics) : null
             );
             const numericValues = rawValues.map(value => Number.isFinite(value) ? value : 0);
-            const colors = selectionData.map(({ colorIndex }) => getCompareColor(colorIndex, 0.6));
-            const borderColors = selectionData.map(({ colorIndex }) => getCompareColor(colorIndex, 0.95));
+            const charterSentence = function (value) {
+                const amount = Number(value);
+                if (!Number.isFinite(amount)) return 'If chartered: —';
+                const dollars = formatCurrency(Math.abs(amount), 0);
+                return amount >= 0 ? 'If chartered: savings ' + dollars : 'If chartered: loss ' + dollars;
+            };
+            const colors = charterChart
+                ? numericValues.map(value => value >= 0 ? 'rgba(40, 180, 70, 0.9)' : 'rgba(240, 69, 69, 0.9)')
+                : selectionData.map(({ colorIndex }) => getCompareColor(colorIndex, 0.6));
+            const borderColors = charterChart
+                ? numericValues.map(value => value >= 0 ? 'rgb(40, 180, 70)' : 'rgb(240, 69, 69)')
+                : selectionData.map(({ colorIndex }) => getCompareColor(colorIndex, 0.95));
+            if (charterChart) {
+                const outcomes = document.createElement('div');
+                outcomes.style.marginTop = '0.65rem';
+                selectionData.forEach(function (item, index) {
+                    const line = document.createElement('p');
+                    const amount = numericValues[index];
+                    line.style.margin = '0.15rem 0';
+                    line.style.fontWeight = '700';
+                    line.style.color = amount >= 0 ? 'rgb(40, 180, 70)' : 'rgb(240, 69, 69)';
+                    line.textContent = getAircraftShortLabel(item.aircraft) + ': ' + charterSentence(amount);
+                    outcomes.appendChild(line);
+                });
+                chartCard.appendChild(outcomes);
+            }
 
             const chart = new Chart(ctx, {
                 type: 'bar',
@@ -6137,6 +6206,9 @@
                                     const value = context.dataset.metaValues
                                         ? context.dataset.metaValues[context.dataIndex]
                                         : context.parsed.y;
+                                    if (option.key === 'AS') {
+                                        return aircraftLabel + ': ' + charterSentence(value);
+                                    }
                                     return `${aircraftLabel}: ${formatMetricValue(option, value)}`;
                                 }
                             }
@@ -6309,28 +6381,28 @@
         updateCompareButtonStates();
     }
 
-    // Spreadsheet per-dollar score. Lower raw values are better. Listing price replaces column AA.
+    // Spreadsheet per-dollar score for the current inputs. The scale is the Aircraft Data
+    // fleet, and the listing's asking price replaces column AA. Lower raw values are better.
     function sheetDollarPercent(aircraft, metricType) {
-        const fields = {
-            speed: 'sheet_speed_dollar',
-            range: 'sheet_range_dollar',
-            performance: 'sheet_performance_dollar',
-            efficiency: 'sheet_efficiency_dollar',
-            allAround: 'sheet_all_around_dollar'
+        const columns = {
+            speed: 'AU',
+            range: 'AX',
+            performance: 'BA',
+            efficiency: 'BD',
+            allAround: 'BF'
         };
-        const field = fields[metricType];
-        const scale = (window.SHEET_SCALE || {})[metricType] || {};
-        const raw = Number(aircraft?.[field]);
-        const min = Number(scale.min);
-        const max = Number(scale.max);
-        if (!field || !(raw > 0) || !(max > min)) return null;
-        const ask = Number(aircraft.price) || 0;
-        const catalog = Number(aircraft.catalog_price) || ask;
-        const ratio = catalog > 0 ? ask / catalog : 1;
-        const adjusted = raw * (ratio > 0 ? ratio : 1);
-        const norm = ((adjusted - min) / (max - min)) * 1000;
+        const column = columns[metricType];
+        if (!column) return null;
+        let metrics;
+        try {
+            metrics = calculateDynamicMetrics(aircraft, getUserInputs());
+        } catch (err) {
+            return null;
+        }
+        const norm = Number(metrics && metrics.columnValues ? metrics.columnValues[column] : NaN);
+        if (!Number.isFinite(norm)) return null;
         const clamped = Math.max(0, Math.min(1000, norm));
-        return Math.round(Math.max(0, Math.min(100, 100 - (clamped / 10))));
+        return Math.round(100 - (clamped / 10));
     }
 
     function marketStatPercent(value, values, higherIsBetter) {
@@ -6350,6 +6422,18 @@
         const green = Math.round(69 + (111 * amount));
         const blue = Math.round(69 + (1 * amount));
         return 'rgb(' + red + ',' + green + ',' + blue + ')';
+    }
+
+    function scoredBar(className, label, valueHtml, pct, extra) {
+        const scored = pct != null && pct !== '';
+        const color = scored ? scoreColor(pct) : '#2a2a2a';
+        let paren = '';
+        if (scored && extra) paren = '(' + pct + '% · ' + extra + ')';
+        else if (scored) paren = '(' + pct + '%)';
+        const mark = paren ? '<span class="stat-pct">' + paren + '</span>' : '';
+        return '<div class="' + className + (scored ? ' is-scored' : '') + '" style="background:' + color + '">'
+            + '<div class="' + className + '__label">' + label + '</div>'
+            + '<div class="' + className + '__value">' + valueHtml + ' ' + mark + '</div></div>';
     }
 
     // Populate relative performance scores for all visible aircraft
@@ -6380,16 +6464,25 @@
                 console.warn('⚠️ All-Around score is 0 or NaN for aircraft:', aircraft.aircraft_name || aircraft.name);
             }
 
+            const peers = filteredAircraftData.length ? filteredAircraftData : allAircraftData;
+            const specScore = {
+                speed: marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true),
+                range: marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true)
+            };
             metrics.forEach((metricType, i) => {
                 const percentage = sheetDollarPercent(aircraft, metricType);
-                const shown = percentage == null ? '—' : percentage + '%';
-                const color = percentage == null ? '#F05545' : scoreColor(percentage);
-                html += `
-                    <div class="perf-bar" style="box-shadow: inset 3px 0 0 ${color}">
-                        <div class="perf-bar__label">${metricLabels[i]}</div>
-                        <div class="perf-bar__value" style="color:${color}">${shown}</div>
-                    </div>
-            `;
+                const raw = {
+                    speed: displayMetrics.bestSpeedDollar,
+                    range: displayMetrics.bestRangeDollar,
+                    performance: displayMetrics.bestPerformanceDollar,
+                    efficiency: displayMetrics.bestEfficiencyDollar,
+                    allAround: displayMetrics.bestAllAroundDollar
+                }[metricType];
+                const shown = Number.isFinite(Number(raw))
+                    ? Number(raw).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                    : '—';
+                const extra = specScore[metricType] == null ? '' : metricType + ' ' + specScore[metricType] + '%';
+                html += scoredBar('perf-bar', metricLabels[i], shown, percentage, extra);
             });
 
             performanceContainer.innerHTML = html;
@@ -6456,22 +6549,18 @@
         const listingHref = aircraft.is_user_listing && aircraft.id ? '/listing/' + aircraft.id : '';
         const peers = filteredAircraftData.length ? filteredAircraftData : allAircraftData;
         const peerMetrics = peers.map(function (item) { return calculateDynamicMetrics(item, getUserInputs()); });
-        const statValue = function (text, pct) {
-            if (pct == null) return text;
-            return text + ' <span class="stat-pct" style="color:' + scoreColor(pct) + '">(' + pct + '%)</span>';
-        };
         const passengerLabel = Number(aircraft.min_crew) === 1
-            ? 'Passengers <span class="stat-note">(includes one flight-deck seat in place of a second pilot)</span>'
+            ? 'Passengers <span class="stat-note">(inc. 1 pilot seat)</span>'
             : 'Passengers';
         const specRows = [
-            ['Range (seats full)', statValue(`${aircraft.range || 0} nm`, marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true))],
-            ['Speed', statValue(`${aircraft.speed || 0} kts`, marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true))],
-            [passengerLabel, statValue(`${aircraft.passengers || 0}`, marketStatPercent(aircraft.passengers, peers.map(function (item) { return item.passengers; }), true))],
-            ['Cabin', statValue(`${aircraft.cabin_volume || 0} cu ft`, marketStatPercent(aircraft.cabin_volume, peers.map(function (item) { return item.cabin_volume; }), true))],
-            ['Hours / year', statValue(`${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, marketStatPercent(displayMetrics.totalTripTime, peerMetrics.map(function (item) { return item.totalTripTime; }), false))],
-            ['Average leg', statValue(`${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, marketStatPercent(displayMetrics.averageTripTime, peerMetrics.map(function (item) { return item.averageTripTime; }), false))],
-            ['Annual budget', statValue(`$${displayMetrics.annualBudget.toLocaleString()}`, marketStatPercent(displayMetrics.annualBudget, peerMetrics.map(function (item) { return item.annualBudget; }), false))],
-            ['Multi-year cost', statValue(`$${displayMetrics.multiYearTotalCost.toLocaleString()}`, marketStatPercent(displayMetrics.multiYearTotalCost, peerMetrics.map(function (item) { return item.multiYearTotalCost; }), false))],
+            { label: 'Range (seats full)', value: `${aircraft.range || 0} nm`, pct: marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true) },
+            { label: 'Speed', value: `${aircraft.speed || 0} kts`, pct: marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true) },
+            { label: passengerLabel, value: `${aircraft.passengers || 0}`, pct: marketStatPercent(aircraft.passengers, peers.map(function (item) { return item.passengers; }), true) },
+            { label: 'Cabin', value: `${aircraft.cabin_volume || 0} cu ft`, pct: marketStatPercent(aircraft.cabin_volume, peers.map(function (item) { return item.cabin_volume; }), true) },
+            { label: 'Hours / year', value: `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, pct: marketStatPercent(displayMetrics.totalTripTime, peerMetrics.map(function (item) { return item.totalTripTime; }), false) },
+            { label: 'Average leg', value: `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, pct: marketStatPercent(displayMetrics.averageTripTime, peerMetrics.map(function (item) { return item.averageTripTime; }), false) },
+            { label: 'Annual budget', value: `$${displayMetrics.annualBudget.toLocaleString()}`, pct: marketStatPercent(displayMetrics.annualBudget, peerMetrics.map(function (item) { return item.annualBudget; }), false) },
+            { label: 'Multi-year cost', value: `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, pct: marketStatPercent(displayMetrics.multiYearTotalCost, peerMetrics.map(function (item) { return item.multiYearTotalCost; }), false) },
         ];
 
         card.innerHTML = `
@@ -6539,7 +6628,7 @@
                     
                     <div class="spec-bars">
                         ${specRows.map(function (bar) {
-                            return `<div class="stat-box"><div class="stat-box__label">${bar[0]}</div><div class="stat-box__value">${bar[1]}</div></div>`;
+                            return scoredBar('stat-box', bar.label, bar.value, bar.pct);
                         }).join('')}
                     </div>
                         
@@ -7192,13 +7281,31 @@
         metrics.BG2 = Z2 > 0 ? metrics.BF2 / Z2 : 0;
     }
 
+    function spreadsheetFleet() {
+        const rows = Array.isArray(window.SHEET_FLEET) ? window.SHEET_FLEET : [];
+        return rows.map(function (row, index) {
+            return {
+                id: 'sheet-' + index,
+                speed: Number(row.s) || 0,
+                range: Number(row.x) || 0,
+                passengers: Number(row.z) || 0,
+                price: Number(row.p) || 0,
+                total_fixed_cost: Number(row.f) || 0,
+                total_variable_cost: Number(row.v) || 0,
+                category: row.c || ''
+            };
+        }).filter(function (row) { return row.price > 0 && row.speed > 0; });
+    }
+
     function buildScenarioCache(params) {
         const metricsById = {};
         const allAT2 = [];
         const allAW2 = [];
         const allBC2 = [];
 
-        allAircraftData.forEach(aircraftItem => {
+        const fleetRows = spreadsheetFleet();
+        const population = fleetRows.length ? fleetRows : allAircraftData;
+        population.forEach(aircraftItem => {
             const metrics = computeMetricsForAircraft(aircraftItem, params);
             metricsById[metrics.key] = metrics;
             if (metrics.AT2 > 0) allAT2.push(metrics.AT2);
@@ -7372,50 +7479,27 @@
             console.log(`  ${index + 1}. ${aircraft.aircraft_name || aircraft.name} - Price: ${aircraft.price}, Range: ${aircraft.range}`);
         });
 
+        try {
         filteredAircraftData.sort((a, b) => {
             let aValue, bValue;
 
             switch (sortBy) {
                 case 'best_speed_dollar':
-                    // Sort by percentage score (higher percentage = better)
-                    const aSpeedMetrics = calculateDynamicMetrics(a, getUserInputs());
-                    const bSpeedMetrics = calculateDynamicMetrics(b, getUserInputs());
-                    aValue = getPerformancePercentage(aSpeedMetrics.bestSpeedDollar, 'speed', filteredAircraftData);
-                    bValue = getPerformancePercentage(bSpeedMetrics.bestSpeedDollar, 'speed', filteredAircraftData);
-                    console.log(`💰 Speed/$ - ${a.aircraft_name}: ${aValue.toFixed(1)}% (raw: ${aSpeedMetrics.bestSpeedDollar}) vs ${b.aircraft_name}: ${bValue.toFixed(1)}% (raw: ${bSpeedMetrics.bestSpeedDollar})`);
-                    return bValue - aValue; // Higher percentage first
-
                 case 'best_range_dollar':
-                    // Sort by percentage score (higher percentage = better)
-                    const aRangeMetrics = calculateDynamicMetrics(a, getUserInputs());
-                    const bRangeMetrics = calculateDynamicMetrics(b, getUserInputs());
-                    aValue = getPerformancePercentage(aRangeMetrics.bestRangeDollar, 'range', filteredAircraftData);
-                    bValue = getPerformancePercentage(bRangeMetrics.bestRangeDollar, 'range', filteredAircraftData);
-                    return bValue - aValue; // Higher percentage first
-
                 case 'best_performance_dollar':
-                    // Sort by percentage score (higher percentage = better)
-                    const aPerfMetrics = calculateDynamicMetrics(a, getUserInputs());
-                    const bPerfMetrics = calculateDynamicMetrics(b, getUserInputs());
-                    aValue = getPerformancePercentage(aPerfMetrics.bestPerformanceDollar, 'performance', filteredAircraftData);
-                    bValue = getPerformancePercentage(bPerfMetrics.bestPerformanceDollar, 'performance', filteredAircraftData);
-                    return bValue - aValue; // Higher percentage first
-
                 case 'best_efficiency_dollar':
-                    // Sort by percentage score (higher percentage = better)
-                    const aEffMetrics = calculateDynamicMetrics(a, getUserInputs());
-                    const bEffMetrics = calculateDynamicMetrics(b, getUserInputs());
-                    aValue = getPerformancePercentage(aEffMetrics.bestEfficiencyDollar, 'efficiency', filteredAircraftData);
-                    bValue = getPerformancePercentage(bEffMetrics.bestEfficiencyDollar, 'efficiency', filteredAircraftData);
-                    return bValue - aValue; // Higher percentage first
-
-                case 'best_all_around_dollar':
-                    // Sort by percentage score (higher percentage = better)
-                    const aAllMetrics = calculateDynamicMetrics(a, getUserInputs());
-                    const bAllMetrics = calculateDynamicMetrics(b, getUserInputs());
-                    aValue = getPerformancePercentage(aAllMetrics.bestAllAroundDollar, 'allAround', filteredAircraftData);
-                    bValue = getPerformancePercentage(bAllMetrics.bestAllAroundDollar, 'allAround', filteredAircraftData);
-                    return bValue - aValue; // Higher percentage first
+                case 'best_all_around_dollar': {
+                    const metricName = {
+                        best_speed_dollar: 'speed',
+                        best_range_dollar: 'range',
+                        best_performance_dollar: 'performance',
+                        best_efficiency_dollar: 'efficiency',
+                        best_all_around_dollar: 'allAround'
+                    }[sortBy];
+                    aValue = sheetDollarPercent(a, metricName);
+                    bValue = sheetDollarPercent(b, metricName);
+                    return (bValue == null ? -1 : bValue) - (aValue == null ? -1 : aValue);
+                }
 
                 case 'price_low':
                     aValue = a.price || 0;
@@ -7557,6 +7641,9 @@
                     return 0;
             }
         });
+        } catch (sortError) {
+            console.error('Sort failed', sortError);
+        }
 
         // Debug: Log the first few aircraft after sorting
         console.log('📋 After sorting - first 3 aircraft:');
