@@ -437,6 +437,15 @@
                                     {% endif %}
                                 </div>
                             </div>
+                            {% if off_market_allowed %}
+                            <div class="mb-3" id="intent-choice" hidden>
+                                <label class="form-label">For sale or wanted?</label>
+                                <div class="market-choice">
+                                    <label><input type="radio" name="listing_intent" value="sale"> For sale</label>
+                                    <label><input type="radio" name="listing_intent" value="wanted"> Wanted</label>
+                                </div>
+                            </div>
+                            {% endif %}
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
                                 <textarea class="form-control" id="description" name="description" rows="4"
@@ -527,6 +536,11 @@
             if (field) field.required = !off;
         });
         document.querySelectorAll('[data-public-star]').forEach(function (star) { star.hidden = off; });
+        const intent = document.getElementById('intent-choice');
+        if (intent) {
+            intent.hidden = !off;
+            intent.querySelectorAll('input').forEach(function (input) { input.required = !!off; });
+        }
     }
     document.querySelectorAll('[name="market"]').forEach(function (radio) {
         radio.addEventListener('change', syncOffMarketFields);
@@ -659,6 +673,7 @@
             manufacturer: get('manufacturer') || undefined,
             pricing_plan: get('pricing_plan') || 'monthly',
             market: (get('market') === 'broker_only' || get('market') === 'off_market') ? 'broker_only' : 'public',
+            listing_intent: get('listing_intent') || undefined,
             serial_number: get('serial_number') || undefined,
             registration: get('registration') || undefined,
             variant: get('variant') || undefined,

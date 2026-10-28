@@ -729,6 +729,7 @@ def off_market_page():
             'model': combined.get('aircraft_name') or combined.get('model') or '',
             'serial_number': row.get('serial_number') or '',
             'email': row.get('email') or '',
+            'intent': 'wanted' if str(row.get('listing_intent') or '').lower() == 'wanted' else 'sale',
         })
     return render_template('off_market.html', listings=listings)
 
@@ -969,6 +970,68 @@ def get_unified_aircraft_data() -> list[dict[str, Any]]:
 
 
 
+def _sheet_fleet(rows):
+    """Compact Aircraft Data rows used to score listings against the whole spreadsheet."""
+    fleet = []
+    for row in rows or []:
+        try:
+            price = float(row.get('price') or 0)
+            speed = float(row.get('speed') or 0)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or speed <= 0:
+            continue
+
+        def num(key, source=row):
+            try:
+                return float(source.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        fleet.append({
+            's': speed,
+            'x': num('range'),
+            'z': num('passengers'),
+            'p': price,
+            'f': num('total_fixed_cost'),
+            'v': num('total_variable_cost'),
+            'c': row.get('category') or '',
+        })
+    return fleet
+
+
+_RUNWAY_FEET = None
+
+
+def _runway_feet_table():
+    """Shortest published runway in feet, keyed by IATA and ICAO."""
+    global _RUNWAY_FEET
+    if _RUNWAY_FEET is None:
+        path = os.path.join(os.path.dirname(__file__), 'static', 'data', 'airport_runways.json')
+        try:
+            with open(path, encoding='utf-8') as handle:
+                loaded = json.load(handle)
+            _RUNWAY_FEET = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            _RUNWAY_FEET = {}
+    return _RUNWAY_FEET
+
+
+def _shortest_runway_ft(iata, icao):
+    table = _runway_feet_table()
+    for code in (icao, iata):
+        key = str(code or '').strip().upper()
+        if not key or key not in table:
+            continue
+        try:
+            feet = int(table[key])
+        except (TypeError, ValueError):
+            continue
+        if feet > 0:
+            return feet
+    return None
+
+
 def _sheet_scale(rows):
     """Fleet min and max for the spreadsheet per-dollar columns. Lower is better."""
     fields = {
@@ -1066,6 +1129,7 @@ def home():
     # Start with unified data (CSV + marketplace)
     catalog = get_unified_aircraft_data()
     sheet_scale = _sheet_scale(catalog)
+    sheet_fleet = _sheet_fleet(catalog)
     filtered_aircraft = catalog
 
     
@@ -1207,6 +1271,7 @@ def home():
     
     return render_template('index.html',
                          sheet_scale=sheet_scale,
+                         sheet_fleet=sheet_fleet,
                          filtered_aircraft=aircraft_page,
                          pagination=pagination,
                          total_aircraft=total,
@@ -1749,8 +1814,10 @@ def api_airports():
             x['name']
         ))
         
-        # Return up to 20 results
-        return jsonify(matching_airports[:20])
+        limited = matching_airports[:20]
+        for airport in limited:
+            airport['shortest_runway_ft'] = _shortest_runway_ft(airport.get('iata'), airport.get('icao'))
+        return jsonify(limited)
         
     except Exception as e:
         print(f"Error in airports API: {e}")
@@ -5901,6 +5968,13 @@ def _create_listing_for_user(user, data):
         return None, market_err
     data['market'] = market
     off_market = market == 'broker_only'
+    raw_intent = str(data.get('listing_intent') or 'sale').strip().lower()
+    if off_market and raw_intent not in ('sale', 'wanted'):
+        return None, ({
+            'error': 'missing_fields',
+            'message': 'Choose whether the aircraft is for sale or wanted.',
+        }, 400)
+    data['listing_intent'] = raw_intent if off_market else 'sale'
     if off_market:
         if not str(data.get('title') or '').strip() or data.get('profile_id') in (None, '') or data.get('year') in (None, ''):
             return None, ({

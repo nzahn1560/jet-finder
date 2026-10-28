@@ -424,36 +424,47 @@ function createRangeDisplay(rangeInfo, distance, color, label, polygonArray) {
             segments.forEach((segment, index) => {
                 const polyline = L.polyline(segment, {
                     color: color,
-                    weight: 2,
-                    dashArray: '5, 5',
+                    weight: 3,
+                    interactive: false,
+                    pane: 'rangeCirclePane'
+                }).addTo(map);
+                const hit = L.polyline(segment, {
+                    color: color,
+                    weight: 16,
+                    opacity: 0,
+                    interactive: true,
+                    bubblingMouseEvents: false,
                     pane: 'rangeCirclePane'
                 }).addTo(map);
 
-                polygonArray.push(polyline);
+                polygonArray.push(polyline, hit);
 
-                // Add tooltip to the first segment
-                if (index === 0) {
-                    polyline.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
-                        permanent: false,
-                        direction: 'top',
-                        className: 'range-tooltip'
-                    });
-                }
+                hit.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
+                    sticky: true,
+                    className: 'range-tooltip'
+                });
             });
         } else {
             // Create a regular polyline if it doesn't cross the date line
             const rangeLine = L.polyline(rangeInfo.points, {
                 color: color,
-                weight: 2,
-                dashArray: '5, 5',
+                weight: 3,
+                interactive: false,
+                pane: 'rangeCirclePane'
+            }).addTo(map);
+            const rangeHit = L.polyline(rangeInfo.points, {
+                color: color,
+                weight: 16,
+                opacity: 0,
+                interactive: true,
+                bubblingMouseEvents: false,
                 pane: 'rangeCirclePane'
             }).addTo(map);
 
-            polygonArray.push(rangeLine);
+            polygonArray.push(rangeLine, rangeHit);
 
-            rangeLine.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
-                permanent: false,
-                direction: 'top',
+            rangeHit.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
+                sticky: true,
                 className: 'range-tooltip'
             });
         }
@@ -462,20 +473,18 @@ function createRangeDisplay(rangeInfo, distance, color, label, polygonArray) {
         // Eastern hemisphere polygon
         const eastPolygon = L.polygon(rangeInfo.eastPolygon, {
             color: color,
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.05,
-            dashArray: '5, 5',
+            weight: 3,
+            fill: false,
+            interactive: true,
             pane: 'rangeCirclePane'
         }).addTo(map);
 
         // Western hemisphere polygon
         const westPolygon = L.polygon(rangeInfo.westPolygon, {
             color: color,
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.05,
-            dashArray: '5, 5',
+            weight: 3,
+            fill: false,
+            interactive: true,
             pane: 'rangeCirclePane'
         }).addTo(map);
 
@@ -483,34 +492,41 @@ function createRangeDisplay(rangeInfo, distance, color, label, polygonArray) {
 
         // Add tooltip to the first polygon
         eastPolygon.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
-            permanent: false,
-            direction: 'top',
+            sticky: true,
+            className: 'range-tooltip'
+        });
+        westPolygon.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
+            sticky: true,
             className: 'range-tooltip'
         });
     } else {
-        // Create a regular circle if it doesn't cross the date line
-        const circle = L.circle(rangeInfo.center, {
-            radius: rangeInfo.radius,
+        const ringPoints = rangeInfo.points && rangeInfo.points.length
+            ? rangeInfo.points
+            : [];
+        const ring = L.polyline(ringPoints, {
             color: color,
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.05,
-            dashArray: '5, 5',
+            weight: 3,
+            interactive: false,
             pane: 'rangeCirclePane'
         }).addTo(map);
-
-        // Store circle reference based on type
+        const hit = L.polyline(ringPoints, {
+            color: color,
+            weight: 16,
+            opacity: 0,
+            interactive: true,
+            bubblingMouseEvents: false,
+            pane: 'rangeCirclePane'
+        }).addTo(map);
+        polygonArray.push(ring, hit);
         if (color === '#F05545') {
-            rangeCircle = circle;
+            rangeCircle = hit;
         } else if (color === '#FFFFFF') {
-            avgTripRangeCircle = circle;
+            avgTripRangeCircle = hit;
         } else if (color === '#3498DB') {
-            longestLegRangeCircle = circle;
+            longestLegRangeCircle = hit;
         }
-
-        circle.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
-            permanent: false,
-            direction: 'top',
+        hit.bindTooltip(`${label}: ${Math.round(distance)} nm`, {
+            sticky: true,
             className: 'range-tooltip'
         });
     }
@@ -1075,6 +1091,11 @@ function addRoutePair(fromAirport, toAirport, frequency) {
         ${toAirport.city}, ${toAirport.country || ''}<br>
         <button class="btn btn-sm btn-danger mt-2 delete-route-btn" data-route-id="${routePair.id}">Delete Route</button>
     `);
+    toMarker.bindTooltip(`${Math.round(legDistance)} nm this leg`, {
+        sticky: true,
+        direction: 'top',
+        className: 'range-tooltip'
+    });
 
     // Add event listeners for delete buttons
     fromMarker.on('popupopen', function () {
@@ -2086,7 +2107,24 @@ function updateInputFields() {
     refreshListingScenario();
 }
 
+function syncAirportRunways() {
+    const feet = [];
+    const consider = function (airport) {
+        const length = Number(airport && airport.shortest_runway_ft);
+        if (length > 0) feet.push(length);
+    };
+    consider(homeAirport);
+    routePairs.forEach(function (pair) {
+        consider(pair.from);
+        consider(pair.to);
+        consider(pair.fromAirport);
+        consider(pair.toAirport);
+    });
+    window.airportRunwayLimit = feet.length ? Math.min.apply(null, feet) : null;
+}
+
 function refreshListingScenario() {
+    syncAirportRunways();
     if (typeof window.refreshListingNumbers === 'function') {
         window.refreshListingNumbers();
     }

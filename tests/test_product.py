@@ -172,6 +172,8 @@ class ProductTests(unittest.TestCase):
         self._login('broker@example.com', 'broker-pass-1')
         broker_page = self.client.get('/create-listing')
         self.assertIn(b'Off market', broker_page.data)
+        self.assertIn(b'For sale', broker_page.data)
+        self.assertIn(b'Wanted', broker_page.data)
         self.assertNotIn(b'value="private"', broker_page.data)
         created = self.client.post('/api/listings', json=self._payload('Broker Quiet', 'broker_only'))
         self.assertEqual(created.status_code, 201, created.get_json())
@@ -188,6 +190,28 @@ class ProductTests(unittest.TestCase):
         row = db_module.get_listing_with_owner(created.get_json()['id'])
         self.assertEqual(row['title'], 'Quiet Name')
         self.assertEqual(row['year'], 2016)
+        self.assertEqual(row.get('listing_intent') or 'sale', 'sale')
+        wanted = self.client.post('/api/listings', json={
+            'profile_id': self.profile_id,
+            'title': 'Looking For',
+            'year': 2018,
+            'market': 'broker_only',
+            'listing_intent': 'wanted',
+        })
+        self.assertEqual(wanted.status_code, 201, wanted.get_json())
+        wanted_row = db_module.get_listing_with_owner(wanted.get_json()['id'])
+        self.assertEqual(wanted_row['listing_intent'], 'wanted')
+        rejected = self.client.post('/api/listings', json={
+            'profile_id': self.profile_id,
+            'title': 'Neither',
+            'year': 2018,
+            'market': 'broker_only',
+            'listing_intent': 'lease',
+        })
+        self.assertEqual(rejected.status_code, 400)
+        opened = self.client.get('/off-market')
+        self.assertIn(b'For sale', opened.data)
+        self.assertIn(b'Wanted', opened.data)
 
     def test_editing_a_live_listing_is_sent_back_as_an_amendment(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -354,6 +378,13 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(db_module.get_charter_booking(booking_id)['status'], 'confirmed')
 
+    def test_airport_search_includes_shortest_runway(self):
+        found = self.client.get('/api/airports?q=TEB')
+        self.assertEqual(found.status_code, 200)
+        airports = found.get_json()
+        teb = next(item for item in airports if item.get('iata') == 'TEB')
+        self.assertEqual(teb['shortest_runway_ft'], 6014)
+
     def test_hidden_listing_media_and_spreadsheet_stay_private(self):
         self._login('broker@example.com', 'broker-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Hidden Media Jet', 'broker_only'))
@@ -369,7 +400,10 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/')
         self.assertIn(b'function escCard', page.data)
         self.assertIn(b'seller-notes', page.data)
-        self.assertIn(b'flight-deck seat', page.data)
+        self.assertIn(b'inc. 1 pilot seat', page.data)
+        self.assertIn(b'(one-way)', page.data)
+        self.assertIn(b'If chartered', page.data)
+        self.assertNotIn(b'Cost To Charter', page.data)
         self.assertIn(b'Min Crew Required', page.data)
         self.assertIn(b'Best Speed/$', page.data)
         self.assertIn(b'refreshListingNumbers', page.data)

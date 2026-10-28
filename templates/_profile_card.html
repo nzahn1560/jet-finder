@@ -1,76 +1,130 @@
 <style>
     .identity {
-        background: #111;
-        border-radius: 20px;
+        background: #161616;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 28px;
         overflow: hidden;
-        margin-bottom: 2rem;
+        margin-bottom: 2.5rem;
+        color: #f7f4ef;
+        font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
     }
     .identity__banner {
-        height: 240px;
-        background: #1a1a1a center/cover no-repeat;
+        height: 280px;
+        background: #1c1c1c center/cover no-repeat;
     }
     .identity__body {
         display: grid;
-        grid-template-columns: 168px 1fr;
-        gap: 1.25rem 1.75rem;
-        padding: 0 2rem 2rem;
-        margin-top: -72px;
+        grid-template-columns: 188px minmax(0, 1fr);
+        gap: 1.5rem 2.25rem;
+        padding: 0 2.5rem 2.5rem;
+        margin-top: -84px;
     }
     .identity__photo {
-        width: 168px;
-        height: 168px;
+        width: 188px;
+        height: 188px;
         border-radius: 50%;
-        border: 4px solid #111;
+        border: 6px solid #161616;
         background: #2a2a2a center/cover no-repeat;
         display: grid;
         place-items: center;
         color: #fff;
-        font-weight: 700;
-        font-size: 2.6rem;
+        font-family: Georgia, "Iowan Old Style", Palatino, serif;
+        font-weight: 500;
+        font-size: 3rem;
         letter-spacing: 0.04em;
     }
     .identity__name {
-        margin: 4.2rem 0 0.45rem;
+        margin: 5rem 0 0.35rem;
         color: #fff;
-        font-size: 2.6rem;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-        line-height: 1.05;
+        font-family: Georgia, "Iowan Old Style", Palatino, serif;
+        font-size: 3.1rem;
+        font-weight: 500;
+        letter-spacing: -0.03em;
+        line-height: 1.02;
     }
-    .identity__line {
-        margin: 0.45rem 0;
-        color: #f3f3f3;
-        font-size: 1.2rem;
+    .identity__role {
+        margin: 0 0 1.1rem;
+        color: #F05545;
+        font-size: 0.78rem;
+        font-weight: 650;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+    }
+    .identity__facts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.9rem 1.5rem;
+        margin: 0;
+    }
+    .identity__facts div { min-width: 0; }
+    .identity__facts dt {
+        margin: 0 0 0.2rem;
+        color: #9d9d9d;
+        font-size: 0.68rem;
+        font-weight: 650;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+    }
+    .identity__facts dd {
+        margin: 0;
+        color: #f7f4ef;
+        font-size: 1.05rem;
         line-height: 1.4;
+        word-break: break-word;
+    }
+    .identity__facts a { color: #fff; text-decoration: none; }
+    .identity__facts a:hover { color: #F05545; }
+    .identity__line {
+        margin: 0.7rem 0 0;
+        color: #f3f3f3;
+        font-size: 1.05rem;
+        line-height: 1.45;
     }
     .identity__bio {
-        max-width: 62ch;
-        margin: 0.85rem 0 0;
-        color: #ddd;
-        font-size: 1.08rem;
-        line-height: 1.6;
+        max-width: 68ch;
+        margin: 1.25rem 0 0;
+        color: #e6e1d8;
+        font-family: Georgia, "Iowan Old Style", Palatino, serif;
+        font-size: 1.16rem;
+        line-height: 1.65;
     }
-    .identity__line a { color: #fff; }
     .identity__edit-btn {
-        margin-top: 0.8rem;
+        margin-top: 1.25rem;
         background: transparent;
         color: #fff;
-        border: 0;
-        padding: 0;
-        font-weight: 700;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+        padding: 0.45rem 1rem;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.75rem;
         cursor: pointer;
     }
     .identity__edit {
         grid-column: 1 / -1;
         display: grid;
-        gap: 0.65rem;
+        gap: 1rem;
         margin-top: 0.5rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
     }
     .identity__edit[hidden] { display: none; }
     .identity__fields {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 0.65rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.9rem 1rem;
+    }
+    .identity__fields label,
+    .identity__photos label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        color: #9d9d9d;
+        font-size: 0.68rem;
+        font-weight: 650;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
     }
     .identity__photos {
         display: flex;
@@ -80,11 +134,12 @@
     .identity .dash__btn {
         display: inline-flex;
         align-items: center;
-        padding: 0.55rem 1rem;
-        border-radius: 10px;
-        font-weight: 700;
+        padding: 0.6rem 1.1rem;
+        border-radius: 999px;
+        font-weight: 650;
+        letter-spacing: 0.03em;
         text-decoration: none;
-        margin: 0.2rem 0.35rem 0.2rem 0;
+        margin: 0.2rem 0.45rem 0.2rem 0;
     }
     .identity .dash__btn--primary { background: #F05545; color: #fff; }
     .identity .dash__btn--secondary { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.25); }
@@ -94,11 +149,13 @@
         border-radius: 999px;
         padding: 0.55rem 1rem;
         cursor: pointer;
-        font-size: 1.05rem;
+        font-size: 0.75rem;
+        width: fit-content;
     }
     @media (max-width: 640px) {
-        .identity__body { grid-template-columns: 1fr; padding: 0 1rem 1.25rem; }
-        .identity__name { margin-top: 0.75rem; }
+        .identity__body { grid-template-columns: 1fr; padding: 0 1.15rem 1.5rem; }
+        .identity__name { margin-top: 0.85rem; font-size: 2.4rem; }
+        .identity__banner { height: 180px; }
     }
 </style>
 {% set person_name = ((user.first_name or '') ~ ' ' ~ (user.last_name or ''))|trim or 'Member' %}
@@ -122,21 +179,26 @@
         <div>
             <h1 class="identity__name">{{ person_name }}</h1>
             {% if brokerage %}
-            <p class="identity__line">Brokerage · {{ brokerage }}</p>
+            <p class="identity__role">{{ brokerage }}</p>
             {% elif (user.profile_role or '') == 'broker' %}
-            <p class="identity__line">Broker</p>
+            <p class="identity__role">Broker</p>
             {% elif user.profile_role and user.profile_role != 'other' %}
-            <p class="identity__line">{{ user.profile_role|replace('_', ' ')|title }}</p>
+            <p class="identity__role">{{ user.profile_role|replace('_', ' ')|title }}</p>
             {% endif %}
-            {% if place %}
-            <p class="identity__line">{{ place }}</p>
-            {% endif %}
-            {% if user.phone %}
-            <p class="identity__line"><a href="tel:{{ user.phone }}">{{ user.phone }}</a></p>
-            {% endif %}
-            {% if user.email %}
-            <p class="identity__line"><a href="mailto:{{ user.email }}">{{ user.email }}</a></p>
-            {% endif %}
+            <dl class="identity__facts">
+                {% if place %}
+                <div><dt>Location</dt><dd>{{ place }}</dd></div>
+                {% endif %}
+                {% if user.phone %}
+                <div><dt>Phone</dt><dd><a href="tel:{{ user.phone }}">{{ user.phone }}</a></dd></div>
+                {% endif %}
+                {% if user.email %}
+                <div><dt>Email</dt><dd><a href="mailto:{{ user.email }}">{{ user.email }}</a></dd></div>
+                {% endif %}
+                {% if user.profile_role and user.profile_role != 'other' %}
+                <div><dt>Role</dt><dd>{{ user.profile_role|replace('_', ' ')|title }}</dd></div>
+                {% endif %}
+            </dl>
             {% if user.broker_bio %}
             <p class="identity__bio">{{ user.broker_bio }}</p>
             {% endif %}
@@ -150,18 +212,20 @@
         {% if is_owner %}
         <form id="profile-edit" class="identity__edit" hidden>
             <div class="identity__fields">
-                <input class="form-control" name="company" placeholder="Brokerage" value="{{ user.company or '' }}">
-                <input class="form-control" name="first_name" placeholder="First name" value="{{ user.first_name or '' }}">
-                <input class="form-control" name="last_name" placeholder="Last name" value="{{ user.last_name or '' }}">
-                <input class="form-control" name="profile_city" placeholder="City" value="{{ user.profile_city or '' }}">
-                <input class="form-control" name="profile_state" placeholder="State" value="{{ user.profile_state or '' }}">
-                <input class="form-control" name="phone" placeholder="Phone" value="{{ user.phone or '' }}">
-                <textarea class="form-control" name="broker_bio" maxlength="1000" rows="4" placeholder="Bio, up to 1000 characters" style="grid-column: 1 / -1;">{{ user.broker_bio or '' }}</textarea>
-                <select class="form-select" name="profile_role">
-                    {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
-                    <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|replace('_', ' ')|title }}</option>
-                    {% endfor %}
-                </select>
+                <label>Brokerage<input class="form-control" name="company" value="{{ user.company or '' }}"></label>
+                <label>First name<input class="form-control" name="first_name" value="{{ user.first_name or '' }}"></label>
+                <label>Last name<input class="form-control" name="last_name" value="{{ user.last_name or '' }}"></label>
+                <label>City<input class="form-control" name="profile_city" value="{{ user.profile_city or '' }}"></label>
+                <label>State<input class="form-control" name="profile_state" value="{{ user.profile_state or '' }}"></label>
+                <label>Phone<input class="form-control" name="phone" value="{{ user.phone or '' }}"></label>
+                <label style="grid-column: 1 / -1;">Bio<textarea class="form-control" name="broker_bio" maxlength="1000" rows="4">{{ user.broker_bio or '' }}</textarea></label>
+                <label>Role
+                    <select class="form-select" name="profile_role">
+                        {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
+                        <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|replace('_', ' ')|title }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
             </div>
             <div class="identity__photos">
                 <label>Photo

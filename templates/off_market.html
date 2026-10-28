@@ -9,6 +9,10 @@
 {% block content %}
 <div class="section-page">
     <h1>Off market <span class="nav-tag">Brokers only</span></h1>
+    <div class="om-switch" role="tablist">
+        <button type="button" class="om-switch__btn is-active" data-intent="sale">For sale</button>
+        <button type="button" class="om-switch__btn" data-intent="wanted">Wanted</button>
+    </div>
     <div class="om-tools">
         <select id="om-make" class="form-select" aria-label="Manufacturer"></select>
         <input id="om-model" class="form-control" type="search" placeholder="Model" autocomplete="off">
@@ -24,6 +28,7 @@
     const modelEl = document.getElementById('om-model');
     const grid = document.getElementById('om-grid');
     const empty = document.getElementById('om-empty');
+    let intent = 'sale';
     const makes = [...new Set(listings.map(function (item) { return item.manufacturer || ''; }).filter(Boolean))].sort();
     makeEl.innerHTML = '<option value="">All manufacturers</option>' + makes.map(function (name) {
         return '<option value="' + name.replace(/"/g, '&quot;') + '">' + name + '</option>';
@@ -46,11 +51,16 @@
         const shown = listings.filter(function (item) {
             const itemMake = (item.manufacturer || '').toLowerCase();
             const itemModel = ((item.model || '') + ' ' + (item.title || '')).toLowerCase();
+            const itemIntent = item.intent === 'wanted' ? 'wanted' : 'sale';
+            if (itemIntent !== intent) return false;
             if (make && itemMake !== make) return false;
             if (model && itemModel.indexOf(model) < 0) return false;
             return true;
         });
         empty.hidden = shown.length > 0;
+        empty.textContent = intent === 'wanted'
+            ? 'No aircraft wanted match that manufacturer and model.'
+            : 'No aircraft for sale match that manufacturer and model.';
         grid.innerHTML = shown.map(function (item) {
             const price = money(item.price);
             const hours = Number(item.hours) > 0 ? Number(item.hours).toLocaleString() + ' hrs' : '';
@@ -67,6 +77,15 @@
     }
     makeEl.addEventListener('change', render);
     modelEl.addEventListener('input', render);
+    document.querySelectorAll('.om-switch__btn').forEach(function (button) {
+        button.addEventListener('click', function () {
+            intent = button.getAttribute('data-intent') || 'sale';
+            document.querySelectorAll('.om-switch__btn').forEach(function (other) {
+                other.classList.toggle('is-active', other === button);
+            });
+            render();
+        });
+    });
     render();
 })();
 </script>

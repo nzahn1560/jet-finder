@@ -207,6 +207,8 @@ class UserListing(Base):
 
     city = Column(String(120))
     state = Column(String(40))
+    # sale | wanted. Public listings stay sale. Off-market brokers choose one.
+    listing_intent = Column(String(20), default='sale', nullable=False)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -794,6 +796,7 @@ def init_db():
                 'review_message TEXT',
                 'city TEXT',
                 'state TEXT',
+                'listing_intent TEXT DEFAULT \'sale\'',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN {col_def}'))
@@ -871,6 +874,7 @@ def init_db():
                 ('review_message', 'TEXT'),
                 ('city', 'VARCHAR(120)'),
                 ('state', 'VARCHAR(40)'),
+                ('listing_intent', "VARCHAR(20) DEFAULT 'sale'"),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -1337,7 +1341,7 @@ def _apply_listing_details(row, details):
     keys = (
         'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
         'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
-        'passenger_config', 'city', 'state',
+        'passenger_config', 'city', 'state', 'listing_intent',
     )
     for key in keys:
         if key not in details or details[key] in (None, ''):
@@ -1347,6 +1351,10 @@ def _apply_listing_details(row, details):
             try:
                 value = int(value)
             except (TypeError, ValueError):
+                continue
+        if key == 'listing_intent':
+            value = str(value).strip().lower()
+            if value not in ('sale', 'wanted'):
                 continue
         setattr(row, key, value)
 
