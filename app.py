@@ -995,6 +995,7 @@ def _sheet_fleet(rows):
             'p': price,
             'f': num('total_fixed_cost'),
             'v': num('total_variable_cost'),
+            'b': num('cabin_volume'),
             'c': row.get('category') or '',
         })
     return fleet

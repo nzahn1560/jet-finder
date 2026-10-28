@@ -1503,7 +1503,7 @@ function updateRoutesDisplay() {
                 <div class="d-flex align-items-center">
                     <label class="text-white me-2 small">Legs/Year:</label>
                     <input type="number" class="form-control form-control-sm route-frequency" 
-                           style="width: 60px;" min="1" value="${route.frequency}" 
+                           style="width: 7rem; min-width: 7rem; flex: 0 0 7rem;" min="1" value="${route.frequency}" 
                            data-id="${route.id}">
                 </div>
             </div>
