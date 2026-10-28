@@ -3489,6 +3489,7 @@
         text-transform: none;
         letter-spacing: 0;
         font-weight: 600;
+        font-size: 0.72rem;
     }
 
     .stat-note {
@@ -4819,7 +4820,7 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=6"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=7"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -5844,6 +5845,7 @@
             numberOfTrips: parseFloat(document.getElementById('number-of-trips')?.value) || 120,
             yearsOfOwnership: parseFloat(document.getElementById('yearsOfOwnership')?.value) || 10,
             jetAPrice: parseFloat(document.getElementById('jetAPrice')?.value) || 6.50,
+            avgasPrice: parseFloat(document.getElementById('avgasPrice')?.value) || 9,
             depreciationRate: parseFloat(document.getElementById('depreciationRate')?.value) || 4.00,
             costToCharter: parseFloat(document.getElementById('costToCharter')?.value) || 200,
             pistonPilotPay: parseFloat(document.getElementById('pistonPilotPay')?.value) || 65000,
@@ -6424,16 +6426,22 @@
         return 'rgb(' + red + ',' + green + ',' + blue + ')';
     }
 
-    function scoredBar(className, label, valueHtml, pct, extra) {
+    function scoredBar(className, label, dataPoint, pct) {
         const scored = pct != null && pct !== '';
         const color = scored ? scoreColor(pct) : '#2a2a2a';
-        let paren = '';
-        if (scored && extra) paren = '(' + pct + '% · ' + extra + ')';
-        else if (scored) paren = '(' + pct + '%)';
-        const mark = paren ? '<span class="stat-pct">' + paren + '</span>' : '';
+        const point = dataPoint == null || dataPoint === '' ? '' : '<span class="stat-pct">(' + dataPoint + ')</span>';
+        const score = scored ? pct + '%' : '';
         return '<div class="' + className + (scored ? ' is-scored' : '') + '" style="background:' + color + '">'
             + '<div class="' + className + '__label">' + label + '</div>'
-            + '<div class="' + className + '__value">' + valueHtml + ' ' + mark + '</div></div>';
+            + '<div class="' + className + '__value">' + point + (score ? ' ' + score : '') + '</div></div>';
+    }
+
+    function fleetStatPercent(kind, value, higherIsBetter) {
+        const params = buildScenarioParams(getUserInputs());
+        const cache = window.dynamicNormalizationCache && window.dynamicNormalizationCache[params.cacheKey];
+        const values = cache && cache.benchmarks ? cache.benchmarks[kind] : null;
+        const pct = marketStatPercent(value, values, higherIsBetter);
+        return pct == null ? null : Math.max(0, Math.min(100, pct));
     }
 
     // Populate relative performance scores for all visible aircraft
@@ -6464,11 +6472,6 @@
                 console.warn('⚠️ All-Around score is 0 or NaN for aircraft:', aircraft.aircraft_name || aircraft.name);
             }
 
-            const peers = filteredAircraftData.length ? filteredAircraftData : allAircraftData;
-            const specScore = {
-                speed: marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true),
-                range: marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true)
-            };
             metrics.forEach((metricType, i) => {
                 const percentage = sheetDollarPercent(aircraft, metricType);
                 const raw = {
@@ -6481,8 +6484,7 @@
                 const shown = Number.isFinite(Number(raw))
                     ? Number(raw).toLocaleString(undefined, { maximumFractionDigits: 2 })
                     : '—';
-                const extra = specScore[metricType] == null ? '' : metricType + ' ' + specScore[metricType] + '%';
-                html += scoredBar('perf-bar', metricLabels[i], shown, percentage, extra);
+                html += scoredBar('perf-bar', metricLabels[i], shown, percentage);
             });
 
             performanceContainer.innerHTML = html;
@@ -6547,20 +6549,18 @@
         const sellerName = escCard(aircraft.seller_name || 'Seller');
         const overallScore = aircraft.overall_score == null ? '—' : aircraft.overall_score;
         const listingHref = aircraft.is_user_listing && aircraft.id ? '/listing/' + aircraft.id : '';
-        const peers = filteredAircraftData.length ? filteredAircraftData : allAircraftData;
-        const peerMetrics = peers.map(function (item) { return calculateDynamicMetrics(item, getUserInputs()); });
         const passengerLabel = Number(aircraft.min_crew) === 1
             ? 'Passengers <span class="stat-note">(inc. 1 pilot seat)</span>'
             : 'Passengers';
         const specRows = [
-            { label: 'Range (seats full)', value: `${aircraft.range || 0} nm`, pct: marketStatPercent(aircraft.range, peers.map(function (item) { return item.range; }), true) },
-            { label: 'Speed', value: `${aircraft.speed || 0} kts`, pct: marketStatPercent(aircraft.speed, peers.map(function (item) { return item.speed; }), true) },
-            { label: passengerLabel, value: `${aircraft.passengers || 0}`, pct: marketStatPercent(aircraft.passengers, peers.map(function (item) { return item.passengers; }), true) },
-            { label: 'Cabin', value: `${aircraft.cabin_volume || 0} cu ft`, pct: marketStatPercent(aircraft.cabin_volume, peers.map(function (item) { return item.cabin_volume; }), true) },
-            { label: 'Hours / year', value: `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, pct: marketStatPercent(displayMetrics.totalTripTime, peerMetrics.map(function (item) { return item.totalTripTime; }), false) },
-            { label: 'Average leg', value: `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, pct: marketStatPercent(displayMetrics.averageTripTime, peerMetrics.map(function (item) { return item.averageTripTime; }), false) },
-            { label: 'Annual budget', value: `$${displayMetrics.annualBudget.toLocaleString()}`, pct: marketStatPercent(displayMetrics.annualBudget, peerMetrics.map(function (item) { return item.annualBudget; }), false) },
-            { label: 'Multi-year cost', value: `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, pct: marketStatPercent(displayMetrics.multiYearTotalCost, peerMetrics.map(function (item) { return item.multiYearTotalCost; }), false) },
+            { label: 'Range (seats full)', value: `${aircraft.range || 0} nm`, pct: fleetStatPercent('range', aircraft.range, true) },
+            { label: 'Speed', value: `${aircraft.speed || 0} kts`, pct: fleetStatPercent('speed', aircraft.speed, true) },
+            { label: passengerLabel, value: `${aircraft.passengers || 0}`, pct: fleetStatPercent('passengers', aircraft.passengers, true) },
+            { label: 'Cabin', value: `${aircraft.cabin_volume || 0} cu ft`, pct: fleetStatPercent('cabin', aircraft.cabin_volume, true) },
+            { label: 'Hours / year', value: `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, pct: fleetStatPercent('hours', displayMetrics.totalTripTime, false) },
+            { label: 'Average leg', value: `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, pct: fleetStatPercent('leg', displayMetrics.averageTripTime, false) },
+            { label: 'Annual budget', value: `$${displayMetrics.annualBudget.toLocaleString()}`, pct: fleetStatPercent('annual', displayMetrics.annualBudget, false) },
+            { label: 'Multi-year cost', value: `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, pct: fleetStatPercent('multiyear', displayMetrics.multiYearTotalCost, false) },
         ];
 
         card.innerHTML = `
@@ -7138,11 +7138,11 @@
             G2: toNumber(inputs.numberOfTrips) || 0,
             H2: toNumber(inputs.yearsOfOwnership) || 0,
             I2: toNumber(inputs.jetAPrice) || 0,
-            J2: toNumber(inputs.avgasPrice) || 0,
+            J2: toNumber(inputs.avgasPrice) || 9,
             K2: (toNumber(inputs.depreciationRate) || 0) / 100,
             L2: (toNumber(inputs.costToCharter) || 0) / 100,
             M2: toNumber(inputs.pistonPilotPay) || 0,
-            N2: toNumber(inputs.turbopropPilotPay) || 0,
+            N2: toNumber(inputs.turbopropPilotPay) || 82500,
             O2: toNumber(inputs.businessJetPilotPay) || 0,
             P2: toNumber(inputs.plannedPax) || 0,
             Q2: toNumber(inputs.passengerPay) || 0,
@@ -7152,7 +7152,7 @@
         };
 
         params.cacheKey = [
-            params.F2, params.G2, params.H2, params.I2,
+            params.F2, params.G2, params.H2, params.I2, params.J2,
             params.K2, params.L2, params.M2, params.N2,
             params.O2, params.P2, params.Q2, params.R2,
             params.S2, params.T2
@@ -7179,10 +7179,11 @@
         const AG2 = Y2 > 0 ? params.S2 / Y2 : 0;
         const AH2 = AG2 * params.T2;
         const AI2 = AH2 * AF2;
-        const AL2 = ((BL2 / 6) * params.I2) * AD2;
+        const aircraftType = (aircraft?.category || '').toLowerCase();
+        const fuelPrice = aircraftType.includes('piston') ? (params.J2 || params.I2) : params.I2;
+        const AL2 = ((BL2 / 6) * fuelPrice) * AD2;
         const AM2 = AJ2 + AK2;
 
-        const aircraftType = (aircraft?.category || '').toLowerCase();
         let pilotPay = params.N2;
         if (aircraftType.includes('piston')) {
             pilotPay = params.M2;
@@ -7292,6 +7293,7 @@
                 price: Number(row.p) || 0,
                 total_fixed_cost: Number(row.f) || 0,
                 total_variable_cost: Number(row.v) || 0,
+                cabin_volume: Number(row.b) || 0,
                 category: row.c || ''
             };
         }).filter(function (row) { return row.price > 0 && row.speed > 0; });
@@ -7305,12 +7307,25 @@
 
         const fleetRows = spreadsheetFleet();
         const population = fleetRows.length ? fleetRows : allAircraftData;
+        const benchmarks = { range: [], speed: [], passengers: [], cabin: [], hours: [], leg: [], annual: [], multiyear: [] };
+        const keep = function (list, value) {
+            const number = Number(value);
+            if (Number.isFinite(number) && number > 0) list.push(number);
+        };
         population.forEach(aircraftItem => {
             const metrics = computeMetricsForAircraft(aircraftItem, params);
             metricsById[metrics.key] = metrics;
             if (metrics.AT2 > 0) allAT2.push(metrics.AT2);
             if (metrics.AW2 > 0) allAW2.push(metrics.AW2);
             if (metrics.BC2 > 0) allBC2.push(metrics.BC2);
+            keep(benchmarks.range, aircraftItem.range);
+            keep(benchmarks.speed, aircraftItem.speed);
+            keep(benchmarks.passengers, aircraftItem.passengers);
+            keep(benchmarks.cabin, aircraftItem.cabin_volume);
+            keep(benchmarks.hours, metrics.AD2);
+            keep(benchmarks.leg, metrics.AC2);
+            keep(benchmarks.annual, metrics.AN2);
+            keep(benchmarks.multiyear, metrics.AO2);
         });
 
         const minAT2 = allAT2.length ? Math.min(...allAT2) : 0;
@@ -7367,6 +7382,7 @@
             maxBC2,
             minAZ2,
             maxAZ2,
+            benchmarks,
             metricsById
         };
     }
@@ -7840,7 +7856,7 @@
         setValueIfExists('number-of-trips', '104');
         setValueIfExists('yearsOfOwnership', '5');
         setValueIfExists('jetAPrice', '6.50');
-        setValueIfExists('avgasPrice', '4.00');
+        setValueIfExists('avgasPrice', '9.00');
         setValueIfExists('depreciationRate', '4.00');
         setValueIfExists('costToCharter', '200');
         setValueIfExists('pistonPilotPay', '65000');
