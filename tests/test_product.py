@@ -246,6 +246,25 @@ class ProductTests(unittest.TestCase):
         patched = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1})
         self.assertEqual(patched.status_code, 403)
 
+    def test_public_and_off_market_listings_reach_the_admin_queue(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        public = self.client.post('/api/listings', json=self._payload('Queue Public', 'public'))
+        self.assertEqual(public.status_code, 201, public.get_json())
+        self._login('broker@example.com', 'broker-pass-1')
+        private = self.client.post('/api/listings', json=self._payload('Queue Off Market', 'off_market'))
+        self.assertEqual(private.status_code, 201, private.get_json())
+        self._login('admin@example.com', 'admin-pass-1')
+        queue = self.client.get('/api/admin/listings?status=pending')
+        self.assertEqual(queue.status_code, 200)
+        titles = [row.get('title') for row in queue.get_json()['listings']]
+        self.assertIn('Queue Public', titles)
+        self.assertIn('Queue Off Market', titles)
+        notes = self.client.get('/api/notifications')
+        self.assertEqual(notes.status_code, 200)
+        note_titles = [row.get('title') for row in notes.get_json()['notifications']]
+        self.assertTrue(any('Queue Public' in (title or '') for title in note_titles))
+        self.assertTrue(any('Queue Off Market' in (title or '') for title in note_titles))
+
     def test_buyer_cannot_open_admin_and_admin_can_approve_own_listing(self):
         self._login('buyer@example.com', 'buyer-pass-1')
         self.assertEqual(self.client.get('/api/admin/listings').status_code, 403)
@@ -758,8 +777,8 @@ class ProductTests(unittest.TestCase):
         directory = self.client.get('/brokers')
         self.assertEqual(directory.status_code, 200)
         self.assertIn(b'Mapbroker', directory.data)
-        self.assertIn(b'airport code', directory.data)
-        self.assertIn(b'team.iata', directory.data)
+        self.assertNotIn(b'id="broker-list"', directory.data)
+        self.assertIn(b"map.on('click', clearSelection)", directory.data)
         self._login('map-broker@example.com', 'broker-pass-1')
         opened = self.client.get('/off-market')
         self.assertEqual(opened.status_code, 200)
@@ -768,6 +787,38 @@ class ProductTests(unittest.TestCase):
         self._login('seller@example.com', 'seller-pass-1')
         blocked = self.client.post('/api/listings', json=self._payload('Seller Off Market', 'broker_only'))
         self.assertEqual(blocked.status_code, 403)
+
+    def test_owner_can_delete_their_account_from_the_profile(self):
+        person = self._signup('delete-me@example.com', 'delete-pass-1', 'seller')
+        self._login('delete-me@example.com', 'delete-pass-1')
+        page = self.client.get('/profile')
+        self.assertIn(b'id="delete-account"', page.data)
+        removed = self.client.delete('/api/account')
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        self.assertIsNone(db_module.get_user_by_id(person['id']))
+        self.assertEqual(self.client.get('/api/auth/me').status_code, 401)
+        self.assertEqual(self.client.delete('/api/account').status_code, 401)
+
+    def test_off_market_listing_contact_comes_from_the_poster(self):
+        person = self._paid_broker('off-contact@example.com', 'sub_off_contact')
+        db_module.update_user_profile(person['id'], {
+            'first_name': 'North',
+            'last_name': 'Star',
+            'phone': '555-0148',
+            'company': 'Northstar Desk',
+        })
+        self._login('off-contact@example.com', 'broker-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Contact Jet', 'off_market'))
+        self.assertEqual(created.status_code, 201, created.get_json())
+        listing_id = created.get_json()['id']
+        self.assertTrue(db_module.admin_approve_listing_any(listing_id, self.admin['id']))
+        page = self.client.get('/off-market')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'555-0148', page.data)
+        self.assertIn(b'off-contact@example.com', page.data)
+        self.assertIn(b'Northstar Desk', page.data)
+        self.assertNotIn(b'seller@example.com', page.data)
+        self.assertIn(b'id="om-contact"', page.data)
 
     def test_buyer_can_send_a_broker_a_request_and_a_listing(self):
         self._login('buyer@example.com', 'buyer-pass-1')

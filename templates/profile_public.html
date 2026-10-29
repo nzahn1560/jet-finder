@@ -3,7 +3,7 @@
 {% block title %}{{ ((user.first_name or '') ~ ' ' ~ (user.last_name or ''))|trim or 'Profile' }} - Jet Finder{% endblock %}
 {% block additional_css %}
 <style>
-    .profile-page { background: #0d0d0d; min-height: 70vh; padding: 2rem 0 4rem; }
+    .profile-page { position: relative; z-index: 1; background: #0d0d0d; min-height: 70vh; padding: 2rem 0 4rem; }
     .profile-page__inner { max-width: 980px; margin: 0 auto; padding: 0 20px; }
     .fold { margin-top: 1.5rem; }
     .fold__toggle { width: 100%; text-align: left; background: #161616; color: #fff; border: 0; border-bottom: 1px solid #2a2a2a; padding: 1rem 1.1rem; font-size: 1.35rem; font-weight: 700; cursor: pointer; }
@@ -11,7 +11,8 @@
     .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
     .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.55rem 0.7rem; font-size: 1.05rem; }
     .fold__tools input { flex: 1; }
-    .sale-card { background: #161616; color: #f4f4f4; padding: 1rem 1.1rem; margin-bottom: 0.7rem; }
+    .sale-card { display: block; background: #161616; color: #f4f4f4; padding: 1rem 1.1rem; margin-bottom: 0.7rem; text-decoration: none; border: 1px solid transparent; }
+    .sale-card:hover { color: #fff; border-color: #F05545; }
     .sale-card h3 { margin: 0 0 0.3rem; font-size: 1.35rem; }
     .sale-card p { margin: 0; font-size: 1.1rem; color: #e4e4e4; }
 </style>
@@ -22,8 +23,8 @@
     <div class="profile-page__inner">
         {% include '_profile_card.html' %}
         <section class="fold" id="selling-fold">
-            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="false">Aircraft for sale</button>
-            <div class="fold__body" id="selling-body" hidden>
+            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="true">Aircraft for sale</button>
+            <div class="fold__body" id="selling-body">
                 <div class="fold__tools">
                     <input id="selling-search" type="search" placeholder="Search aircraft">
                     <select id="selling-sort">
@@ -65,7 +66,8 @@
         list.innerHTML = shown.map(function (row) {
             const bits = [row.year, row.engine_type, row.place, row.serial_number ? 'S/N ' + row.serial_number : ''].filter(Boolean).join(' · ');
             const price = Number(row.price) > 0 ? '$' + Number(row.price).toLocaleString() : '';
-            return '<article class="sale-card"><h3>' + esc(row.title || 'Aircraft') + '</h3><p>' + esc(price) + (price && bits ? ' · ' : '') + esc(bits) + '</p></article>';
+            const href = row.market === 'off_market' || row.market === 'broker_only' ? '/off-market' : ('/listing/' + row.id);
+            return '<a class="sale-card" href="' + href + '"><h3>' + esc(row.title || 'Aircraft') + '</h3><p>' + esc(price) + (price && bits ? ' · ' : '') + esc(bits) + '</p></a>';
         }).join('');
         toggle.textContent = 'Aircraft for sale (' + rows.length + ')';
     }

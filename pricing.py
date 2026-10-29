@@ -24,5 +24,5 @@ def listing_price(now: datetime | None = None) -> dict:
         'regular_cents': cents,
         'regular_dollars': cents / 100,
         'promotional': False,
-        'label': 'Listing fee',
+        'label': 'Listing fee, $49.99 per month',
     }

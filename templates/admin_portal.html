@@ -71,7 +71,7 @@
         <div id="tab-listings">
             <div class="ap__filter">
                 <select id="status-filter">
-                    <option value="pending">Pending</option>
+                    <option value="pending">Needs approval</option>
                     <option value="unpaid">Unpaid</option>
                     <option value="active">Active (approved)</option>
                     <option value="rejected">Rejected</option>
@@ -165,7 +165,7 @@ async function loadAdminListings() {
                 + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
                 + ' &middot; ' + esc(l.location || '') + '<br>'
                 + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + '</span>'
-                + ((l.market === 'off_market') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
+                + ((l.market === 'off_market' || l.market === 'broker_only') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
                 + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
                 + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(l.status) + '</span></div>'
