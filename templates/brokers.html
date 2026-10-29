@@ -12,11 +12,6 @@
         <p class="section-lead">Approved brokerages and brokers appear on the map.</p>
 
     <div class="broker-shell">
-        <aside class="broker-list-wrap">
-            <label class="broker-search-label" for="broker-search">Find a broker</label>
-            <input id="broker-search" class="form-control" type="search" placeholder="Name, city, or airport code" autocomplete="off">
-            <div id="broker-list" class="broker-list"></div>
-        </aside>
         <div class="broker-stage">
             <div id="broker-map" class="section-map"></div>
             <article id="broker-selected" class="broker-selected" hidden></article>
@@ -45,8 +40,6 @@
         return '$' + amount.toLocaleString();
     }
     const teams = {{ map_points|tojson }};
-    const listEl = document.getElementById('broker-list');
-    const searchEl = document.getElementById('broker-search');
     const selectedEl = document.getElementById('broker-selected');
     const map = L.map('broker-map').setView([39.8, -98.6], 4);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
@@ -104,8 +97,23 @@
             + (people || '<p>No brokers are on this team yet.</p>');
     }
 
+    function paintMarkers() {
+        markers.forEach(function (marker, id) {
+            const on = id === activeId;
+            marker.setStyle({ radius: on ? 9 : 6, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
+        });
+    }
+
+    function clearSelection() {
+        activeId = null;
+        selectedEl.hidden = true;
+        selectedEl.innerHTML = '';
+        paintMarkers();
+    }
+
     function selectBroker(broker) {
         activeId = broker.pin_id;
+        paintMarkers();
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(broker)
             + (broker.bio ? '<p>' + esc(broker.bio) + '</p>' : '')
@@ -119,10 +127,7 @@
         document.querySelectorAll('.broker-person[data-id]').forEach(function (node) {
             node.classList.toggle('is-selected', node.getAttribute('data-id') === team.pin_id);
         });
-        markers.forEach(function (marker, id) {
-            const on = id === team.pin_id;
-            marker.setStyle({ radius: on ? 9 : 6, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
-        });
+        paintMarkers();
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(team) + '<p>Loading brokers...</p>';
         const marker = markers.get(team.pin_id);
@@ -130,46 +135,6 @@
         const resp = await fetch('/api/broker-teams/' + team.id);
         const detail = await resp.json().catch(function () { return {}; });
         showTeam(team, detail);
-    }
-
-    function searchText(team) {
-        return [
-            team.display_name, team.place, team.city, team.region, team.country,
-            team.iata, team.icao, team.airport_name, team.category, team.leader, team.bio
-        ].filter(Boolean).join(' ').toLowerCase();
-    }
-
-    function renderList(query) {
-        const needle = (query || '').trim().toLowerCase();
-        const shown = teams.filter(function (team) {
-            if (!needle) return true;
-            return searchText(team).indexOf(needle) >= 0;
-        });
-        if (!shown.length) {
-            listEl.innerHTML = '<p class="broker-empty">No brokerage matches that search.</p>';
-            return;
-        }
-        listEl.innerHTML = shown.map(function (team) {
-            return '<button type="button" class="broker-person' + (team.pin_id === activeId ? ' is-selected' : '') + '" data-id="' + team.pin_id + '">'
-                + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'T').slice(0, 1))) + '</span>'
-                + '<span><strong>' + esc(team.display_name) + '</strong>'
-                + '<em>' + esc([team.category, team.city || team.place || 'Brokerage', team.iata].filter(Boolean).join(' · ')) + '</em></span>'
-                + '</button>';
-        }).join('');
-        listEl.querySelectorAll('.broker-person').forEach(function (button) {
-            button.addEventListener('click', function () {
-                const id = button.getAttribute('data-id');
-                const team = teams.find(function (item) { return item.pin_id === id; });
-                if (!team) return;
-                if (team.kind === 'broker') selectBroker(team);
-                else selectTeam(team);
-            });
-        });
-        markers.forEach(function (marker, id) {
-            const visible = shown.some(function (team) { return team.pin_id === id; });
-            if (visible) marker.addTo(map);
-            else map.removeLayer(marker);
-        });
     }
 
     const bounds = [];
@@ -184,20 +149,16 @@
             className: 'broker-tip',
             offset: [0, -8]
         });
-        marker.on('click', function () {
+        marker.on('click', function (event) {
+            if (event && event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
             if (team.kind === 'broker') selectBroker(team);
             else selectTeam(team);
         });
         markers.set(team.pin_id, marker);
         bounds.push([team.lat, team.lon]);
     });
-    if (!teams.length) {
-        listEl.innerHTML = '<p class="broker-empty">No brokerages are on the map yet.</p>';
-    } else {
-        renderList('');
-    }
+    map.on('click', clearSelection);
     if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 8 });
-    searchEl.addEventListener('input', function () { renderList(searchEl.value); });
     setTimeout(function () { map.invalidateSize(); }, 200);
 })();
 </script>

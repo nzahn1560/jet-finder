@@ -4588,7 +4588,7 @@
                                 <strong>$49</strong> <span style="background:#F05545; color:#fff; font-size:0.75rem; padding:2px 6px;">30% off</span>
                             </div>
                             <button class="btn btn-success" id="createListingBtn">
-                                <i class="fas fa-check me-2"></i>Submit listing — $49
+                                <i class="fas fa-check me-2"></i>Submit listing — $49.99 per month
                             </button>
                         </div>
                     </div>
@@ -8120,7 +8120,16 @@
                 }
                 const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
                 const payData = await pay.json().catch(function () { return {}; });
-                window.location.href = (pay.ok && payData.url) ? payData.url : '/dashboard?submitted=1';
+                if (pay.ok && payData.url) {
+                    window.location.href = payData.url;
+                    return;
+                }
+                if (data.payment_required) {
+                    alert(payData.message || 'Checkout could not be opened. The listing is saved. Use Pay listing fee on your profile.');
+                    window.location.href = '/dashboard?paid=0&submitted=' + data.id;
+                    return;
+                }
+                window.location.href = '/dashboard?submitted=' + data.id;
             } catch (err) {
                 alert('Could not create the listing. Please try again.');
             } finally {

@@ -1203,6 +1203,72 @@ def delete_user_session_token(token):
         return n > 0
 
 
+def delete_user_account(user_id):
+    """Remove an account and the rows that belong to it. Returns False when the user is missing."""
+    with get_session() as s:
+        user = s.query(User).filter(User.id == int(user_id)).first()
+        if user is None:
+            return False
+        listing_ids = [
+            row.id for row in s.query(UserListing.id).filter(UserListing.user_id == user.id).all()
+        ]
+        if listing_ids:
+            s.query(BrokerMessage).filter(BrokerMessage.listing_id.in_(listing_ids)).delete(synchronize_session=False)
+            s.query(ListingMedia).filter(ListingMedia.listing_id.in_(listing_ids)).delete(synchronize_session=False)
+            s.query(ListingAudit).filter(ListingAudit.listing_id.in_(listing_ids)).delete(synchronize_session=False)
+            s.query(UserListing).filter(UserListing.id.in_(listing_ids)).delete(synchronize_session=False)
+        s.query(UserListing).filter(UserListing.approved_by == user.id).update(
+            {UserListing.approved_by: None}, synchronize_session=False,
+        )
+        s.query(ListingAudit).filter(ListingAudit.actor_id == user.id).update(
+            {ListingAudit.actor_id: None}, synchronize_session=False,
+        )
+        s.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
+        s.query(UserNotification).filter(UserNotification.user_id == user.id).delete(synchronize_session=False)
+        s.query(SavedAircraft).filter(SavedAircraft.user_id == user.id).delete(synchronize_session=False)
+        s.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete(synchronize_session=False)
+        s.query(UserSubscription).filter(UserSubscription.user_id == user.id).delete(synchronize_session=False)
+        s.query(PerUsePurchase).filter(PerUsePurchase.user_id == user.id).delete(synchronize_session=False)
+        s.query(BuyerPreference).filter(BuyerPreference.user_id == user.id).delete(synchronize_session=False)
+        s.query(BrokerMessage).filter(
+            (BrokerMessage.from_user_id == user.id) | (BrokerMessage.to_user_id == user.id)
+        ).delete(synchronize_session=False)
+        s.query(BrokerTeamMember).filter(BrokerTeamMember.user_id == user.id).delete(synchronize_session=False)
+        team_ids = [
+            row.id for row in s.query(BrokerTeam.id).filter(BrokerTeam.admin_user_id == user.id).all()
+        ]
+        if team_ids:
+            s.query(BrokerTeamMember).filter(BrokerTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
+            s.query(BrokerTeam).filter(BrokerTeam.id.in_(team_ids)).delete(synchronize_session=False)
+        s.query(CharterInquiry).filter(CharterInquiry.user_id == user.id).update(
+            {CharterInquiry.user_id: None}, synchronize_session=False,
+        )
+        s.query(CharterBooking).filter(CharterBooking.user_id == user.id).update(
+            {CharterBooking.user_id: None}, synchronize_session=False,
+        )
+        operator_ids = [
+            row.id for row in s.query(CharterOperator.id).filter(CharterOperator.user_id == user.id).all()
+        ]
+        if operator_ids:
+            aircraft_ids = [
+                row.id for row in s.query(CharterAircraft.id).filter(
+                    CharterAircraft.operator_id.in_(operator_ids)
+                ).all()
+            ]
+            if aircraft_ids:
+                s.query(CharterBlock).filter(CharterBlock.aircraft_id.in_(aircraft_ids)).delete(synchronize_session=False)
+                s.query(CharterBooking).filter(CharterBooking.aircraft_id.in_(aircraft_ids)).delete(synchronize_session=False)
+                s.query(CharterAircraft).filter(CharterAircraft.id.in_(aircraft_ids)).delete(synchronize_session=False)
+            s.query(CharterOperator).filter(CharterOperator.id.in_(operator_ids)).delete(synchronize_session=False)
+        s.query(ServiceProviderReview).filter(ServiceProviderReview.reviewer_id == user.id).delete(synchronize_session=False)
+        s.query(ServiceProviderContact).filter(ServiceProviderContact.customer_id == user.id).delete(synchronize_session=False)
+        s.query(ServiceProvider).filter(ServiceProvider.user_id == user.id).update(
+            {ServiceProvider.user_id: None}, synchronize_session=False,
+        )
+        s.delete(user)
+        return True
+
+
 def purge_expired_user_sessions():
     """Best-effort cleanup of expired session rows. Safe to call periodically."""
     try:
@@ -1659,7 +1725,9 @@ def admin_list_user_listings(status=None, limit=500):
     """Admin: list all listings, optionally filtered by status."""
     with get_session() as s:
         q = s.query(UserListing)
-        if status:
+        if status == 'pending':
+            q = q.filter(UserListing.status.in_(('pending', 'unpaid')))
+        elif status:
             q = q.filter(UserListing.status == status)
         rows = q.order_by(UserListing.created_at.desc()).limit(limit).all()
         return [r.to_dict() for r in rows]
@@ -2299,6 +2367,7 @@ def listings_for_user(user_id, include_off_market=False):
                 'year': row.year,
                 'engine_type': row.engine_type or '',
                 'manufacturer': row.manufacturer or '',
+                'market': market,
             })
         return out
 

@@ -512,7 +512,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">Submitted listings go to approval.</p>
+                        <p id="listing-next-step" class="text-white mb-3">Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -550,7 +550,7 @@
         const box = document.getElementById('listing-price-box');
         const note = document.getElementById('listing-price-note');
         if (!box || !price) return;
-        const current = '$' + Number(price.amount_dollars).toFixed(2);
+        const current = '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
         const regular = '$' + Number(price.regular_dollars).toFixed(2);
         box.innerHTML = price.promotional
             ? '<span style="text-decoration:line-through;color:#888;font-size:1.2rem;">' + regular + '</span> <strong style="font-size:2rem;margin-left:0.5rem;">' + current + '</strong>'
@@ -807,7 +807,10 @@
                         window.location.href = payData.url;
                         return;
                     }
-                } catch (err) { /* listing is already saved */ }
+                    return fail(payData.message || 'Checkout could not be opened. The listing is saved. Use Pay listing fee on your profile.');
+                } catch (err) {
+                    return fail('Checkout could not be opened. The listing is saved. Use Pay listing fee on your profile.');
+                }
             }
             window.location.href = LISTING_USER_IS_ADMIN
                 ? ('/admin?highlight=' + listingId)

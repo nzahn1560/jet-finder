@@ -6,6 +6,8 @@
 {% block additional_css %}
 <style>
     .dash {
+        position: relative;
+        z-index: 1;
         min-height: 100vh;
         background: linear-gradient(160deg, #0a0a0a 0%, #111 40%, #0d0d0d 100%);
         padding: 2rem 0 4rem;
@@ -262,7 +264,9 @@
         .dash__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     .fold { margin-top: 2rem; }
-    .fold__toggle { width: 100%; text-align: left; background: transparent; color: #fff; border: 0; border-bottom: 1px solid rgba(255,255,255,0.12); padding: 0.8rem 0; font-size: 1.45rem; font-weight: 700; cursor: pointer; font-family: 'Orbitron', sans-serif; }
+    .fold__toggle { position: relative; z-index: 2; width: 100%; text-align: left; background: transparent; color: #fff; border: 0; border-bottom: 1px solid rgba(255,255,255,0.12); padding: 0.8rem 0; font-size: 1.45rem; font-weight: 700; cursor: pointer; font-family: 'Orbitron', sans-serif; }
+    .dash__card-title a, .alert-item a { color: #fff; text-decoration: none; }
+    .dash__card-title a:hover, .alert-item a:hover { color: #F05545; }
     .fold__body { padding-top: 1rem; }
     .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
     .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.6rem 0.75rem; font-size: 1.05rem; }
@@ -315,8 +319,8 @@
         {% endif %}
 
         <section class="fold" id="messages">
-            <button type="button" class="fold__toggle" id="messages-toggle" aria-expanded="false">Broker messages</button>
-            <div class="fold__body" id="messages-body" hidden>
+            <button type="button" class="fold__toggle" id="messages-toggle" aria-expanded="true">Broker messages</button>
+            <div class="fold__body" id="messages-body">
                 <form id="portal-message" style="display:grid; gap:0.55rem; margin-bottom:1rem;">
                     <p style="color:#d0d0d0; margin:0;">Send a broker an aircraft request, a listing, or a note. Approved brokers receive it as an alert.</p>
                     <select class="form-select" id="portal-broker"></select>
@@ -343,12 +347,12 @@
         </section>
 
         <section class="fold" id="selling-fold">
-            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="false">Aircraft you're selling</button>
-            <div class="fold__body" id="selling-body" hidden>
+            <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="true">Aircraft you're selling</button>
+            <div class="fold__body" id="selling-body">
         {% if request.args.get('submitted') %}
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
             {% if request.args.get('paid') == '0' %}
-            This listing is saved. Payment was not finished, so it is not in the approval queue yet. Use Pay $49 on the card below.
+            This listing is saved. Payment was not finished. Use Pay listing fee on the card below. An admin can still see it in the approval queue.
             {% elif request.args.get('paid') == '1' %}
             Payment received. This listing is waiting for approval. It appears on the marketplace after it is approved.
             {% else %}
@@ -383,8 +387,8 @@
         </section>
 
         <section class="fold" id="watching-fold">
-            <button type="button" class="fold__toggle" id="watching-toggle" aria-expanded="false">Aircraft you're watching</button>
-            <div class="fold__body" id="watching-body" hidden>
+            <button type="button" class="fold__toggle" id="watching-toggle" aria-expanded="true">Aircraft you're watching</button>
+            <div class="fold__body" id="watching-body">
         <div class="fold__tools">
             <input id="watching-search" type="search" placeholder="Search watched aircraft">
             <select id="watching-sort">
@@ -423,7 +427,7 @@
         const statusCopy = {
             active: 'Live on the marketplace.',
             pending: 'Waiting for approval. Not on the marketplace yet.',
-            unpaid: 'Saved. Pay the $49 fee to send it for approval.',
+            unpaid: 'Saved. Pay the $49.99 per month fee. An admin can already see it.',
             rejected: 'Not approved.',
             deleted: 'Removed from the marketplace.',
             archived: 'Archived.',
@@ -446,15 +450,18 @@
                     ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
                     : (statusCopy[l.status] || 'Saved.'));
             const searchBlob = [l.title, l.name, l.manufacturer, l.category, l.location, l.year].join(' ');
+            const openHref = l.status === 'active'
+                ? (offMarket ? '/off-market' : '/listing/' + l.id)
+                : ('/create-listing?edit=' + l.id);
             return '\n<div class="dash__card" data-search="' + escapeHtml(searchBlob) + '" data-price="' + (Number(l.price) || 0) + '" data-year="' + (Number(l.year) || 0) + '" data-title="' + escapeHtml(l.title || '') + '" data-created="' + escapeHtml(l.created_at || '') + '">\n'
-                + '  <h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>\n'
+                + '  <h3 class="dash__card-title"><a href="' + openHref + '">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</a></h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
                 + rej + amendment + review + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
-                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay listing fee</button>' : '')
+                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49.99 per month</button>' : '')
                 + (l.status === 'rejected' ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Send back for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
@@ -574,11 +581,12 @@
         listEl.innerHTML = saved.map(function (a) {
             const kindLabel = a.kind === 'listing' ? 'For sale' : 'Model';
             const price = Number(a.price) ? '$' + Number(a.price).toLocaleString() : 'Price on request';
+            const href = a.kind === 'listing' && a.target_id ? ('/listing/' + a.target_id) : ('/?aircraft=' + encodeURIComponent(a.target_id || a.title || ''));
             return '<div class="dash__card" data-search="' + escapeHtml([a.title, a.manufacturer, a.location].join(' ')) + '" data-price="' + (Number(a.price) || 0) + '" data-title="' + escapeHtml(a.title || '') + '" data-created="' + escapeHtml(a.created_at || '') + '">'
-                + '<h3 class="dash__card-title">' + escapeHtml(a.title || 'Aircraft') + '</h3>'
+                + '<h3 class="dash__card-title"><a href="' + href + '">' + escapeHtml(a.title || 'Aircraft') + '</a></h3>'
                 + '<p class="dash__card-desc">' + escapeHtml(a.manufacturer || '') + (a.location ? ' · ' + escapeHtml(a.location) : '') + '<br><strong>' + price + '</strong></p>'
                 + '<span class="dash__badge">' + kindLabel + '</span>'
-                + '<div style="margin-top:0.8rem;"><button class="dash__card-link" data-unsave="' + a.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Remove</button></div>'
+                + '<div style="margin-top:0.8rem;"><a class="dash__card-link" href="' + href + '">Open</a> <button class="dash__card-link" data-unsave="' + a.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Remove</button></div>'
                 + '</div>';
         }).join('');
         const watchingSearch = document.getElementById('watching-search');
@@ -674,8 +682,10 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         const rows = (data.inbox || []).concat(data.sent || []);
         inbox.innerHTML = rows.length ? rows.map(function (row) {
             const mine = row.from_user_id === {{ user.id }};
-            return '<article class="alert-item"><strong>' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</strong>'
-                + esc(row.aircraft_name || row.kind) + (row.notes ? '<br>' + esc(row.notes) : '') + '</article>';
+            const personId = mine ? row.to_user_id : row.from_user_id;
+            const listingLink = row.listing_id ? '<br><a href="/listing/' + row.listing_id + '">Open the listing</a>' : '';
+            return '<article class="alert-item"><strong><a href="/people/' + personId + '">' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</a></strong>'
+                + esc(row.aircraft_name || row.kind) + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink + '</article>';
         }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
     }
     loadInbox();

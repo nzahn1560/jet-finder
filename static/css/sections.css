@@ -155,10 +155,7 @@
 }
 
 .broker-shell {
-    display: grid;
-    grid-template-columns: 300px minmax(0, 1fr);
-    gap: 1rem;
-    align-items: stretch;
+    display: block;
 }
 
 .broker-list-wrap,
@@ -356,10 +353,44 @@
 
 .om-card {
     background: linear-gradient(145deg, #1a1a1a, #2d2d2d);
+    border: 1px solid transparent;
     border-radius: 12px;
     padding: 0.85rem 0.9rem;
     color: #f4f4f4;
     min-height: 132px;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+}
+
+.om-card.is-selected,
+.om-card:hover {
+    border-color: #F05545;
+}
+
+.om-contact {
+    margin-top: 1rem;
+    max-width: 520px;
+    background: #161616;
+    border: 1px solid rgba(240, 85, 69, 0.45);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    color: #f4f4f4;
+}
+
+.om-contact h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.35rem;
+    color: #fff;
+}
+
+.om-contact p {
+    margin: 0.25rem 0;
+}
+
+.om-contact a {
+    color: #F05545;
 }
 
 .om-card h2 {
@@ -393,15 +424,7 @@
 }
 
 @media (max-width: 860px) {
-    .broker-shell {
-        grid-template-columns: 1fr;
-    }
-
     .broker-stage .section-map {
         height: 420px;
-    }
-
-    .broker-list {
-        max-height: 240px;
     }
 }

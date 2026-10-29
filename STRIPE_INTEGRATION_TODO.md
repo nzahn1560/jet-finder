@@ -1,8 +1,8 @@
 # Stripe Checkout
 
-Hosted Checkout is already wired in [app.py](app.py). Customers are redirected to a Stripe-hosted payment page. The installed SDK is `stripe==7.8.0` in [requirements.txt](requirements.txt), which is below 21.0.0, so `ui_mode` is `hosted`. SDK 21.0.0 and above would use `hosted_page` instead.
+Hosted Checkout is already wired in [app.py](app.py). Submit for approval redirects to a Stripe-hosted payment page when `STRIPE_SECRET_KEY` is set. The installed SDK is `stripe==7.8.0` in [requirements.txt](requirements.txt), which sends API version 2023-10-16. Parameters that version rejects (`ui_mode`, `name_collection`, `consent_collection`, `integration_identifier`, `origin_context`, `saved_payment_method_options`, `submit_type`) are not sent, because they stopped Checkout from opening.
 
-A listing fee is $49.99. A broker account is $19.99 a month. A broker team is $19.99 a month. Coupon codes are accepted at Checkout.
+A listing fee is $49.99 per month. A broker account is $19.99 per month. A broker team is $19.99 per month. Coupon codes are accepted at Checkout. Set `REQUIRE_PAYMENT_FOR_LISTINGS=false` only to skip Checkout.
 
 ## Values to Replace
 
@@ -13,10 +13,10 @@ No sample-only placeholders are left in the Checkout Session calls. `mode`, `suc
 
 | Field | Current value | What to set |
 | --- | --- | --- |
-| mode | `payment` for a listing. `subscription` for a broker account and a broker team. | Leave these. |
+| mode | `subscription` for a listing, a broker account, and a broker team. Each price uses `recurring.interval` `month`, so Checkout shows per month. | Leave these. |
 | success_url | Dashboard URL on this site. Broker checkout keeps `{CHECKOUT_SESSION_ID}`. | Leave these. |
 | cancel_url | Dashboard URL on this site. | Leave these. |
-| line_items | Inline prices: $49.99 once for a listing, $19.99 per month for a broker account, $19.99 per month for a broker team. | Leave these. They are not `price_...` placeholders. |
+| line_items | Inline prices: $49.99 per month for a listing, $19.99 per month for a broker account, $19.99 per month for a broker team. | Leave these. They are not `price_...` placeholders. |
 
 ## Configured Parameters
 
@@ -27,20 +27,12 @@ These Checkout Studio values are set on the `stripe.checkout.Session.create` cal
 
 | Parameter | Value |
 | --- | --- |
-| ui_mode | `hosted` |
 | billing_address_collection | `auto` |
 | phone_number_collection | `{"enabled": true}` |
 | automatic_tax | `{"enabled": false}` |
 | allow_promotion_codes | `true` |
-| payment_method_collection | `always` on the two subscription calls only |
-| submit_type | `auto` on the listing-fee payment call only |
-| consent_collection | `{"terms_of_service": "required"}` |
-| name_collection | individual and business name, both enabled and optional |
-| saved_payment_method_options | `{"payment_method_save": "enabled"}` on the listing-fee payment call |
-| integration_identifier | `hosted_web_0001` |
-| origin_context | `web` |
-
-`payment_method_collection` is omitted on the one-time listing fee. `submit_type` is omitted on the broker subscriptions because Stripe only accepts it when `mode` is `payment`. `saved_payment_method_options` is on the listing fee. A subscription already saves the card for renewal.
+| payment_method_collection | `always` on every subscription, including the listing fee |
+| recurring.interval | `month` on the listing fee, the broker account, and the broker team |
 
 Customer, metadata, and subscription metadata stay on the calls so a paid session can still be matched to the listing or the broker account.
 

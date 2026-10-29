@@ -237,6 +237,7 @@
             </div>
             <div>
                 <button type="submit" class="dash__btn dash__btn--primary" style="border:0; cursor:pointer;">Save</button>
+                <button type="button" class="dash__btn" id="delete-account" style="border:1px solid #ef4444; color:#ef4444; background:transparent; cursor:pointer;">Delete account</button>
                 <span id="profile-save-status" style="margin-left:0.75rem; color:#8e8e93;"></span>
             </div>
             {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
@@ -393,6 +394,22 @@ document.getElementById('broker-note').addEventListener('submit', async function
             }
             status.textContent = 'Saved.';
             setTimeout(function () { window.location.reload(); }, 400);
+        });
+    }
+    const deleteAccount = document.getElementById('delete-account');
+    if (deleteAccount) {
+        deleteAccount.addEventListener('click', async function () {
+            const status = document.getElementById('profile-save-status');
+            if (!window.confirm('Delete this account? Your profile, messages, and listings will be removed.')) return;
+            deleteAccount.disabled = true;
+            if (status) status.textContent = 'Deleting...';
+            const response = await fetch('/api/account', { method: 'DELETE', credentials: 'include' });
+            if (!response.ok) {
+                deleteAccount.disabled = false;
+                if (status) status.textContent = 'The account could not be deleted.';
+                return;
+            }
+            window.location.href = '/';
         });
     }
     const becomeBroker = document.getElementById('become-broker');

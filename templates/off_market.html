@@ -20,6 +20,13 @@
     </div>
     <div id="om-grid" class="om-grid"></div>
     <p id="om-empty" class="section-empty" hidden>No aircraft match that manufacturer and model.</p>
+    <aside id="om-contact" class="om-contact" hidden>
+        <h2 id="om-contact-title"></h2>
+        <p id="om-contact-name"></p>
+        <p id="om-contact-company"></p>
+        <p id="om-contact-email"></p>
+        <p id="om-contact-phone"></p>
+    </aside>
 </div>
 <script>
 (function () {
@@ -28,7 +35,9 @@
     const modelEl = document.getElementById('om-model');
     const grid = document.getElementById('om-grid');
     const empty = document.getElementById('om-empty');
+    const contactEl = document.getElementById('om-contact');
     let intent = 'sale';
+    let selectedId = null;
     const makes = [...new Set(listings.map(function (item) { return item.manufacturer || ''; }).filter(Boolean))].sort();
     makeEl.innerHTML = '<option value="">All manufacturers</option>' + makes.map(function (name) {
         return '<option value="' + name.replace(/"/g, '&quot;') + '">' + name + '</option>';
@@ -66,15 +75,50 @@
             const hours = Number(item.hours) > 0 ? Number(item.hours).toLocaleString() + ' hrs' : '';
             const meta = [item.manufacturer, item.model, item.year, hours].filter(Boolean).join(' · ');
             const place = item.location || '';
-            return '<article class="om-card">'
+            const selected = String(item.id) === String(selectedId) ? ' is-selected' : '';
+            return '<button type="button" class="om-card' + selected + '" data-id="' + item.id + '">'
                 + '<h2>' + esc(item.title || 'Aircraft') + '</h2>'
                 + '<p>' + esc(meta) + '</p>'
                 + (place ? '<p class="om-card__meta">' + esc(place) + '</p>' : '')
                 + (price ? '<p class="om-card__price">' + esc(price) + '</p>' : '')
-                + (item.email ? '<a href="mailto:' + esc(item.email) + '">Contact</a>' : '')
-                + '</article>';
+                + '</button>';
         }).join('');
+        if (selectedId && !shown.some(function (item) { return String(item.id) === String(selectedId); })) {
+            contactEl.hidden = true;
+            selectedId = null;
+        }
     }
+    function showContact(item) {
+        const contact = item.contact || {};
+        document.getElementById('om-contact-title').textContent = item.title || 'Aircraft';
+        document.getElementById('om-contact-name').textContent = contact.name || 'Seller';
+        const company = document.getElementById('om-contact-company');
+        company.textContent = contact.company || '';
+        company.hidden = !contact.company;
+        const email = document.getElementById('om-contact-email');
+        email.innerHTML = contact.email ? '<a href="mailto:' + esc(contact.email) + '">' + esc(contact.email) + '</a>' : '';
+        email.hidden = !contact.email;
+        const phone = document.getElementById('om-contact-phone');
+        phone.innerHTML = contact.phone ? '<a href="tel:' + esc(contact.phone) + '">' + esc(contact.phone) + '</a>' : '';
+        phone.hidden = !contact.phone;
+        contactEl.hidden = false;
+    }
+    grid.addEventListener('click', function (event) {
+        const card = event.target.closest('.om-card');
+        if (!card) return;
+        const id = card.getAttribute('data-id');
+        if (String(selectedId) === String(id)) {
+            selectedId = null;
+            contactEl.hidden = true;
+            render();
+            return;
+        }
+        const item = listings.find(function (row) { return String(row.id) === String(id); });
+        if (!item) return;
+        selectedId = item.id;
+        showContact(item);
+        render();
+    });
     makeEl.addEventListener('change', render);
     modelEl.addEventListener('input', render);
     document.querySelectorAll('.om-switch__btn').forEach(function (button) {

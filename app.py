@@ -676,27 +676,19 @@ def api_team_checkout():
             'team_id': str(team_id),
         }
         checkout = stripe.checkout.Session.create(
-            ui_mode='hosted',
             mode='subscription',
             billing_address_collection='auto',
             phone_number_collection={'enabled': True},
             automatic_tax={'enabled': False},
             allow_promotion_codes=True,
             payment_method_collection='always',
-            consent_collection={'terms_of_service': 'required'},
-            name_collection={
-                'individual': {'enabled': True, 'optional': True},
-                'business': {'enabled': True, 'optional': True},
-            },
-            integration_identifier='hosted_web_0001',
-            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
                     'unit_amount': BROKER_FEE_CENTS,
                     'recurring': {'interval': 'month'},
                     'product_data': {
-                        'name': f'JetSchool broker team — {name}',
+                        'name': f'JetSchool broker team — {name} — {BROKER_FEE_LABEL} per month',
                         'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
                     },
                 },
@@ -733,6 +725,18 @@ def off_market_page():
         if not place:
             raw_place = (row.get('location') or '').strip()
             place = '' if raw_place.isalpha() and len(raw_place) <= 4 else raw_place
+        owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
+        contact_name = ''
+        contact_email = ''
+        contact_phone = ''
+        contact_company = ''
+        if owner:
+            contact_name = ' '.join(
+                part for part in (owner.get('first_name'), owner.get('last_name')) if part
+            ).strip()
+            contact_email = owner.get('email') or ''
+            contact_phone = owner.get('phone') or ''
+            contact_company = owner.get('company') or ''
         listings.append({
             'id': row.get('id'),
             'title': combined.get('title') or row.get('title') or 'Aircraft',
@@ -743,8 +747,13 @@ def off_market_page():
             'manufacturer': row.get('manufacturer') or combined.get('manufacturer') or '',
             'model': combined.get('aircraft_name') or combined.get('model') or '',
             'serial_number': row.get('serial_number') or '',
-            'email': row.get('email') or '',
             'intent': 'wanted' if str(row.get('listing_intent') or '').lower() == 'wanted' else 'sale',
+            'contact': {
+                'name': contact_name,
+                'email': contact_email,
+                'phone': contact_phone,
+                'company': contact_company,
+            },
         })
     return render_template('off_market.html', listings=listings)
 
@@ -3176,6 +3185,26 @@ def api_auth_logout():
     return resp, 200
 
 
+@app.route('/api/account', methods=['DELETE'])
+@require_auth
+def api_account_delete():
+    """Delete the signed-in account, its listings, and its session."""
+    user = request.current_user  # type: ignore[attr-defined]
+    for subscription in db_module.get_user_subscriptions(user['id']):
+        subscription_id = subscription.get('stripe_subscription_id')
+        if subscription_id and _stripe_configured():
+            try:
+                stripe.Subscription.delete(subscription_id)
+            except Exception:
+                logger.exception('Could not cancel Stripe subscription %s', subscription_id)
+    if not db_module.delete_user_account(user['id']):
+        return jsonify({'error': 'not_found'}), 404
+    session.clear()
+    resp = jsonify({'ok': True})
+    _clear_jet_session_cookie(resp)
+    return resp, 200
+
+
 @app.route('/api/auth/me')
 def api_auth_me():
     """Return the logged-in user or 401. Used by the dashboard on page load."""
@@ -3357,27 +3386,19 @@ def api_broker_checkout():
     try:
         broker_meta = {'user_id': str(user['id']), 'purpose': 'broker_account'}
         checkout = stripe.checkout.Session.create(
-            ui_mode='hosted',
             mode='subscription',
             billing_address_collection='auto',
             phone_number_collection={'enabled': True},
             automatic_tax={'enabled': False},
             allow_promotion_codes=True,
             payment_method_collection='always',
-            consent_collection={'terms_of_service': 'required'},
-            name_collection={
-                'individual': {'enabled': True, 'optional': True},
-                'business': {'enabled': True, 'optional': True},
-            },
-            integration_identifier='hosted_web_0001',
-            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
                     'unit_amount': BROKER_FEE_CENTS,
                     'recurring': {'interval': 'month'},
                     'product_data': {
-                        'name': 'JetSchool broker account',
+                        'name': f'JetSchool broker account — {BROKER_FEE_LABEL} per month',
                         'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
                     },
                 },
@@ -3613,6 +3634,10 @@ def create_listing():
                 off_market_allowed=_broker_market_access(user),
             ), status
         listing_id = result['id']
+        if result.get('payment_required'):
+            checkout_url = _listing_checkout_url(user, listing_id)
+            if checkout_url:
+                return redirect(checkout_url)
         if user and user.get('is_admin'):
             return redirect(url_for('admin_index', highlight=listing_id))
         return redirect(url_for('dashboard', submitted=listing_id))
@@ -5697,27 +5722,33 @@ def _mail_listing_status(email, title, outcome, reason):
 
 
 def _notify_admins_new_listing(listing_id, title, seller_email, market='public'):
-    """Email every ADMIN_EMAILS address that a listing is waiting for approval."""
+    """Tell every admin account, in the portal and by email, that a listing needs approval."""
     import email_service as email_mod
     addresses = _admin_addresses()
-    link = request.host_url.rstrip('/') + '/admin'
-    where = 'off market' if market == 'off_market' else 'the public marketplace'
+    link = '/admin?highlight=' + str(listing_id)
+    where = 'off market' if market in ('off_market', 'broker_only') else 'the public marketplace'
     subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
     text = (
         f'A listing is waiting for your approval on JetSchool.\n\n'
         f'{title or "Listing"} #{listing_id}\n'
         f'Seller: {seller_email or "unknown"}\n'
-        f'After approval it goes to {where}.\n\n'
-        f'Open the admin page to approve or delete it:\n{link}\n'
+        f'After approval it goes to {where}.\n'
     )
-    html = (
-        f'<p>A listing is waiting for your approval on JetSchool.</p>'
-        f'<p><strong>{title or "Listing"}</strong> (#{listing_id})<br>Seller: {seller_email or "unknown"}</p>'
-        f'<p><a href="{link}">Approve or delete it</a></p>'
-    )
+    try:
+        for admin_id in db_module.list_admin_user_ids():
+            db_module.create_notification(admin_id, 'listing_approval', subject, text, link)
+    except Exception:
+        logger.exception('Could not alert admin accounts about listing %s', listing_id)
     if not addresses:
         logger.info('Listing %s is pending approval. Set ADMIN_EMAILS to get these by email.', listing_id)
         return
+    page = request.host_url.rstrip('/') + link
+    html = (
+        f'<p>A listing is waiting for your approval on JetSchool.</p>'
+        f'<p><strong>{title or "Listing"}</strong> (#{listing_id})<br>Seller: {seller_email or "unknown"}</p>'
+        f'<p>After approval it goes to {where}.</p>'
+        f'<p><a href="{page}">Approve or delete it</a></p>'
+    )
     for addr in addresses:
         try:
             email_mod.send_email(addr, subject, html, text)
@@ -6174,11 +6205,10 @@ def _create_listing_for_user(user, data):
             market=sections_module.normalize_market(data.get('market')),
             details=data,
         )
-        if initial_status == 'pending':
-            _notify_admins_new_listing(
-                listing_id, title, data.get('email') or user.get('email'),
-                market=sections_module.normalize_market(data.get('market')),
-            )
+        _notify_admins_new_listing(
+            listing_id, title, data.get('email') or user.get('email'),
+            market=sections_module.normalize_market(data.get('market')),
+        )
         return {
             'ok': True,
             'id': listing_id,
@@ -6355,12 +6385,11 @@ def _show_value(value):
 
 # =============================================================================
 # Stripe payments for listings.
-# Toggle: REQUIRE_PAYMENT_FOR_LISTINGS=true makes new listings start 'unpaid'
-# and require checkout before admin review. Default false so the site works
-# end-to-end before Stripe is fully configured.
+# A configured Stripe key sends Submit for approval to Checkout. The listing
+# fee is $49.99 per month. Set REQUIRE_PAYMENT_FOR_LISTINGS=false to skip it.
 # =============================================================================
 def _listing_fee_cents() -> int:
-    """Server-side listing fee. $49.99."""
+    """Server-side listing fee. $49.99 per month."""
     return pricing_module.listing_price_cents()
 
 
@@ -6370,19 +6399,73 @@ def _stripe_configured() -> bool:
 
 
 def _payment_required() -> bool:
-    """Payment gating only applies when explicitly enabled AND Stripe is configured."""
-    flag = (os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS') or 'false').lower() in ('1', 'true', 'yes')
-    return flag and _stripe_configured()
+    """Checkout runs in production whenever Stripe is configured.
+
+    A local or test process can set REQUIRE_PAYMENT_FOR_LISTINGS=false to skip it.
+    That opt-out does not apply in production.
+    """
+    if not _stripe_configured():
+        return False
+    flag = (os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS') or '').strip().lower()
+    if flag in ('0', 'false', 'no', 'off') and not db_module.is_production():
+        return False
+    return True
+
+
+def _listing_checkout_url(user, listing_id):
+    """Open Stripe Checkout for the monthly listing fee. None when it cannot start."""
+    if not _payment_required():
+        return None
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row or row.get('payment_status') == 'paid':
+        return None
+    amount = _listing_fee_cents()
+    dollars = f'{amount / 100:.2f}'
+    title = row.get('title') or f'Listing #{listing_id}'
+    base = request.host_url.rstrip('/')
+    meta = {
+        'listing_id': str(listing_id),
+        'user_id': str(user['id']),
+        'purpose': 'listing_fee',
+    }
+    try:
+        checkout = stripe.checkout.Session.create(
+            mode='subscription',
+            billing_address_collection='auto',
+            phone_number_collection={'enabled': True},
+            automatic_tax={'enabled': False},
+            allow_promotion_codes=True,
+            payment_method_collection='always',
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'unit_amount': amount,
+                    'recurring': {'interval': 'month'},
+                    'product_data': {
+                        'name': f'Listing fee — ${dollars} per month',
+                        'description': f'{title}. ${dollars} per month.',
+                    },
+                },
+                'quantity': 1,
+            }],
+            metadata=meta,
+            subscription_data={'metadata': meta},
+            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}',
+            cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
+            idempotency_key=_checkout_idempotency(f'listing-{listing_id}-{amount}-monthly'),
+            **_stripe_buyer(user),
+        )
+        db_module.set_listing_payment_session(listing_id, checkout.id)
+        return checkout.url
+    except Exception:
+        logger.exception('Stripe checkout creation failed')
+        return None
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
 @require_auth
 def api_listing_checkout(listing_id: int):
-    """Create a Stripe Checkout session for a listing fee. Returns {url} to redirect to.
-
-    If payment is not required (flag off or Stripe unconfigured) returns
-    {skip: true} so the frontend can continue straight to the dashboard.
-    """
+    """Create a Stripe Checkout session for the monthly listing fee. Returns {url}."""
     user = request.current_user  # type: ignore[attr-defined]
     row = db_module.get_listing_with_owner(listing_id)
     if not row:
@@ -6393,49 +6476,10 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'skip': True, 'message': 'Payment not required'}), 200
     if row.get('payment_status') == 'paid':
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
-
-    amount = _listing_fee_cents()
-    quote = pricing_module.listing_price()
-    base = request.host_url.rstrip('/')
-    try:
-        checkout = stripe.checkout.Session.create(
-            ui_mode='hosted',
-            mode='payment',
-            billing_address_collection='auto',
-            phone_number_collection={'enabled': True},
-            automatic_tax={'enabled': False},
-            allow_promotion_codes=True,
-            submit_type='auto',
-            consent_collection={'terms_of_service': 'required'},
-            name_collection={
-                'individual': {'enabled': True, 'optional': True},
-                'business': {'enabled': True, 'optional': True},
-            },
-            saved_payment_method_options={'payment_method_save': 'enabled'},
-            integration_identifier='hosted_web_0001',
-            origin_context='web',
-            line_items=[{
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': amount,
-                    'product_data': {
-                        'name': f"JetSchool listing — {row.get('title') or ('Listing #' + str(listing_id))}",
-                        'description': quote['label'],
-                    },
-                },
-                'quantity': 1,
-            }],
-            metadata={'listing_id': str(listing_id), 'user_id': str(user['id']), 'purpose': 'listing_fee'},
-            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}',
-            cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
-            idempotency_key=_checkout_idempotency(f'listing-{listing_id}-{amount}'),
-            **_stripe_buyer(user),
-        )
-        db_module.set_listing_payment_session(listing_id, checkout.id)
-        return jsonify({'url': checkout.url}), 200
-    except Exception as e:
-        logger.exception('Stripe checkout creation failed')
+    url = _listing_checkout_url(user, listing_id)
+    if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+    return jsonify({'url': url}), 200
 
 
 @app.route('/api/stripe/webhook', methods=['POST'])
