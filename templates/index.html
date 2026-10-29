@@ -1421,6 +1421,13 @@
         color: rgba(255, 255, 255, 0.6);
     }
 
+    .compare-remove-btn,
+    .compare-clear-btn {
+        background: #f4f4f4;
+        color: #1a1a1a;
+        border: 1px solid #1a1a1a;
+    }
+
     .compare-remove-btn {
         border-radius: 50%;
         width: 32px;
@@ -1428,15 +1435,17 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-        color: rgba(255, 255, 255, 0.65);
-        backdrop-filter: blur(6px);
     }
 
-    .compare-remove-btn:hover {
-        color: #fff;
-        border-color: rgba(255, 255, 255, 0.45);
-        background: rgba(255, 255, 255, 0.12);
+    .compare-remove-btn:hover,
+    .compare-clear-btn:hover:not(:disabled) {
+        color: #F05545;
+        border-color: #F05545;
+        background: #fff;
+    }
+
+    .compare-clear-btn:disabled {
+        opacity: 0.45;
     }
 
     .compare-pill-group {
@@ -4273,7 +4282,7 @@
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge rounded-pill compare-count" id="compareSelectedCount">0 / 4 selected</span>
                     <span class="compare-limit-notice text-warning small" id="compareLimitNotice"></span>
-                    <button type="button" class="btn btn-sm btn-outline-light" id="clearCompareBtn" disabled>
+                    <button type="button" class="btn btn-sm compare-clear-btn" id="clearCompareBtn" disabled>
                         <i class="fas fa-times me-1"></i>Clear All
                     </button>
                 </div>
@@ -4289,8 +4298,7 @@
                     <div class="compare-chart-card">
                         <div class="chart-header">
                             <h6 class="mb-1 text-white">Cost Outlook</h6>
-                            <small class="text-white-50">Select any three Excel columns (L–BO) to visualize
-                                side-by-side.</small>
+                            <small class="text-white-50">Choose what you want to compare.</small>
                         </div>
                         <div class="compare-cost-charts" id="costChartsContainer"></div>
                         <div class="cost-chart-selectors">
@@ -4820,7 +4828,7 @@
 <!-- Leaflet Geocoder -->
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
-<script src="{{ url_for('static', filename='js/script.js') }}?v=7"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=8"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -5698,7 +5706,7 @@
             const neededRunway = Number(aircraft.runwayLength || aircraft.runway_length || 0);
             if (shortestRunway.length && neededRunway > 0 && neededRunway > Math.min.apply(null, shortestRunway)) {
                 matches = false;
-                filterReasons.push(`Balanced field ${neededRunway}ft is longer than the shortest runway`);
+                filterReasons.push(`Balanced field ${neededRunway}ft is longer than the longest runway`);
             }
 
             // Annual Cost filter
@@ -5757,7 +5765,7 @@
             const limit = Number(window.airportRunwayLimit);
             if (limit > 0) {
                 runwayNote.hidden = false;
-                runwayNote.textContent = 'Showing aircraft whose balanced field length fits the shortest runway (' + Math.round(limit).toLocaleString() + ' ft) at the airports you entered.';
+                runwayNote.textContent = 'Showing aircraft whose balanced field length fits the longest runway at each airport you entered (' + Math.round(limit).toLocaleString() + ' ft).';
             } else {
                 runwayNote.hidden = true;
                 runwayNote.textContent = '';
@@ -6138,7 +6146,7 @@
             chartCard.innerHTML = `
                 <div class="chart-header">
                     <h6 class="mb-1 text-white">${charterChart ? 'If chartered' : option.label}</h6>
-                    <small class="text-white-50">${charterChart ? 'Savings in green. Loss in red.' : 'Independent scale per metric for apples-to-apples comparison.'}</small>
+                    ${charterChart ? '<small class="text-white-50">Savings in green. Loss in red.</small>' : ''}
                 </div>
                 <div class="chart-wrapper">
                     <canvas id="compareCostChart-${metricIndex}"></canvas>
@@ -6335,10 +6343,6 @@
                     <div class="compare-pill">
                         <span>Multi-Year Cost</span>
                         <strong>${formatCurrency(metrics.multiYearTotalCost || 0)}</strong>
-                    </div>
-                    <div class="compare-pill">
-                        <span>Cost to Charter</span>
-                        <strong>${formatCurrency(metrics.costToCharter || 0)}</strong>
                     </div>
                 </div>
                 <div class="compare-metrics">

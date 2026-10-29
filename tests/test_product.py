@@ -62,14 +62,14 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/login')
         self.assertEqual(page.status_code, 200)
 
-    def test_price_switches_on_new_year_chicago(self):
+    def test_listing_fee_is_fifty_dollars(self):
         chicago = ZoneInfo('America/Chicago')
         promo = datetime(2026, 12, 31, 23, 59, tzinfo=chicago)
         after = datetime(2027, 1, 1, 0, 0, tzinfo=chicago)
-        self.assertEqual(pricing.listing_price_cents(promo), 1499)
+        self.assertEqual(pricing.listing_price_cents(promo), 4999)
         self.assertEqual(pricing.listing_price_cents(after), 4999)
-        self.assertTrue(pricing.listing_price(promo)['promotional'])
-        self.assertFalse(pricing.listing_price(after)['promotional'])
+        self.assertEqual(pricing.listing_price()['amount_dollars'], 49.99)
+        self.assertFalse(pricing.listing_price()['promotional'])
 
     def test_login_logout_and_wrong_password(self):
         bad = self.client.post('/api/auth/login', json={'email': 'buyer@example.com', 'password': 'nope-nope'})
@@ -123,7 +123,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
         self.assertEqual(checkout.status_code, 503)
-        self.assertIn(b'$20 a month', checkout.data)
+        self.assertIn(b'$19.99 a month', checkout.data)
         self.assertIn(b'broker map', checkout.data)
         self.assertIn(b'off-market', checkout.data)
 
@@ -378,12 +378,12 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(db_module.get_charter_booking(booking_id)['status'], 'confirmed')
 
-    def test_airport_search_includes_shortest_runway(self):
+    def test_airport_search_includes_longest_runway(self):
         found = self.client.get('/api/airports?q=TEB')
         self.assertEqual(found.status_code, 200)
         airports = found.get_json()
         teb = next(item for item in airports if item.get('iata') == 'TEB')
-        self.assertEqual(teb['shortest_runway_ft'], 6014)
+        self.assertEqual(teb['longest_runway_ft'], 6997)
 
     def test_hidden_listing_media_and_spreadsheet_stay_private(self):
         self._login('broker@example.com', 'broker-pass-1')
@@ -404,6 +404,9 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'(one-way)', page.data)
         self.assertIn(b'If chartered', page.data)
         self.assertNotIn(b'Cost To Charter', page.data)
+        self.assertIn(b'Choose what you want to compare.', page.data)
+        self.assertNotIn(b'Independent scale per metric', page.data)
+        self.assertIn(b'I understand', page.data)
         self.assertIn(b'Min Crew Required', page.data)
         self.assertIn(b'Best Speed/$', page.data)
         self.assertIn(b'refreshListingNumbers', page.data)
@@ -452,6 +455,30 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'not a promise that a refund will be issued', page.data)
         terms = self.client.get('/terms')
         self.assertIn(b'href="/refunds"', terms.data)
+
+    def test_contact_message_reaches_admin_alerts(self):
+        page = self.client.get('/contact')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Contact', page.data)
+        token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+        sent = self.client.post('/api/contact', json={
+            'name': 'Ada Buyer',
+            'email': 'ada@example.com',
+            'phone': '555-0100',
+            'message': 'I would like to ask about a listing.',
+        }, headers={'X-CSRF-Token': token})
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        self._login('buyer@example.com', 'buyer-pass-1')
+        hidden = self.client.get('/api/admin/contacts')
+        self.assertEqual(hidden.status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        inbox = self.client.get('/api/admin/contacts')
+        self.assertEqual(inbox.status_code, 200)
+        messages = inbox.get_json()['messages']
+        self.assertTrue(any(row['email'] == 'ada@example.com' for row in messages))
+        notes = self.client.get('/api/notifications')
+        titles = [note['title'] for note in notes.get_json()['notifications']]
+        self.assertIn('Contact from Ada Buyer', titles)
 
     def test_robots_and_sitemap_skip_private_listings(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -593,6 +620,124 @@ class ProductTests(unittest.TestCase):
     def test_duplicate_stripe_event_is_ignored(self):
         self.assertTrue(db_module.claim_stripe_event('evt_test_once'))
         self.assertFalse(db_module.claim_stripe_event('evt_test_once'))
+
+    def _paid_broker(self, email, subscription_id, kind='broker'):
+        person = self._signup(email, 'broker-pass-1', 'seller')
+        db_module.update_user_profile(person['id'], {'profile_role': 'broker'})
+        db_module.set_broker_application(person['id'], 'approved')
+        db_module.update_user_subscription(
+            person['id'], kind,
+            stripe_customer_id='cus_' + subscription_id,
+            stripe_subscription_id=subscription_id,
+            subscription_status='active',
+        )
+        return person
+
+    def _stripe_event(self, event_id, event_type, obj):
+        return self.client.post('/api/stripe/webhook', json={
+            'id': event_id,
+            'type': event_type,
+            'data': {'object': obj},
+        })
+
+    def test_cancelled_broker_subscription_closes_off_market(self):
+        person = self._paid_broker('cancel-broker@example.com', 'sub_cancel_broker')
+        self._login(person['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        kept = self._stripe_event('evt_sub_still_active', 'customer.subscription.updated', {
+            'id': 'sub_cancel_broker', 'object': 'subscription', 'status': 'active',
+            'cancel_at_period_end': True, 'customer': 'cus_sub_cancel_broker',
+        })
+        self.assertEqual(kept.status_code, 200, kept.get_json())
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        failed = self._stripe_event('evt_sub_past_due', 'invoice.payment_failed', {
+            'object': 'invoice', 'subscription': 'sub_cancel_broker', 'customer': 'cus_sub_cancel_broker',
+        })
+        self.assertEqual(failed.status_code, 200, failed.get_json())
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        restored = self._stripe_event('evt_sub_paid_again', 'invoice.paid', {
+            'object': 'invoice', 'subscription': 'sub_cancel_broker', 'customer': 'cus_sub_cancel_broker',
+        })
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual(db_module.get_user_subscription(person['id'], 'broker')['subscription_status'], 'active')
+        ended = self._stripe_event('evt_sub_deleted', 'customer.subscription.deleted', {
+            'id': 'sub_cancel_broker', 'object': 'subscription', 'status': 'canceled',
+            'customer': 'cus_sub_cancel_broker',
+        })
+        self.assertEqual(ended.status_code, 200, ended.get_json())
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        unrelated = self._stripe_event('evt_sub_other', 'customer.subscription.deleted', {
+            'id': 'sub_someone_else', 'object': 'subscription', 'status': 'canceled',
+        })
+        self.assertEqual(unrelated.status_code, 200, unrelated.get_json())
+
+    def test_cancelled_team_subscription_closes_members(self):
+        leader = self._paid_broker('team-lead-cancel@example.com', 'sub_team_cancel', kind='broker_team')
+        team_id = db_module.create_broker_team(leader['id'], 'Cancel Co', 'Dallas', 'TX', active=True)
+        member = self._signup('team-member-cancel@example.com', 'broker-pass-1', 'buyer')
+        self._login(member['email'], 'broker-pass-1')
+        self.assertEqual(self.client.post(f'/api/broker-teams/{team_id}/join').status_code, 200)
+        self._login(leader['email'], 'broker-pass-1')
+        allowed = self.client.post(f"/api/broker-teams/{team_id}/members/{member['id']}/allow")
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        self._login(member['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        ended = self._stripe_event('evt_team_deleted', 'customer.subscription.deleted', {
+            'id': 'sub_team_cancel', 'object': 'subscription', 'status': 'canceled',
+            'customer': 'cus_sub_team_cancel', 'metadata': {'purpose': 'broker_team', 'team_id': str(team_id)},
+        })
+        self.assertEqual(ended.status_code, 200, ended.get_json())
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        self.assertEqual(db_module.get_broker_team(team_id)['subscription_status'], 'inactive')
+
+    def test_listing_dispute_does_not_unpublish_or_close_a_broker(self):
+        person = self._paid_broker('dispute-broker@example.com', 'sub_dispute_broker')
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Disputed Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'payment_status': 'paid', 'stripe_payment_intent_id': 'pi_dispute_listing'},
+                synchronize_session=False,
+            )
+        opened = self._stripe_event('evt_dispute_open', 'charge.dispute.created', {
+            'object': 'dispute', 'status': 'needs_response', 'payment_intent': 'pi_dispute_listing',
+        })
+        self.assertEqual(opened.status_code, 200, opened.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['payment_status'], 'disputed')
+        self.assertEqual(row['status'], 'active')
+        won = self._stripe_event('evt_dispute_won', 'charge.dispute.closed', {
+            'object': 'dispute', 'status': 'won', 'payment_intent': 'pi_dispute_listing',
+        })
+        self.assertEqual(won.status_code, 200, won.get_json())
+        self.assertEqual(db_module.get_listing_with_owner(listing_id)['payment_status'], 'paid')
+        self._login(person['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+
+    def test_refunded_broker_charge_ends_access(self):
+        person = self._paid_broker('refund-broker@example.com', 'sub_refund_broker')
+        self._login(person['email'], 'broker-pass-1')
+        refunded = self._stripe_event('evt_broker_refund', 'charge.refunded', {
+            'object': 'charge', 'amount': 2000, 'amount_refunded': 2000, 'refunded': True,
+            'payment_intent': 'pi_broker_refund',
+            'invoice': {'subscription': 'sub_refund_broker'},
+        })
+        self.assertEqual(refunded.status_code, 200, refunded.get_json())
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+
+    def test_billing_portal_needs_a_subscription_and_stripe(self):
+        self._login('buyer@example.com', 'buyer-pass-1')
+        missing = self.client.post('/api/account/billing-portal')
+        self.assertEqual(missing.status_code, 404)
+        person = self._paid_broker('portal-broker@example.com', 'sub_portal_broker')
+        self._login(person['email'], 'broker-pass-1')
+        unavailable = self.client.post('/api/account/billing-portal')
+        self.assertEqual(unavailable.status_code, 503)
+        page = self.client.get('/dashboard')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Manage billing', page.data)
 
     def test_listing_fee_ignores_a_client_supplied_amount(self):
         from app import _listing_fee_cents

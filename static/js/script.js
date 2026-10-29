@@ -2110,7 +2110,7 @@ function updateInputFields() {
 function syncAirportRunways() {
     const feet = [];
     const consider = function (airport) {
-        const length = Number(airport && airport.shortest_runway_ft);
+        const length = Number(airport && airport.longest_runway_ft);
         if (length > 0) feet.push(length);
     };
     consider(homeAirport);

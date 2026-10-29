@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}JetSchool{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}JetSchool helps you find an aircraft, sell one, find a broker, or request a charter.{% endblock %}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="canonical" href="{% block canonical %}{{ request.base_url }}{% endblock %}">
     {% block extra_head %}{% endblock %}
     <!-- Bootstrap CSS -->
@@ -336,7 +337,7 @@
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('service_providers') }}">
-                                <i class="fas fa-wrench me-2"></i>Mechanics
+                                <i class="fas fa-wrench me-2"></i>Maintenance
                                 <span class="nav-tag">Coming soon</span>
                             </a>
                         </li>
@@ -442,6 +443,7 @@
         {% block content %}{% endblock %}
 
         <footer class="py-4 text-center">
+            <a href="{{ url_for('contact') }}" class="small me-3" style="color:#F05545;">Contact</a>
             <a href="{{ url_for('privacy') }}" class="small me-3" style="color:#F05545;">Privacy</a>
             <a href="{{ url_for('terms') }}" class="small me-3" style="color:#F05545;">Terms</a>
             <a href="{{ url_for('refunds') }}" class="small" style="color:#F05545;">Refunds</a>
@@ -500,6 +502,94 @@
                 return false;
             }
         }
+    </script>
+
+    <div id="site-notice" class="site-notice" hidden>
+        <div class="site-notice__card" role="dialog" aria-modal="true" aria-labelledby="site-notice-title">
+            <p class="site-notice__kicker">Notice</p>
+            <h2 id="site-notice-title">Please read before you continue</h2>
+            <p>JetSchool is an information service and a marketplace. It does not provide financial, investment, legal, tax, or aviation advice, and it does not act as your broker, advisor, or agent. Decisions you make using this website are your own.</p>
+            <p>Prices, operating costs, performance figures, comparisons, and other numbers shown here are estimates. JetSchool maintains this data with care and intends it to be accurate and of high quality. An estimate can still differ from actual cost, value, condition, or performance. Use your own judgment, verify anything material through independent research, and consult qualified professionals where the decision calls for it.</p>
+            <p>To the fullest extent permitted by law, JetSchool and its owners, operators, and affiliates are not liable for financial advice, for any decision made or not made in reliance on this data, or for any loss arising out of your use of the website, its estimates, or its listings.</p>
+            <button type="button" id="site-notice-accept">I understand</button>
+        </div>
+    </div>
+    <style>
+        .site-notice {
+            position: fixed;
+            inset: 0;
+            z-index: 4000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem;
+            background: rgba(6, 6, 8, 0.82);
+        }
+        .site-notice[hidden] { display: none; }
+        .site-notice__card {
+            width: min(640px, 100%);
+            max-height: min(86vh, 760px);
+            overflow: auto;
+            background: #141414;
+            color: #f4f4f4;
+            border: 1px solid rgba(240, 85, 69, 0.45);
+            border-radius: 16px;
+            padding: 1.75rem 1.6rem 1.5rem;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+            font-family: Georgia, 'Times New Roman', serif;
+        }
+        .site-notice__kicker {
+            margin: 0 0 0.35rem;
+            color: #F05545;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+        .site-notice__card h2 {
+            margin: 0 0 0.9rem;
+            color: #fff;
+            font-size: 1.55rem;
+            line-height: 1.25;
+        }
+        .site-notice__card p {
+            margin: 0 0 0.85rem;
+            color: #e6e6e6;
+            font-size: 1.02rem;
+            line-height: 1.55;
+        }
+        #site-notice-accept {
+            margin-top: 0.4rem;
+            border: 0;
+            border-radius: 8px;
+            background: #F05545;
+            color: #fff;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            padding: 0.7rem 1.3rem;
+            cursor: pointer;
+        }
+        #site-notice-accept:hover { background: #ff6a58; }
+    </style>
+    <script>
+        (function () {
+            var notice = document.getElementById('site-notice');
+            var accept = document.getElementById('site-notice-accept');
+            if (!notice || !accept) return;
+            var key = 'jetschool-notice-ack';
+            try {
+                if (window.localStorage.getItem(key) === '1') return;
+            } catch (err) {}
+            notice.hidden = false;
+            accept.focus();
+            accept.addEventListener('click', function () {
+                try { window.localStorage.setItem(key, '1'); } catch (err) {}
+                notice.hidden = true;
+            });
+        })();
     </script>
 
     <!-- Floating Compare Bar -->
