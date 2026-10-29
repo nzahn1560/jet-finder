@@ -18,6 +18,10 @@ import pricing as pricing_module
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import stripe
+# stripe 7.8 leaves these namespaces as None until the submodules are imported.
+# Without this, Checkout and the billing portal never open.
+import stripe.billing_portal  # noqa: F401
+import stripe.checkout  # noqa: F401
 import logging
 
 # Configure logging
@@ -3487,6 +3491,12 @@ def api_broker_message(user_id):
     if int(recipient['id']) == int(sender['id']):
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(silent=True) or {}
+    contact_email = str(data.get('contact_email') if 'contact_email' in data else (sender.get('email') or '')).strip()[:254]
+    contact_phone = str(data.get('contact_phone') if 'contact_phone' in data else (sender.get('phone') or '')).strip()[:40]
+    if '@' not in contact_email or '.' not in contact_email.split('@')[-1]:
+        return jsonify({'error': 'contact_required', 'message': 'Enter an email the broker can use.'}), 400
+    if sum(ch.isdigit() for ch in contact_phone) < 7:
+        return jsonify({'error': 'contact_required', 'message': 'Enter a phone number the broker can use.'}), 400
     kind = (data.get('kind') or 'message').strip().lower()
     listing_id = data.get('listing_id')
     if kind == 'listing':
@@ -3505,6 +3515,8 @@ def api_broker_message(user_id):
             notes=data.get('notes') or '',
             aircraft_name=data.get('aircraft_name') or '',
             listing_id=listing_id if kind == 'listing' else None,
+            contact_email=contact_email,
+            contact_phone=contact_phone,
         )
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
@@ -3514,9 +3526,10 @@ def api_broker_message(user_id):
         'listing': f'{sender_name} sent you a listing',
         'message': f'{sender_name} sent you a message',
     }
+    note = (data.get('notes') or data.get('aircraft_name') or '').strip()
     db_module.notify_user(
         user_id, 'broker_message', titles.get(kind, titles['message']),
-        (data.get('notes') or data.get('aircraft_name') or '')[:500],
+        f'Email: {contact_email}\nPhone: {contact_phone}' + (f'\n{note}' if note else ''),
         '/dashboard#messages', recipient.get('email'),
     )
     return jsonify({'ok': True, 'id': message_id}), 201
@@ -3638,6 +3651,7 @@ def create_listing():
             checkout_url = _listing_checkout_url(user, listing_id)
             if checkout_url:
                 return redirect(checkout_url)
+            return redirect(url_for('dashboard', submitted=listing_id, paid='0'))
         if user and user.get('is_admin'):
             return redirect(url_for('admin_index', highlight=listing_id))
         return redirect(url_for('dashboard', submitted=listing_id))
@@ -5705,6 +5719,16 @@ def _mail_listing_status(email, title, outcome, reason):
         if outcome == 'approved':
             subject = 'Your JetSchool listing is live'
             text = f'{title or "Your listing"} is approved and visible according to the visibility you chose.'
+        elif outcome == 'update_approved':
+            subject = 'Your JetSchool listing update is live'
+            text = f'The update to {title or "your listing"} is approved. Those changes are now on the listing.'
+        elif outcome == 'update_rejected':
+            subject = 'Your JetSchool listing update was not approved'
+            text = (
+                f'The update to {title or "your listing"} was not approved. '
+                f'Reason: {reason or "No reason provided"}. '
+                f'The listing that is already up is unchanged.'
+            )
         elif outcome == 'pending':
             subject = 'Approval pending on your JetSchool listing'
             text = (
@@ -5721,19 +5745,28 @@ def _mail_listing_status(email, title, outcome, reason):
         return False
 
 
-def _notify_admins_new_listing(listing_id, title, seller_email, market='public'):
+def _notify_admins_new_listing(listing_id, title, seller_email, market='public', kind='new'):
     """Tell every admin account, in the portal and by email, that a listing needs approval."""
     import email_service as email_mod
     addresses = _admin_addresses()
     link = '/admin?highlight=' + str(listing_id)
     where = 'off market' if market in ('off_market', 'broker_only') else 'the public marketplace'
-    subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
-    text = (
-        f'A listing is waiting for your approval on JetSchool.\n\n'
-        f'{title or "Listing"} #{listing_id}\n'
-        f'Seller: {seller_email or "unknown"}\n'
-        f'After approval it goes to {where}.\n'
-    )
+    if kind == 'update':
+        subject = f'Listing update to approve: {title or ("#" + str(listing_id))}'
+        text = (
+            f'An update is waiting for your approval on JetSchool.\n\n'
+            f'{title or "Listing"} #{listing_id}\n'
+            f'Seller: {seller_email or "unknown"}\n'
+            f'The listing stays as it is until you approve the update.\n'
+        )
+    else:
+        subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
+        text = (
+            f'A listing is waiting for your approval on JetSchool.\n\n'
+            f'{title or "Listing"} #{listing_id}\n'
+            f'Seller: {seller_email or "unknown"}\n'
+            f'After approval it goes to {where}.\n'
+        )
     try:
         for admin_id in db_module.list_admin_user_ids():
             db_module.create_notification(admin_id, 'listing_approval', subject, text, link)
@@ -5743,12 +5776,7 @@ def _notify_admins_new_listing(listing_id, title, seller_email, market='public')
         logger.info('Listing %s is pending approval. Set ADMIN_EMAILS to get these by email.', listing_id)
         return
     page = request.host_url.rstrip('/') + link
-    html = (
-        f'<p>A listing is waiting for your approval on JetSchool.</p>'
-        f'<p><strong>{title or "Listing"}</strong> (#{listing_id})<br>Seller: {seller_email or "unknown"}</p>'
-        f'<p>After approval it goes to {where}.</p>'
-        f'<p><a href="{page}">Approve or delete it</a></p>'
-    )
+    html = f'<p>{text.replace(chr(10), "<br>")}</p><p><a href="{page}">Open the approval queue</a></p>'
     for addr in addresses:
         try:
             email_mod.send_email(addr, subject, html, text)
@@ -5992,6 +6020,7 @@ def api_listings_me():
                 'rejection_reason': row.get('rejection_reason'),
                 'amendment_note': row.get('amendment_note'),
                 'review_message': row.get('review_message'),
+                'pending_review': bool(db_module.parse_listing_pending(row.get('pending_changes'))),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
                 'photo_count': sum(1 for m in media if m.get('media_type') == 'photo'),
@@ -6289,12 +6318,101 @@ def admin_listing_audit(listing_id):
     return jsonify({'audit': db_module.list_listing_audits(listing_id)})
 
 
+def _edits_wait_for_approval(row, user):
+    """An approved listing stays as it is until an admin approves the owner's update."""
+    return bool(row and row.get('status') == 'active' and user and not user.get('is_admin'))
+
+
+def _blank_revision():
+    return {'fields': {}, 'media_add': [], 'media_remove': []}
+
+
+def _revision_note(row, pending):
+    parts = _listing_amendments(row, (pending or {}).get('fields') or {})
+    added = len((pending or {}).get('media_add') or [])
+    removed = len((pending or {}).get('media_remove') or [])
+    if added:
+        parts.append(f'Photos added: {added}')
+    if removed:
+        parts.append(f'Photos removed: {removed}')
+    if not parts:
+        return None
+    return 'Update waiting for approval. ' + '; '.join(parts)
+
+
+def _save_listing_revision(listing_id, row, user, pending):
+    """Store a staged update and tell admins. Returns the note, or None when nothing is waiting."""
+    note = _revision_note(row, pending)
+    if not note:
+        if row.get('pending_changes'):
+            db_module.set_listing_pending_changes(listing_id, None)
+        return None
+    previous_raw = row.get('pending_changes') or ''
+    db_module.set_listing_pending_changes(listing_id, pending)
+    db_module.set_listing_amendment(listing_id, note)
+    saved = db_module.get_listing_with_owner(listing_id) or {}
+    same = (saved.get('pending_changes') or '') == previous_raw and (row.get('amendment_note') or '') == note
+    if not same:
+        db_module.record_listing_audit(listing_id, user['id'], 'amendment', row.get('status'), row.get('status'), note)
+        _notify_admins_new_listing(
+            listing_id, row.get('title') or 'Listing', row.get('email') or user.get('email'),
+            market=sections_module.normalize_market(row.get('market')),
+            kind='update',
+        )
+    row['pending_changes'] = saved.get('pending_changes')
+    row['amendment_note'] = note
+    return note
+
+
+def _apply_pending_listing_update(listing_id, row):
+    """Copy a staged update onto the live listing. Used when an admin approves it."""
+    pending = db_module.parse_listing_pending(row.get('pending_changes'))
+    if not pending:
+        return False
+    if pending.get('fields'):
+        db_module.update_user_listing_fields(listing_id, pending['fields'])
+    for media_id in pending.get('media_add') or []:
+        media = db_module.get_listing_media_row(media_id)
+        if media and media.get('listing_id') == listing_id:
+            db_module.set_listing_media_published(media_id, True)
+    for media_id in pending.get('media_remove') or []:
+        media = db_module.get_listing_media_row(media_id)
+        if not media or media.get('listing_id') != listing_id:
+            continue
+        try:
+            _r2.delete_object(media['r2_object_key'])
+        except Exception:
+            logger.exception('R2 delete failed while approving listing %s media %s', listing_id, media_id)
+        db_module.delete_listing_media_row(media_id)
+    db_module.set_listing_pending_changes(listing_id, None)
+    return True
+
+
+def _drop_pending_listing_update(listing_id, row):
+    """Throw away a staged update. The live listing stays as it is."""
+    pending = db_module.parse_listing_pending(row.get('pending_changes'))
+    if not pending:
+        return False
+    for media_id in pending.get('media_add') or []:
+        media = db_module.get_listing_media_row(media_id)
+        if not media or media.get('listing_id') != listing_id:
+            continue
+        try:
+            _r2.delete_object(media['r2_object_key'])
+        except Exception:
+            logger.exception('R2 delete failed while dropping listing %s media %s', listing_id, media_id)
+        db_module.delete_listing_media_row(media_id)
+    db_module.set_listing_pending_changes(listing_id, None)
+    return True
+
+
 @app.route('/api/listings/<int:listing_id>', methods=['PATCH'])
 @require_auth
 def api_listings_patch(listing_id: int):
     """Update a listing. Owners can edit their own; admins can edit any.
 
-    Non-admin owners may not edit listings that are already 'active' (approved).
+    Edits to an approved listing are held for approval. The live price, photos,
+    and other details stay as they are until an admin approves the update.
     """
     user = request.current_user  # type: ignore[attr-defined]
     row = db_module.get_listing_with_owner(listing_id)
@@ -6314,6 +6432,25 @@ def api_listings_patch(listing_id: int):
     state = str(data.get('state') or '').strip()
     if city and state:
         data['location'] = f'{city}, {state}'
+    if _edits_wait_for_approval(row, user):
+        pending = db_module.parse_listing_pending(row.get('pending_changes')) or _blank_revision()
+        fields = dict(pending.get('fields') or {})
+        incoming = db_module.normalize_listing_fields(data)
+        for key, value in incoming.items():
+            if _same_listing_value(row.get(key), value):
+                fields.pop(key, None)
+            else:
+                fields[key] = value
+        pending['fields'] = fields
+        if not incoming and not db_module.parse_listing_pending(row.get('pending_changes')):
+            return jsonify({'error': 'no_changes'}), 400
+        note = _save_listing_revision(listing_id, row, user, pending)
+        return jsonify({
+            'ok': True,
+            'status': 'active',
+            'amendment': note,
+            'pending_review': bool(note),
+        }), 200
     changes = _listing_amendments(row, data)
     if not db_module.update_user_listing_fields(listing_id, data):
         return jsonify({'error': 'no_changes'}), 400
@@ -6322,7 +6459,7 @@ def api_listings_patch(listing_id: int):
     if changes and is_owner and not user.get('is_admin'):
         note = 'Amendment. ' + '; '.join(changes)
         db_module.set_listing_amendment(listing_id, note)
-        if status in ('active', 'rejected', 'suspended'):
+        if status in ('rejected', 'suspended'):
             db_module.set_user_listing_status(listing_id, 'pending')
             status = 'pending'
         db_module.record_listing_audit(listing_id, user['id'], 'amendment', row.get('status'), status, note)
@@ -6330,7 +6467,7 @@ def api_listings_patch(listing_id: int):
             listing_id, row.get('title') or 'Listing', row.get('email') or user.get('email'),
             market=sections_module.normalize_market(row.get('market')),
         )
-    return jsonify({'ok': True, 'status': status, 'amendment': note}), 200
+    return jsonify({'ok': True, 'status': status, 'amendment': note, 'pending_review': False}), 200
 
 
 _AMENDMENT_LABELS = {
@@ -6347,6 +6484,8 @@ _AMENDMENT_LABELS = {
     'engine_type': 'Engine',
     'serial_number': 'S/N',
     'market': 'Market',
+    'profile_id': 'Aircraft',
+    'listing_intent': 'Listing',
 }
 
 
@@ -6393,9 +6532,46 @@ def _listing_fee_cents() -> int:
     return pricing_module.listing_price_cents()
 
 
+def _stripe_secret() -> str:
+    """Secret key only. A publishable key, blank value, or placeholder does not count."""
+    raw = os.environ.get('STRIPE_SECRET_KEY') or ''
+    key = raw.strip().strip('"').strip("'")
+    if key.startswith('sk_') and '...' not in key:
+        return key
+    return ''
+
+
 def _stripe_configured() -> bool:
-    key = os.environ.get('STRIPE_SECRET_KEY', '')
-    return key.startswith('sk_') and 'sk_test_...' not in key
+    key = _stripe_secret()
+    if not key:
+        return False
+    stripe.api_key = key
+    return True
+
+
+def _log_stripe_setup() -> None:
+    raw = (os.environ.get('STRIPE_SECRET_KEY') or '').strip().strip('"').strip("'")
+    key = _stripe_secret()
+    if key:
+        mode = 'live' if key.startswith('sk_live_') else 'test'
+        logger.info('Stripe checkout is on (%s mode).', mode)
+        if not (os.environ.get('STRIPE_WEBHOOK_SECRET') or '').strip():
+            logger.warning(
+                'STRIPE_WEBHOOK_SECRET is not set. A finished Checkout updates the listing when the buyer returns. '
+                'Renewals, cancellations, and a buyer who closes the tab before returning need the webhook.'
+            )
+        return
+    if raw.startswith('pk_'):
+        logger.error(
+            'STRIPE_SECRET_KEY is a publishable key. Checkout stays off until Railway has the secret key (sk_test_ or sk_live_).'
+        )
+    elif raw:
+        logger.error('STRIPE_SECRET_KEY is set but is not a Stripe secret key. Checkout stays off.')
+    else:
+        logger.warning('STRIPE_SECRET_KEY is not set. Checkout stays off.')
+
+
+_log_stripe_setup()
 
 
 def _payment_required() -> bool:
@@ -6450,13 +6626,21 @@ def _listing_checkout_url(user, listing_id):
             }],
             metadata=meta,
             subscription_data={'metadata': meta},
-            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}',
+            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}&session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
             idempotency_key=_checkout_idempotency(f'listing-{listing_id}-{amount}-monthly'),
             **_stripe_buyer(user),
         )
         db_module.set_listing_payment_session(listing_id, checkout.id)
         return checkout.url
+    except stripe.error.AuthenticationError:
+        logger.error(
+            'Stripe rejected STRIPE_SECRET_KEY. Use the secret key that starts with sk_test_ or sk_live_, not the publishable key.'
+        )
+        return None
+    except stripe.error.InvalidRequestError as exc:
+        logger.error('Stripe refused to open Checkout: %s', getattr(exc, 'user_message', None) or exc)
+        return None
     except Exception:
         logger.exception('Stripe checkout creation failed')
         return None
@@ -6482,6 +6666,60 @@ def api_listing_checkout(listing_id: int):
     return jsonify({'url': url}), 200
 
 
+def _listing_checkout_settled(sess, listing_id, user_id) -> bool:
+    """True when this Checkout Session is a finished payment for this listing and owner."""
+    meta = _stripe_metadata(sess)
+    if str(meta.get('purpose') or '') != 'listing_fee':
+        return False
+    if str(meta.get('listing_id') or '') != str(listing_id):
+        return False
+    if str(meta.get('user_id') or '') != str(user_id):
+        return False
+    if _stripe_field(sess, 'status') != 'complete':
+        return False
+    if _stripe_field(sess, 'payment_status') in ('paid', 'no_payment_required'):
+        return True
+    subscription = _stripe_field(sess, 'subscription')
+    subscription_status = subscription.get('status') if isinstance(subscription, dict) else None
+    return subscription_status in ('active', 'trialing')
+
+
+@app.route('/api/listings/<int:listing_id>/confirm-payment', methods=['POST'])
+@require_auth
+def api_listing_confirm_payment(listing_id: int):
+    """Turn a listing on after the buyer comes back from Checkout, without waiting for the webhook."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id'] and not user.get('is_admin'):
+        return jsonify({'error': 'forbidden'}), 403
+    session_id = ((request.get_json(silent=True) or {}).get('session_id') or '').strip()
+    if not session_id or not _stripe_configured():
+        return jsonify({'error': 'not_confirmed'}), 400
+    if row.get('payment_status') == 'paid':
+        return jsonify({'ok': True, 'status': row.get('status'), 'payment_status': 'paid'}), 200
+    try:
+        sess = stripe.checkout.Session.retrieve(session_id, expand=['subscription'])
+    except Exception:
+        logger.exception('Listing checkout confirm failed')
+        return jsonify({'error': 'stripe_error'}), 502
+    if not _listing_checkout_settled(sess, listing_id, row.get('user_id')):
+        return jsonify({'error': 'not_confirmed'}), 400
+    intent = _stripe_field(sess, 'payment_intent')
+    intent_id = intent.get('id') if isinstance(intent, dict) else intent
+    was_waiting = row.get('status') in ('unpaid', 'draft')
+    if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id):
+        return jsonify({'error': 'server_error'}), 500
+    if was_waiting:
+        fresh = db_module.get_listing_with_owner(listing_id) or row
+        _notify_admins_new_listing(
+            listing_id, fresh.get('title'), fresh.get('email'),
+            market=sections_module.normalize_market(fresh.get('market')),
+        )
+    return jsonify({'ok': True, 'status': 'pending' if was_waiting else row.get('status'), 'payment_status': 'paid'}), 200
+
+
 @app.route('/api/stripe/webhook', methods=['POST'])
 def api_stripe_webhook():
     """Stripe webhook for listing fees and the broker subscription.
@@ -6495,7 +6733,7 @@ def api_stripe_webhook():
     """
     payload = request.get_data()
     sig = request.headers.get('Stripe-Signature', '')
-    secret = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+    secret = (os.environ.get('STRIPE_WEBHOOK_SECRET') or '').strip().strip('"').strip("'")
     try:
         if secret:
             event = stripe.Webhook.construct_event(payload, sig, secret)  # type: ignore[attr-defined]
@@ -6549,6 +6787,8 @@ def api_stripe_webhook():
     elif event_type in ('customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed'):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
         _sync_broker_billing_event(event_type, obj)
+        if event_type == 'invoice.paid':
+            _activate_listing_from_invoice(obj)
     elif event_type in ('charge.dispute.created', 'charge.dispute.closed'):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
         _sync_broker_dispute(event_type, obj)
@@ -6574,6 +6814,43 @@ def _stripe_metadata(obj):
         return dict(meta)
     except Exception:
         return {}
+
+
+def _activate_listing_from_invoice(obj):
+    """A paid listing-fee invoice turns the listing on when Checkout did not."""
+    meta = _stripe_metadata(obj)
+    listing_id = meta.get('listing_id') if meta.get('purpose') == 'listing_fee' else None
+    if not listing_id:
+        subscription_id = _object_subscription_id(obj)
+        if not subscription_id or db_module.find_subscription_by_stripe_id(subscription_id):
+            return
+        if not _stripe_configured():
+            return
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+        except Exception:
+            logger.exception('Stripe subscription lookup failed')
+            return
+        meta = _stripe_metadata(subscription)
+        if meta.get('purpose') != 'listing_fee':
+            return
+        listing_id = meta.get('listing_id')
+    try:
+        listing_id = int(listing_id)
+    except (TypeError, ValueError):
+        return
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row or row.get('payment_status') == 'paid':
+        return
+    was_waiting = row.get('status') in ('unpaid', 'draft')
+    if not db_module.mark_listing_fee_paid(listing_id):
+        return
+    logger.info('Stripe invoice paid the fee for listing %s', listing_id)
+    if was_waiting:
+        _notify_admins_new_listing(
+            listing_id, row.get('title'), row.get('email'),
+            market=sections_module.normalize_market(row.get('market')),
+        )
 
 
 def _local_subscription_state(stripe_status):
@@ -6837,7 +7114,14 @@ def api_listing_mine(listing_id: int):
             out.pop(private_key, None)
     out['created_at'] = str(out.get('created_at')) if out.get('created_at') else None
     out['updated_at'] = str(out.get('updated_at')) if out.get('updated_at') else None
-    out['media'] = db_module.list_listing_media(listing_id)
+    pending = db_module.parse_listing_pending(out.get('pending_changes'))
+    out['pending_review'] = bool(pending)
+    if pending and pending.get('fields'):
+        for key, value in pending['fields'].items():
+            if key not in ('id', 'user_id', 'status'):
+                out[key] = value
+    out.pop('pending_changes', None)
+    out['media'] = db_module.list_listing_media(listing_id, include_unpublished=True)
     return jsonify({'listing': out}), 200
 
 
@@ -6874,7 +7158,9 @@ def api_listings_media_list(listing_id: int):
         if not (owner or public_ok or broker_ok):
             return jsonify({'error': 'not_found'}), 404
         items = []
-        for item in db_module.list_listing_media(listing_id):
+        for item in db_module.list_listing_media(listing_id, include_unpublished=owner):
+            if not owner and item.get('published') is False:
+                continue
             items.append({key: value for key, value in item.items() if key != 'r2_object_key'})
         return jsonify({'media': items, 'total': len(items)}), 200
     except Exception:
@@ -6947,6 +7233,7 @@ def api_listings_media_upload(listing_id: int):
             rejected.append({'filename': f.filename, 'reason': 'upload_failed', 'detail': str(e)})
             continue
 
+        hold = _edits_wait_for_approval(row, user)
         media_id = db_module.add_listing_media(
             listing_id=listing_id,
             media_type=kind,
@@ -6955,6 +7242,7 @@ def api_listings_media_upload(listing_id: int):
             content_type=content_type,
             size_bytes=size,
             sort_order=start_sort + idx,
+            published=not hold,
         )
         if kind == 'photo':
             existing_photos += 1
@@ -6968,7 +7256,21 @@ def api_listings_media_upload(listing_id: int):
             'content_type': content_type,
             'size_bytes': size,
             'sort_order': start_sort + idx,
+            'published': not hold,
         })
+
+    pending_review = False
+    if created and _edits_wait_for_approval(row, user):
+        fresh = db_module.get_listing_with_owner(listing_id) or row
+        pending = db_module.parse_listing_pending(fresh.get('pending_changes')) or _blank_revision()
+        for item in created:
+            if item.get('published'):
+                continue
+            if item['id'] not in pending['media_add']:
+                pending['media_add'].append(item['id'])
+            pending['media_remove'] = [media_id for media_id in pending['media_remove'] if media_id != item['id']]
+        note = _save_listing_revision(listing_id, fresh, user, pending)
+        pending_review = bool(note)
 
     status = 201 if created else 400
     return jsonify({
@@ -6977,16 +7279,17 @@ def api_listings_media_upload(listing_id: int):
         'rejected': rejected,
         'photo_count': existing_photos,
         'video_count': existing_videos,
+        'pending_review': pending_review,
     }), status
 
 
 @app.route('/api/listings/<int:listing_id>/media/<int:media_id>', methods=['DELETE'])
 @require_auth
 def api_listings_media_delete(listing_id: int, media_id: int):
-    """Delete a single media item: removes the R2 object AND the DB row.
+    """Delete a single media item.
 
-    Owner-only (admins also allowed). Approved (active) listings: owner cannot
-    delete unless admin (parallel to listing-edit rule).
+    On an approved listing, the photo stays up until an admin approves the removal.
+    A photo that was only staged for this update is removed immediately.
     """
     user = request.current_user  # type: ignore[attr-defined]
     row, err = _listing_owner_or_admin(listing_id, user)
@@ -6995,8 +7298,24 @@ def api_listings_media_delete(listing_id: int, media_id: int):
     if err == 'forbidden':
         return jsonify({'error': 'forbidden'}), 403
     assert row is not None
-    if not user.get('is_admin') and row.get('status') == 'active':
-        return jsonify({'error': 'cannot_modify_active'}), 403
+    media = db_module.get_listing_media_row(media_id)
+    if _edits_wait_for_approval(row, user) and media and media.get('listing_id') == listing_id:
+        pending = db_module.parse_listing_pending(row.get('pending_changes')) or _blank_revision()
+        staged = media_id in pending['media_add'] or media.get('published') is False
+        if staged:
+            pending['media_add'] = [item for item in pending['media_add'] if item != media_id]
+            try:
+                _r2.delete_object(media['r2_object_key'])
+            except Exception:
+                logger.exception('R2 delete failed (continuing to remove DB row)')
+            if not db_module.delete_listing_media_row(media_id):
+                return jsonify({'error': 'server_error'}), 500
+            note = _save_listing_revision(listing_id, row, user, pending)
+            return jsonify({'ok': True, 'pending_review': bool(note)}), 200
+        if media_id not in pending['media_remove']:
+            pending['media_remove'].append(media_id)
+        note = _save_listing_revision(listing_id, row, user, pending)
+        return jsonify({'ok': True, 'pending_review': bool(note)}), 200
     media = db_module.get_listing_media_row(media_id)
     if not media or media.get('listing_id') != listing_id:
         return jsonify({'error': 'not_found'}), 404
@@ -7216,6 +7535,7 @@ def api_admin_listings():
                 'rejection_reason': row.get('rejection_reason'),
                 'amendment_note': row.get('amendment_note'),
                 'review_message': row.get('review_message'),
+                'pending_review': bool(db_module.parse_listing_pending(row.get('pending_changes'))),
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'name': combined.get('name'),
                 'manufacturer': combined.get('manufacturer'),
@@ -7382,11 +7702,15 @@ def _money(value):
 
 def _admin_listing_review(row):
     """Listing ask next to the aircraft-data profile it was built from."""
+    pending = db_module.parse_listing_pending(row.get('pending_changes'))
+    shown = dict(row)
+    if pending and pending.get('fields'):
+        shown.update(pending['fields'])
     aircraft_map = {aircraft.get('id'): aircraft for aircraft in get_unified_aircraft_data()}
-    profile = aircraft_map.get(row.get('profile_id')) or {}
-    asking_price = _money(row.get('price'))
+    profile = aircraft_map.get(shown.get('profile_id')) or {}
+    asking_price = _money(shown.get('price'))
     reference_price = _money(profile.get('price'))
-    year = row.get('year')
+    year = shown.get('year')
     low = profile.get('lowest_year')
     high = profile.get('highest_year')
     year_note = ''
@@ -7404,29 +7728,38 @@ def _admin_listing_review(row):
         share = abs(gap) / reference_price * 100
         side = 'above' if gap > 0 else 'below'
         price_note = f'Asking price is {share:.0f}% {side} the aircraft data price (${reference_price:,.0f}).'
-    listing_make = (row.get('manufacturer') or '').strip()
+    listing_make = (shown.get('manufacturer') or '').strip()
     reference_make = (profile.get('manufacturer') or '').strip()
     make_note = ''
     if listing_make and reference_make and listing_make.lower() != reference_make.lower():
         make_note = 'Manufacturer on the listing does not match the aircraft data.'
+    live_bits = []
+    if pending and pending.get('fields'):
+        if 'price' in pending['fields']:
+            live_price = _money(row.get('price'))
+            live_bits.append('price ' + (f'${live_price:,.0f}' if live_price else 'not set'))
+        if 'title' in pending['fields']:
+            live_bits.append(row.get('title') or 'untitled')
     return {
         'listing': {
             'id': row.get('id'),
-            'title': row.get('title'),
+            'title': shown.get('title'),
             'status': row.get('status'),
-            'market': row.get('market'),
+            'market': shown.get('market') or row.get('market'),
             'price': asking_price,
-            'year': row.get('year'),
-            'hours': row.get('hours'),
-            'city': row.get('city'),
-            'state': row.get('state'),
-            'location': row.get('location'),
-            'serial_number': row.get('serial_number'),
-            'manufacturer': row.get('manufacturer'),
-            'description': row.get('description'),
-            'email': row.get('email'),
+            'year': shown.get('year'),
+            'hours': shown.get('hours'),
+            'city': shown.get('city'),
+            'state': shown.get('state'),
+            'location': shown.get('location'),
+            'serial_number': shown.get('serial_number'),
+            'manufacturer': shown.get('manufacturer'),
+            'description': shown.get('description'),
+            'email': shown.get('email'),
             'amendment_note': row.get('amendment_note'),
             'review_message': row.get('review_message'),
+            'pending_review': bool(pending),
+            'currently_live': ', '.join(live_bits),
             'image': row.get('images'),
         },
         'aircraft_data': {
@@ -7469,13 +7802,15 @@ def admin_listing_message(listing_id):
     if not existing:
         return jsonify({'error': 'not_found'}), 404
     previous = existing.get('status')
-    if not db_module.set_listing_review_message(listing_id, message):
+    keep_live = previous == 'active' and bool(db_module.parse_listing_pending(existing.get('pending_changes')))
+    if not db_module.set_listing_review_message(listing_id, message, keep_status=keep_live):
         return jsonify({'error': 'server_error'}), 500
+    new_status = previous if keep_live else 'pending'
     db_module.record_listing_audit(
-        listing_id, admin['id'], 'request_changes', previous, 'pending', message,
+        listing_id, admin['id'], 'request_changes', previous, new_status, message,
     )
     mailed = _mail_listing_status(existing.get('email'), existing.get('title'), 'pending', message)
-    return jsonify({'ok': True, 'status': 'pending', 'emailed': bool(mailed)})
+    return jsonify({'ok': True, 'status': new_status, 'emailed': bool(mailed), 'kept_live': keep_live})
 
 
 @app.route('/api/admin/listings/<int:listing_id>/approve', methods=['POST'])
@@ -7488,10 +7823,15 @@ def admin_approve_listing(listing_id):
         if not existing:
             return jsonify({'error': 'not_found'}), 404
         previous = existing.get('status')
+        had_update = previous == 'active' and bool(db_module.parse_listing_pending(existing.get('pending_changes')))
+        _apply_pending_listing_update(listing_id, existing)
         if not db_module.admin_approve_listing_any(listing_id, admin['id']):
             return jsonify({'error': 'server_error'}), 500
         db_module.record_listing_audit(listing_id, admin['id'], 'approve', previous, 'active', None)
-        _mail_listing_status(existing.get('email'), existing.get('title'), 'approved', None)
+        _mail_listing_status(
+            existing.get('email'), existing.get('title'),
+            'update_approved' if had_update else 'approved', None,
+        )
         db_module.notify_watchers_of_listing(existing)
         return jsonify({'ok': True, 'status': 'active'}), 200
     except Exception:
@@ -7511,6 +7851,16 @@ def admin_reject_listing(listing_id):
             return jsonify({'error': 'not_found'}), 404
         admin = get_current_user_from_request()
         previous = existing.get('status')
+        if previous == 'active' and db_module.parse_listing_pending(existing.get('pending_changes')):
+            _drop_pending_listing_update(listing_id, existing)
+            db_module.set_listing_review_message(
+                listing_id, 'Update not approved. ' + reason, keep_status=True,
+            )
+            db_module.record_listing_audit(
+                listing_id, admin['id'] if admin else None, 'reject_update', previous, 'active', reason,
+            )
+            _mail_listing_status(existing.get('email'), existing.get('title'), 'update_rejected', reason)
+            return jsonify({'ok': True, 'status': 'active', 'update_rejected': True}), 200
         if not db_module.admin_reject_listing_any(listing_id, reason):
             return jsonify({'error': 'server_error'}), 500
         db_module.record_listing_audit(

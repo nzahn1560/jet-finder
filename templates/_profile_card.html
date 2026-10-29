@@ -278,7 +278,8 @@
         {% endif %}
     </div>
 </article>
-{% if not is_owner and user.broker_application_status == 'approved' and get_current_user_info() %}
+{% set note_viewer = get_current_user_info() %}
+{% if not is_owner and user.broker_application_status == 'approved' and note_viewer %}
 <form id="broker-note" class="identity" style="padding:1.25rem 1.5rem; display:grid; gap:0.6rem;">
     <strong style="color:#fff;">Send {{ person_name }} a note</strong>
     <select class="form-select" name="kind">
@@ -287,6 +288,10 @@
     </select>
     <input class="form-control" name="aircraft_name" maxlength="200" placeholder="Aircraft you are looking for">
     <textarea class="form-control" name="notes" maxlength="2000" rows="3" placeholder="Notes"></textarea>
+    <label for="broker-note-email" style="color:#d0d0d0;">Email</label>
+    <input class="form-control" id="broker-note-email" name="contact_email" type="email" maxlength="254" required autocomplete="email" value="{{ note_viewer.email or '' }}">
+    <label for="broker-note-phone" style="color:#d0d0d0;">Phone</label>
+    <input class="form-control" id="broker-note-phone" name="contact_phone" type="tel" maxlength="40" required autocomplete="tel" value="{{ note_viewer.phone or '' }}">
     <button type="submit" class="dash__btn dash__btn--primary" style="border:0; width:max-content; cursor:pointer;">Send</button>
     <span id="broker-note-status" style="color:#c8c8c8;"></span>
 </form>
@@ -303,9 +308,12 @@ document.getElementById('broker-note').addEventListener('submit', async function
             kind: data.get('kind'),
             aircraft_name: data.get('aircraft_name') || '',
             notes: data.get('notes') || '',
+            contact_email: data.get('contact_email') || '',
+            contact_phone: data.get('contact_phone') || '',
         }),
     });
-    status.textContent = response.ok ? 'Sent.' : 'Could not send that note.';
+    const body = await response.json().catch(function () { return {}; });
+    status.textContent = response.ok ? 'Sent.' : (body.message || 'Could not send that note.');
 });
 </script>
 {% endif %}

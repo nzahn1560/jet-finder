@@ -13,6 +13,11 @@
 
     <div class="broker-shell">
         <div class="broker-stage">
+            <form class="broker-find" id="broker-find" role="search">
+                <label class="broker-search-label" for="broker-search">Search an area</label>
+                <input id="broker-search" class="form-control" type="search" placeholder="Airport code or location" autocomplete="off">
+                <div id="broker-results" class="broker-results" hidden></div>
+            </form>
             <div id="broker-map" class="section-map"></div>
             <article id="broker-selected" class="broker-selected" hidden></article>
         </div>
@@ -41,7 +46,11 @@
     }
     const teams = {{ map_points|tojson }};
     const selectedEl = document.getElementById('broker-selected');
-    const map = L.map('broker-map').setView([39.8, -98.6], 4);
+    const searchEl = document.getElementById('broker-search');
+    const resultsEl = document.getElementById('broker-results');
+    const findEl = document.getElementById('broker-find');
+    const map = L.map('broker-map', { zoomControl: false }).setView([39.8, -98.6], 4);
+    L.control.zoom({ position: 'topright' }).addTo(map);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri',
         maxZoom: 16
@@ -53,6 +62,9 @@
 
     const markers = new Map();
     let activeId = null;
+    let pinClickAt = 0;
+    map.createPane('brokers');
+    map.getPane('brokers').style.zIndex = 620;
 
     function photoStyle(url) {
         return url ? "background-image:url('" + String(url).replace(/'/g, '') + "')" : '';
@@ -100,7 +112,7 @@
     function paintMarkers() {
         markers.forEach(function (marker, id) {
             const on = id === activeId;
-            marker.setStyle({ radius: on ? 9 : 6, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
+            marker.setStyle({ radius: on ? 10 : 7, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
         });
     }
 
@@ -109,6 +121,60 @@
         selectedEl.hidden = true;
         selectedEl.innerHTML = '';
         paintMarkers();
+    }
+
+    function searchText(team) {
+        return [
+            team.display_name, team.place, team.city, team.region, team.country,
+            team.iata, team.icao, team.airport_name, team.category, team.leader
+        ].filter(Boolean).join(' ').toLowerCase();
+    }
+
+    function milesBetween(lat, lon, otherLat, otherLon) {
+        const toRad = Math.PI / 180;
+        const dLat = (otherLat - lat) * toRad;
+        const dLon = (otherLon - lon) * toRad;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+            + Math.cos(lat * toRad) * Math.cos(otherLat * toRad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function showMarkers(shown) {
+        const visible = {};
+        shown.forEach(function (team) { visible[team.pin_id] = true; });
+        markers.forEach(function (marker, id) {
+            if (visible[id]) marker.addTo(map);
+            else map.removeLayer(marker);
+        });
+    }
+
+    function choose(team) {
+        if (!team) return;
+        if (team.kind === 'broker') selectBroker(team);
+        else selectTeam(team);
+    }
+
+    function renderResults(shown, area) {
+        if (!shown.length) {
+            const where = area ? (area.iata || area.icao || area.city || area.name) : '';
+            resultsEl.hidden = false;
+            resultsEl.innerHTML = '<p class="broker-empty">No brokers in ' + esc(where || 'that area') + '.</p>';
+            return;
+        }
+        resultsEl.hidden = false;
+        resultsEl.innerHTML = shown.map(function (team) {
+            const where = [team.iata || team.icao, team.city || team.place].filter(Boolean).join(' · ');
+            return '<button type="button" class="broker-person' + (team.pin_id === activeId ? ' is-selected' : '') + '" data-id="' + team.pin_id + '">'
+                + '<span class="broker-person__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : esc((team.display_name || 'B').slice(0, 1))) + '</span>'
+                + '<span><strong>' + esc(team.display_name) + '</strong><em>' + esc(where || 'Broker') + '</em></span>'
+                + '</button>';
+        }).join('');
+        resultsEl.querySelectorAll('.broker-person').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const team = teams.find(function (item) { return item.pin_id === button.getAttribute('data-id'); });
+                choose(team);
+            });
+        });
     }
 
     function selectBroker(broker) {
@@ -138,10 +204,17 @@
     }
 
     const bounds = [];
+    const occupied = {};
     teams.forEach(function (team) {
         if (team.lat == null || team.lon == null) return;
-        const marker = L.circleMarker([team.lat, team.lon], {
-            radius: 6, color: '#F05545', weight: 0, fillColor: '#F05545', fillOpacity: 1
+        const key = Number(team.lat).toFixed(3) + ',' + Number(team.lon).toFixed(3);
+        const slot = occupied[key] || 0;
+        occupied[key] = slot + 1;
+        const angle = slot * 0.9;
+        const lat = Number(team.lat) + Math.sin(angle) * 0.05 * slot;
+        const lon = Number(team.lon) + Math.cos(angle) * 0.05 * slot;
+        const marker = L.circleMarker([lat, lon], {
+            radius: 7, pane: 'brokers', color: '#F05545', weight: 0, fillColor: '#F05545', fillOpacity: 1
         }).addTo(map);
         marker.bindTooltip(miniHtml(team), {
             direction: 'top',
@@ -150,14 +223,49 @@
             offset: [0, -8]
         });
         marker.on('click', function (event) {
-            if (event && event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
-            if (team.kind === 'broker') selectBroker(team);
-            else selectTeam(team);
+            pinClickAt = Date.now();
+            if (event) L.DomEvent.stopPropagation(event);
+            choose(team);
         });
         markers.set(team.pin_id, marker);
         bounds.push([team.lat, team.lon]);
     });
-    map.on('click', clearSelection);
+    map.on('click', function () {
+        if (Date.now() - pinClickAt < 400) return;
+        clearSelection();
+    });
+    findEl.addEventListener('submit', function (event) { event.preventDefault(); });
+    findEl.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+    let searchToken = 0;
+    searchEl.addEventListener('input', function () {
+        const needle = searchEl.value.trim().toLowerCase();
+        const token = ++searchToken;
+        if (!needle) {
+            resultsEl.hidden = true;
+            resultsEl.innerHTML = '';
+            showMarkers(teams.filter(function (team) { return team.lat != null && team.lon != null; }));
+            if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 8 });
+            return;
+        }
+        fetch('/api/airports?q=' + encodeURIComponent(needle))
+            .then(function (response) { return response.ok ? response.json() : []; })
+            .catch(function () { return []; })
+            .then(function (rows) {
+                if (token !== searchToken) return;
+                const area = Array.isArray(rows) && rows.length ? rows[0] : null;
+                const shown = teams.filter(function (team) {
+                    if (team.lat == null || team.lon == null) return false;
+                    if (searchText(team).indexOf(needle) >= 0) return true;
+                    if (!area || area.lat == null || area.lon == null) return false;
+                    return milesBetween(Number(area.lat), Number(area.lon), Number(team.lat), Number(team.lon)) <= 75;
+                });
+                renderResults(shown, area);
+                showMarkers(shown);
+                const spots = shown.map(function (team) { return markers.get(team.pin_id).getLatLng(); });
+                if (spots.length) map.fitBounds(L.latLngBounds(spots), { padding: [64, 64], maxZoom: 9 });
+                else if (area && area.lat != null && area.lon != null) map.flyTo([area.lat, area.lon], 9, { duration: 0.45 });
+            });
+    });
     if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 8 });
     setTimeout(function () { map.invalidateSize(); }, 200);
 })();

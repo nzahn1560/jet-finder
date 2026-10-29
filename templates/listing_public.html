@@ -104,6 +104,10 @@
                     {% endfor %}
                 </select>
                 <textarea name="notes" maxlength="2000" rows="3" placeholder="Notes for the broker"></textarea>
+                <label for="send-email">Email</label>
+                <input id="send-email" name="contact_email" type="email" maxlength="254" required autocomplete="email" value="{{ viewer.email or '' }}">
+                <label for="send-phone">Phone</label>
+                <input id="send-phone" name="contact_phone" type="tel" maxlength="40" required autocomplete="tel" value="{{ viewer.phone or '' }}">
                 <button type="submit">Send listing</button>
                 <span id="send-listing-status" style="color:#c8c8c8;"></span>
             </form>
@@ -140,9 +144,16 @@ document.getElementById('send-listing').addEventListener('submit', async functio
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'listing', listing_id: {{ listing.id }}, notes: data.get('notes') || '' }),
+        body: JSON.stringify({
+            kind: 'listing',
+            listing_id: {{ listing.id }},
+            notes: data.get('notes') || '',
+            contact_email: data.get('contact_email') || '',
+            contact_phone: data.get('contact_phone') || '',
+        }),
     });
-    status.textContent = response.ok ? 'Sent to the broker.' : 'Could not send that listing.';
+    const body = await response.json().catch(function () { return {}; });
+    status.textContent = response.ok ? 'Sent to the broker.' : (body.message || 'Could not send that listing.');
 });
 </script>
 {% endif %}

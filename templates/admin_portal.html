@@ -152,6 +152,7 @@ async function loadAdminListings() {
         const items = data.listings || [];
         if (!items.length) { target.innerHTML = '<div class="ap__empty">No listings.</div>'; return; }
         target.innerHTML = items.map(function (l) {
+            const updateWaiting = l.pending_review && l.status === 'active';
             const color = STATUS_COLORS[l.status] || '#8e8e93';
             const owner = l.owner ? (l.owner.email || (l.owner.first_name + ' ' + l.owner.last_name)) : 'unknown';
             return ''
@@ -168,10 +169,10 @@ async function loadAdminListings() {
                 + ((l.market === 'off_market' || l.market === 'broker_only') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
                 + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
-                + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(l.status) + '</span></div>'
+                + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '">Approve</button>'
-                + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '">Reject</button>'
+                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
+                + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>' + (updateWaiting ? 'Reject update' : 'Reject') + '</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="notes" data-id="' + l.id + '">Private note</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
@@ -197,7 +198,9 @@ async function loadAdminListings() {
                 } else {
                     let body = undefined;
                     if (act === 'reject') {
-                        const reason = prompt('Reason for rejection?') || '';
+                        const reason = prompt(btn.getAttribute('data-pending') === '1'
+                            ? 'Reason for rejecting this update? The live listing stays up.'
+                            : 'Reason for rejection?') || '';
                         body = JSON.stringify({ reason: reason });
                     }
                     if (act === 'notes') {
@@ -211,11 +214,15 @@ async function loadAdminListings() {
                     });
                 }
                 if (resp.ok) {
-                    if (act === 'approve') {
+                    if (act === 'approve' || (act === 'reject' && btn.getAttribute('data-pending') === '1')) {
                         const note = document.getElementById('admin-note');
                         if (note) {
                             note.hidden = false;
-                            note.textContent = 'Approved. Public listings are on the marketplace. Broker-only listings stay off it.';
+                            note.textContent = act === 'approve'
+                                ? (btn.getAttribute('data-pending') === '1'
+                                    ? 'Update approved. Those changes are now on the listing.'
+                                    : 'Approved. Public listings are on the marketplace. Broker-only listings stay off it.')
+                                : 'Update rejected. The listing that is already up is unchanged.';
                         }
                     }
                     loadAdminListings();
@@ -352,6 +359,8 @@ async function openReview(id) {
         + '<p>' + esc(ask.manufacturer || '') + '</p>'
         + '<p>' + esc(ask.description || '') + '</p>'
         + '<p style="color:#bdbdbd;">Seller ' + esc(ask.email || '') + '</p>'
+        + (ask.pending_review ? '<p class="flag">This update is not on the listing yet. Approve it to publish these changes. Reject it and the live listing stays as it is.</p>' : '')
+        + (ask.currently_live ? '<p>Currently live: ' + esc(ask.currently_live) + '</p>' : '')
         + (ask.amendment_note ? '<p class="flag">' + esc(ask.amendment_note) + '</p>' : '');
     const yearRange = [ref.year_from, ref.year_to].filter(Boolean).join('–');
     const checks = (body.checks || []).map(function (line) { return '<p class="flag">' + esc(line) + '</p>'; }).join('');
@@ -401,9 +410,11 @@ document.getElementById('review-send').addEventListener('click', async function 
         status.textContent = body.message || 'Message was not sent.';
         return;
     }
-    status.textContent = body.emailed
+    status.textContent = body.kept_live
+        ? 'The seller has the message. The live listing is unchanged.'
+        : (body.emailed
         ? 'Approval stays pending. The seller has the message.'
-        : 'Approval stays pending. The seller will see this on their listings.';
+        : 'Approval stays pending. The seller will see this on their listings.');
     loadAdminListings();
 });
 document.getElementById('review-approve').addEventListener('click', async function () {
