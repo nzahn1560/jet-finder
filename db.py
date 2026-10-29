@@ -19,10 +19,11 @@ PRODUCTION DATA SAFETY GUARANTEES
 """
 from __future__ import annotations
 
+import json
 import os
 import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text, UniqueConstraint, or_
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
@@ -209,6 +210,8 @@ class UserListing(Base):
     state = Column(String(40))
     # sale | wanted. Public listings stay sale. Off-market brokers choose one.
     listing_intent = Column(String(20), default='sale', nullable=False)
+    # JSON proposal for an approved listing. Live columns stay put until an admin approves it.
+    pending_changes = Column(Text)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -349,6 +352,8 @@ class BrokerMessage(Base):
     kind = Column(String(20), nullable=False)
     aircraft_name = Column(String(200))
     notes = Column(Text)
+    contact_email = Column(String(255))
+    contact_phone = Column(String(40))
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -483,6 +488,8 @@ class ListingMedia(Base):
     content_type = Column(String(128))
     size_bytes = Column(Integer)
     sort_order = Column(Integer, default=0, index=True)
+    # False while a new photo on an approved listing is waiting for approval.
+    published = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     def to_dict(self):
@@ -814,6 +821,7 @@ def init_db():
                 'city TEXT',
                 'state TEXT',
                 'listing_intent TEXT DEFAULT \'sale\'',
+                'pending_changes TEXT',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN {col_def}'))
@@ -821,6 +829,11 @@ def init_db():
                 except Exception:
                     conn.rollback()
                     pass  # column already exists
+            try:
+                conn.execute(text('ALTER TABLE listing_media ADD COLUMN published BOOLEAN DEFAULT 1'))
+                conn.commit()
+            except Exception:
+                conn.rollback()
             for col_def in [
                 'profile_role VARCHAR(50) DEFAULT \'other\'',
                 'profile_location VARCHAR(255)',
@@ -892,6 +905,7 @@ def init_db():
                 ('city', 'VARCHAR(120)'),
                 ('state', 'VARCHAR(40)'),
                 ('listing_intent', "VARCHAR(20) DEFAULT 'sale'"),
+                ('pending_changes', 'TEXT'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -900,10 +914,26 @@ def init_db():
                     conn.rollback()
                     pass
             try:
+                conn.execute(text(
+                    'ALTER TABLE listing_media ADD COLUMN IF NOT EXISTS published BOOLEAN DEFAULT TRUE'
+                ))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+            try:
                 conn.execute(text('ALTER TABLE broker_teams ADD COLUMN IF NOT EXISTS category VARCHAR(40)'))
                 conn.commit()
             except Exception:
                 conn.rollback()
+            for col, typ in (
+                ('contact_email', 'VARCHAR(255)'),
+                ('contact_phone', 'VARCHAR(40)'),
+            ):
+                try:
+                    conn.execute(text(f'ALTER TABLE broker_messages ADD COLUMN IF NOT EXISTS {col} {typ}'))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
     if DATABASE_URL.startswith('sqlite'):
         with engine.connect() as conn:
             try:
@@ -911,6 +941,12 @@ def init_db():
                 conn.commit()
             except Exception:
                 conn.rollback()
+            for col_def in ('contact_email VARCHAR(255)', 'contact_phone VARCHAR(40)'):
+                try:
+                    conn.execute(text(f'ALTER TABLE broker_messages ADD COLUMN {col_def}'))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
 
 
 @contextmanager
@@ -1509,6 +1545,26 @@ def set_listing_payment_session(listing_id, session_id):
         return n > 0
 
 
+def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None):
+    """Mark a listing fee paid and send an unpaid or draft listing to review."""
+    if not listing_id:
+        return None
+    with get_session() as s:
+        row = s.query(UserListing).filter(UserListing.id == listing_id).first()
+        if not row:
+            return None
+        lid = int(row.id)  # type: ignore[arg-type]
+        updates: dict = {'payment_status': 'paid'}
+        if payment_intent_id:
+            updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
+        if session_id:
+            updates['payment_session_id'] = str(session_id)[:255]
+        if row.status in ('unpaid', 'draft'):
+            updates['status'] = 'pending'
+        s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
+        return lid
+
+
 def mark_listing_paid_by_session(session_id, payment_intent_id=None):
     """Stripe webhook: mark the listing paid and move it to 'pending' review.
 
@@ -1518,16 +1574,10 @@ def mark_listing_paid_by_session(session_id, payment_intent_id=None):
         return None
     with get_session() as s:
         row = s.query(UserListing).filter(UserListing.payment_session_id == session_id).first()
-        if not row:
-            return None
-        lid = int(row.id)  # type: ignore[arg-type]
-        updates: dict = {'payment_status': 'paid'}
-        if payment_intent_id:
-            updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
-        if row.status in ('unpaid', 'draft'):
-            updates['status'] = 'pending'
-        s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
-        return lid
+        listing_id = int(row.id) if row else None  # type: ignore[arg-type]
+    if not listing_id:
+        return None
+    return mark_listing_fee_paid(listing_id, payment_intent_id, session_id)
 
 
 def reconcile_listing_refund(payment_intent_id, payment_status):
@@ -1684,31 +1734,108 @@ def get_listing_with_owner(listing_id):
         return row.to_dict() if row else None
 
 
-def update_user_listing_fields(listing_id, fields):
-    """Update an existing listing with a whitelisted set of fields. Returns True if updated.
-
-    Only allowed columns can be patched. user_id can never be overwritten via this path.
-    """
+def normalize_listing_fields(fields):
+    """Whitelisted listing columns from a form or JSON body. Never includes ownership or status."""
     allowed = {
         'title', 'year', 'price', 'hours', 'location', 'email', 'description',
         'images', 'documents', 'engine_type', 'manufacturer', 'pricing_plan', 'market',
         'serial_number', 'registration', 'variant', 'engine_program', 'engine_hours',
         'engine_cycles', 'maintenance_status', 'avionics', 'paint_year', 'interior_year',
-        'passenger_config', 'city', 'state',
+        'passenger_config', 'city', 'state', 'profile_id', 'listing_intent',
     }
     safe = {k: v for k, v in (fields or {}).items() if k in allowed}
     if 'market' in safe:
         safe['market'] = _stored_market(safe['market'])
-    for key in ('engine_hours', 'engine_cycles', 'paint_year', 'interior_year'):
+    if 'listing_intent' in safe:
+        intent = str(safe.get('listing_intent') or '').strip().lower()
+        if intent in ('sale', 'wanted'):
+            safe['listing_intent'] = intent
+        else:
+            safe.pop('listing_intent', None)
+    if 'profile_id' in safe:
+        try:
+            safe['profile_id'] = int(safe['profile_id'])
+        except (TypeError, ValueError):
+            safe.pop('profile_id', None)
+    for key in ('engine_hours', 'engine_cycles', 'paint_year', 'interior_year', 'year', 'hours'):
         if key in safe and safe[key] not in (None, ''):
             try:
                 safe[key] = int(safe[key])
             except (TypeError, ValueError):
                 safe.pop(key, None)
+    if 'price' in safe and safe['price'] not in (None, ''):
+        try:
+            safe['price'] = float(safe['price'])
+        except (TypeError, ValueError):
+            safe.pop('price', None)
+    return safe
+
+
+def update_user_listing_fields(listing_id, fields):
+    """Update an existing listing with a whitelisted set of fields. Returns True if updated.
+
+    Only allowed columns can be patched. user_id can never be overwritten via this path.
+    """
+    safe = normalize_listing_fields(fields)
     if not safe:
         return False
     with get_session() as s:
         n = s.query(UserListing).filter(UserListing.id == listing_id).update(safe, synchronize_session=False)
+        return n > 0
+
+
+def parse_listing_pending(raw):
+    """Return the staged update for an approved listing, or None when there is nothing waiting."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    fields = data.get('fields') if isinstance(data.get('fields'), dict) else {}
+
+    def _ids(key):
+        found = []
+        for item in data.get(key) or []:
+            try:
+                found.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return found
+
+    media_add = _ids('media_add')
+    media_remove = _ids('media_remove')
+    if not fields and not media_add and not media_remove:
+        return None
+    return {'fields': fields, 'media_add': media_add, 'media_remove': media_remove}
+
+
+def set_listing_pending_changes(listing_id, pending):
+    """Store a staged update, or clear it. Clearing also clears the amendment note."""
+    raw = None
+    if pending:
+        fields = pending.get('fields') or {}
+        media_add = []
+        media_remove = []
+        for item in pending.get('media_add') or []:
+            try:
+                media_add.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        for item in pending.get('media_remove') or []:
+            try:
+                media_remove.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if fields or media_add or media_remove:
+            raw = json.dumps({'fields': fields, 'media_add': media_add, 'media_remove': media_remove})
+    values = {'pending_changes': raw}
+    if raw is None:
+        values['amendment_note'] = None
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(values, synchronize_session=False)
         return n > 0
 
 
@@ -1726,7 +1853,10 @@ def admin_list_user_listings(status=None, limit=500):
     with get_session() as s:
         q = s.query(UserListing)
         if status == 'pending':
-            q = q.filter(UserListing.status.in_(('pending', 'unpaid')))
+            q = q.filter(or_(
+                UserListing.status.in_(('pending', 'unpaid')),
+                UserListing.pending_changes.isnot(None),
+            ))
         elif status:
             q = q.filter(UserListing.status == status)
         rows = q.order_by(UserListing.created_at.desc()).limit(limit).all()
@@ -1788,11 +1918,12 @@ def set_broker_verified(user_id, verified: bool) -> bool:
         return n > 0
 
 
-def set_listing_review_message(listing_id, message: str) -> bool:
+def set_listing_review_message(listing_id, message: str, keep_status: bool = False) -> bool:
+    values = {'review_message': message}
+    if not keep_status:
+        values['status'] = 'pending'
     with get_session() as s:
-        n = s.query(UserListing).filter(UserListing.id == listing_id).update(
-            {'review_message': message, 'status': 'pending'}, synchronize_session=False
-        )
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update(values, synchronize_session=False)
         return n > 0
 
 
@@ -2222,7 +2353,7 @@ def list_approved_brokers():
         return out
 
 
-def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_name='', listing_id=None):
+def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_name='', listing_id=None, contact_email='', contact_phone=''):
     kind = (kind or '').strip().lower()
     if kind not in ('request', 'listing', 'message'):
         raise ValueError('invalid_kind')
@@ -2242,6 +2373,8 @@ def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_nam
             kind=kind,
             aircraft_name=aircraft_name or None,
             notes=notes or None,
+            contact_email=(contact_email or '').strip()[:254] or None,
+            contact_phone=(contact_phone or '').strip()[:40] or None,
         )
         s.add(row)
         s.flush()
@@ -2268,6 +2401,8 @@ def list_broker_messages(user_id, box='in'):
                 'kind': row.kind,
                 'aircraft_name': row.aircraft_name or '',
                 'notes': row.notes or '',
+                'contact_email': row.contact_email or '',
+                'contact_phone': row.contact_phone or '',
                 'listing_id': row.listing_id,
                 'from_user_id': int(row.from_user_id),
                 'to_user_id': int(row.to_user_id),
@@ -2546,7 +2681,7 @@ def admin_reject_listing_any(listing_id, rejection_reason):
 # --- Listing media helpers (Cloudflare R2 backed) ---
 def add_listing_media(listing_id: int, media_type: str, r2_object_key: str, url: str,
                       *, thumbnail_url: str | None = None, content_type: str | None = None,
-                      size_bytes: int | None = None, sort_order: int = 0) -> int:
+                      size_bytes: int | None = None, sort_order: int = 0, published: bool = True) -> int:
     """Insert a listing_media row. Bytes themselves are in R2; we only store metadata."""
     with get_session() as s:
         row = ListingMedia(
@@ -2558,35 +2693,32 @@ def add_listing_media(listing_id: int, media_type: str, r2_object_key: str, url:
             content_type=content_type,
             size_bytes=size_bytes,
             sort_order=sort_order,
+            published=bool(published),
         )
         s.add(row)
         s.flush()
         return int(row.id)  # type: ignore[arg-type]
 
 
-def list_listing_media(listing_id: int) -> list[dict]:
+def list_listing_media(listing_id: int, include_unpublished: bool = False) -> list[dict]:
     """Return ordered media metadata for a listing (used by display endpoints)."""
     with get_session() as s:
-        rows = (
-            s.query(ListingMedia)
-            .filter(ListingMedia.listing_id == listing_id)
-            .order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc())
-            .all()
-        )
+        query = s.query(ListingMedia).filter(ListingMedia.listing_id == listing_id)
+        if not include_unpublished:
+            query = query.filter(or_(ListingMedia.published.is_(True), ListingMedia.published.is_(None)))
+        rows = query.order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc()).all()
         return [r.to_dict() for r in rows]
 
 
-def list_media_for_listings(listing_ids: list[int]) -> dict[int, list[dict]]:
+def list_media_for_listings(listing_ids: list[int], include_unpublished: bool = False) -> dict[int, list[dict]]:
     """Batch lookup: return {listing_id: [media_dict, ...]} for many listings (avoid N+1)."""
     if not listing_ids:
         return {}
     with get_session() as s:
-        rows = (
-            s.query(ListingMedia)
-            .filter(ListingMedia.listing_id.in_(listing_ids))
-            .order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc())
-            .all()
-        )
+        query = s.query(ListingMedia).filter(ListingMedia.listing_id.in_(listing_ids))
+        if not include_unpublished:
+            query = query.filter(or_(ListingMedia.published.is_(True), ListingMedia.published.is_(None)))
+        rows = query.order_by(ListingMedia.sort_order.asc(), ListingMedia.id.asc()).all()
         out: dict[int, list[dict]] = {}
         for r in rows:
             out.setdefault(int(r.listing_id), []).append(r.to_dict())  # type: ignore[arg-type]
@@ -2597,6 +2729,14 @@ def get_listing_media_row(media_id: int) -> dict | None:
     with get_session() as s:
         row = s.query(ListingMedia).filter(ListingMedia.id == media_id).first()
         return row.to_dict() if row else None
+
+
+def set_listing_media_published(media_id: int, published: bool = True) -> bool:
+    with get_session() as s:
+        n = s.query(ListingMedia).filter(ListingMedia.id == media_id).update(
+            {'published': bool(published)}, synchronize_session=False
+        )
+        return n > 0
 
 
 def delete_listing_media_row(media_id: int) -> bool:

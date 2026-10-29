@@ -214,6 +214,8 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Wanted', opened.data)
 
     def test_editing_a_live_listing_is_sent_back_as_an_amendment(self):
+        import io
+        import json
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Amend Jet', 'public'))
         listing_id = created.get_json()['id']
@@ -221,11 +223,51 @@ class ProductTests(unittest.TestCase):
         patched = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1800000})
         self.assertEqual(patched.status_code, 200, patched.get_json())
         note = patched.get_json().get('amendment') or ''
-        self.assertIn('Amendment', note)
+        self.assertIn('waiting for approval', note.lower())
         self.assertIn('Price', note)
+        self.assertTrue(patched.get_json().get('pending_review'))
         row = db_module.get_listing_with_owner(listing_id)
-        self.assertEqual(row['status'], 'pending')
-        self.assertIn('Price', row.get('amendment_note') or '')
+        self.assertEqual(row['status'], 'active')
+        self.assertEqual(float(row['price']), 2500000)
+        staged = json.loads(row['pending_changes'])
+        self.assertEqual(float(staged['fields']['price']), 1800000)
+        page = self.client.get(f'/listing/{listing_id}')
+        self.assertIn(b'$2,500,000', page.data)
+        self.assertNotIn(b'$1,800,000', page.data)
+        self._login('admin@example.com', 'admin-pass-1')
+        queue = self.client.get('/api/admin/listings?status=pending')
+        queued = [item for item in queue.get_json()['listings'] if item['id'] == listing_id]
+        self.assertEqual(len(queued), 1)
+        self.assertTrue(queued[0].get('pending_review'))
+        rejected = self.client.post(f'/api/admin/listings/{listing_id}/reject', json={'reason': 'Price is off'})
+        self.assertEqual(rejected.status_code, 200, rejected.get_json())
+        self.assertEqual(rejected.get_json()['status'], 'active')
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'active')
+        self.assertEqual(float(row['price']), 2500000)
+        self.assertFalse(row.get('pending_changes'))
+        self._login('seller@example.com', 'seller-pass-1')
+        again = self.client.patch(f'/api/listings/{listing_id}', json={'price': 1800000})
+        self.assertEqual(again.status_code, 200, again.get_json())
+        photo = self.client.post(
+            f'/api/listings/{listing_id}/media',
+            data={'files': (io.BytesIO(b'\xff\xd8\xff\xd9'), 'plane.jpg', 'image/jpeg')},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(photo.status_code, 201, photo.get_json())
+        self.assertTrue(photo.get_json().get('pending_review'))
+        self.assertEqual(db_module.list_listing_media(listing_id), [])
+        self.assertEqual(len(db_module.list_listing_media(listing_id, include_unpublished=True)), 1)
+        self._login('admin@example.com', 'admin-pass-1')
+        approved = self.client.post(f'/api/admin/listings/{listing_id}/approve')
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'active')
+        self.assertEqual(float(row['price']), 1800000)
+        self.assertFalse(row.get('pending_changes'))
+        self.assertEqual(len(db_module.list_listing_media(listing_id)), 1)
+        page = self.client.get(f'/listing/{listing_id}')
+        self.assertIn(b'$1,800,000', page.data)
 
     def test_public_profile_hides_edit_from_visitors(self):
         visitor = self.client.get(f"/people/{self.buyer['id']}")
@@ -455,6 +497,66 @@ class ProductTests(unittest.TestCase):
         row = db_module.get_listing_with_owner(listing_id)
         self.assertEqual(row.get('payment_status'), 'paid')
         self.assertEqual(row.get('status'), 'pending')
+
+    def test_stripe_checkout_namespace_loads(self):
+        import stripe
+        self.assertIsNotNone(stripe.checkout)
+        self.assertTrue(callable(stripe.checkout.Session.create))
+        self.assertIsNotNone(stripe.billing_portal)
+        self.assertTrue(callable(stripe.billing_portal.Session.create))
+
+    def test_returning_from_checkout_marks_the_listing_paid(self):
+        import stripe
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Return Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.set_user_listing_status(listing_id, 'unpaid')
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_returncheck'
+        state = {'status': 'open', 'payment_status': 'unpaid', 'subscription_status': 'incomplete'}
+
+        def retrieve(session_id, expand=None):
+            return {
+                'id': session_id,
+                'status': state['status'],
+                'payment_status': state['payment_status'],
+                'metadata': {
+                    'purpose': 'listing_fee',
+                    'listing_id': str(listing_id),
+                    'user_id': str(self.seller['id']),
+                },
+                'payment_intent': 'pi_return_1',
+                'subscription': {'id': 'sub_return_1', 'status': state['subscription_status']},
+            }
+
+        original = stripe.checkout.Session.retrieve
+        stripe.checkout.Session.retrieve = retrieve
+        try:
+            waiting = self.client.post(
+                f'/api/listings/{listing_id}/confirm-payment',
+                json={'session_id': 'cs_test_return'},
+            )
+            self.assertEqual(waiting.status_code, 400, waiting.get_json())
+            self.assertNotEqual(db_module.get_listing_with_owner(listing_id).get('payment_status'), 'paid')
+            state['status'] = 'complete'
+            state['payment_status'] = 'unpaid'
+            state['subscription_status'] = 'active'
+            settled = self.client.post(
+                f'/api/listings/{listing_id}/confirm-payment',
+                json={'session_id': 'cs_test_return'},
+            )
+            self.assertEqual(settled.status_code, 200, settled.get_json())
+            row = db_module.get_listing_with_owner(listing_id)
+            self.assertEqual(row.get('payment_status'), 'paid')
+            self.assertEqual(row.get('status'), 'pending')
+            page = self.client.get(f'/dashboard?submitted={listing_id}&paid=confirmed')
+            self.assertIn(b'Payment received', page.data)
+        finally:
+            stripe.checkout.Session.retrieve = original
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
 
     def test_production_webhook_without_a_secret_is_refused(self):
         import os
@@ -778,7 +880,12 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(directory.status_code, 200)
         self.assertIn(b'Mapbroker', directory.data)
         self.assertNotIn(b'id="broker-list"', directory.data)
-        self.assertIn(b"map.on('click', clearSelection)", directory.data)
+        self.assertIn(b'id="broker-search"', directory.data)
+        self.assertIn(b'Airport code or location', directory.data)
+        self.assertIn(b'/api/airports?q=', directory.data)
+        self.assertIn(b"if (Date.now() - pinClickAt < 400) return;", directory.data)
+        self.assertIn(b'clearSelection();', directory.data)
+        self.assertIn(b'Open profile', directory.data)
         self._login('map-broker@example.com', 'broker-pass-1')
         opened = self.client.get('/off-market')
         self.assertEqual(opened.status_code, 200)
@@ -837,10 +944,12 @@ class ProductTests(unittest.TestCase):
         self._login('buyer@example.com', 'buyer-pass-1')
         request_note = self.client.post(f"/api/brokers/{self.broker['id']}/messages", json={
             'kind': 'request', 'aircraft_name': 'Citation Latitude', 'notes': 'Seats for six',
+            'contact_email': 'buyer@example.com', 'contact_phone': '555-0199',
         })
         self.assertEqual(request_note.status_code, 201, request_note.get_json())
         listing_note = self.client.post(f"/api/brokers/{self.broker['id']}/messages", json={
             'kind': 'listing', 'listing_id': listing_id, 'notes': 'Please take a look',
+            'contact_email': 'buyer@example.com', 'contact_phone': '555-0199',
         })
         self.assertEqual(listing_note.status_code, 201, listing_note.get_json())
         page = self.client.get(f'/listing/{listing_id}')
@@ -855,6 +964,21 @@ class ProductTests(unittest.TestCase):
         kinds = {row['kind'] for row in inbox.get_json()['inbox']}
         self.assertIn('request', kinds)
         self.assertIn('listing', kinds)
+        self.assertTrue(all(row['contact_email'] == 'buyer@example.com' and row['contact_phone'] == '555-0199' for row in inbox.get_json()['inbox']))
+        self._login('buyer@example.com', 'buyer-pass-1')
+        profile = self.client.get(f"/people/{self.broker['id']}")
+        self.assertIn(b'name="contact_email"', profile.data)
+        self.assertIn(b'name="contact_phone"', profile.data)
+        listing_page = self.client.get(f'/listing/{listing_id}')
+        self.assertIn(b'id="send-email"', listing_page.data)
+        self.assertIn(b'id="send-phone"', listing_page.data)
+        portal = self.client.get('/dashboard')
+        self.assertIn(b'id="portal-email"', portal.data)
+        self.assertIn(b'id="portal-phone"', portal.data)
+        missing_phone = self.client.post(f"/api/brokers/{self.broker['id']}/messages", json={
+            'kind': 'message', 'notes': 'Call me', 'contact_email': 'buyer@example.com', 'contact_phone': '',
+        })
+        self.assertEqual(missing_phone.status_code, 400)
 
     def _payload(self, title, market):
         return {

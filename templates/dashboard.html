@@ -332,6 +332,10 @@
                     <input class="form-control" id="portal-aircraft" maxlength="200" placeholder="Aircraft name">
                     <input class="form-control" id="portal-listing" placeholder="Listing id, when sending a listing">
                     <textarea class="form-control" id="portal-notes" maxlength="2000" rows="3" placeholder="Notes"></textarea>
+                    <label for="portal-email" style="color:#d0d0d0;">Email</label>
+                    <input class="form-control" id="portal-email" type="email" maxlength="254" required autocomplete="email" value="{{ user.email or '' }}">
+                    <label for="portal-phone" style="color:#d0d0d0;">Phone</label>
+                    <input class="form-control" id="portal-phone" type="tel" maxlength="40" required autocomplete="tel" value="{{ user.phone or '' }}">
                     <button type="submit" class="dash__btn dash__btn--primary" style="border:0; width:max-content; cursor:pointer;">Send to broker</button>
                     <span id="portal-status" style="color:#c8c8c8;"></span>
                 </form>
@@ -353,7 +357,7 @@
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
             {% if request.args.get('paid') == '0' %}
             This listing is saved. Payment was not finished. Use Pay listing fee on the card below. An admin can still see it in the approval queue.
-            {% elif request.args.get('paid') == '1' %}
+            {% elif request.args.get('paid') == '1' or request.args.get('paid') == 'confirmed' %}
             Payment received. This listing is waiting for approval. It appears on the marketplace after it is approved.
             {% else %}
             This listing is saved and waiting for approval. It appears on the marketplace only after an admin approves it.
@@ -365,7 +369,7 @@
         {% elif request.args.get('updated') %}
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
             {% if request.args.get('updated') == 'amendment' %}
-            Amendment sent for approval.
+            This update is waiting for approval. The listing that is already up stays as it is until an admin approves it.
             {% else %}
             Changes saved.
             {% endif %}
@@ -444,11 +448,13 @@
             const canEdit = l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
-            const copy = offMarket && l.status === 'active'
+            const copy = (l.status === 'active' && l.pending_review)
+                ? 'Live. An update is waiting for approval. The current price, photos, and details stay until it is approved.'
+                : (offMarket && l.status === 'active'
                 ? 'Live on the off-market page. Not on the public marketplace.'
                 : (offMarket && l.status === 'pending'
                     ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
-                    : (statusCopy[l.status] || 'Saved.'));
+                    : (statusCopy[l.status] || 'Saved.')));
             const searchBlob = [l.title, l.name, l.manufacturer, l.category, l.location, l.year].join(' ');
             const openHref = l.status === 'active'
                 ? (offMarket ? '/off-market' : '/listing/' + l.id)
@@ -560,6 +566,24 @@
     }).finally(function () { window.location.href = '/dashboard?broker=active'; });
 })();
 
+(function confirmListingReturn() {
+    const params = new URLSearchParams(window.location.search);
+    const listingId = params.get('submitted');
+    if (params.get('paid') !== '1' || !listingId || !params.get('session_id')) return;
+    fetch('/api/listings/' + listingId + '/confirm-payment', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: params.get('session_id') }),
+    }).then(function (resp) {
+        window.location.href = resp.ok
+            ? '/dashboard?submitted=' + listingId + '&paid=confirmed'
+            : '/dashboard?submitted=' + listingId + '&paid=0';
+    }).catch(function () {
+        window.location.href = '/dashboard?submitted=' + listingId + '&paid=0';
+    });
+})();
+
 (async function loadSavedAircraft() {
     const listEl = document.getElementById('saved-aircraft');
     const statusEl = document.getElementById('saved-status');
@@ -669,10 +693,12 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
                 aircraft_name: document.getElementById('portal-aircraft').value,
                 listing_id: document.getElementById('portal-listing').value,
                 notes: document.getElementById('portal-notes').value,
+                contact_email: document.getElementById('portal-email').value,
+                contact_phone: document.getElementById('portal-phone').value,
             }),
         });
         const data = await response.json().catch(function () { return {}; });
-        status.textContent = response.ok ? 'Sent.' : (data.error || 'Could not send that.');
+        status.textContent = response.ok ? 'Sent.' : (data.message || 'Could not send that.');
         if (response.ok) loadInbox();
     });
     async function loadInbox() {
@@ -684,8 +710,11 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
             const mine = row.from_user_id === {{ user.id }};
             const personId = mine ? row.to_user_id : row.from_user_id;
             const listingLink = row.listing_id ? '<br><a href="/listing/' + row.listing_id + '">Open the listing</a>' : '';
+            const contact = (row.contact_email || row.contact_phone)
+                ? '<br>Email: ' + esc(row.contact_email || '') + '<br>Phone: ' + esc(row.contact_phone || '')
+                : '';
             return '<article class="alert-item"><strong><a href="/people/' + personId + '">' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</a></strong>'
-                + esc(row.aircraft_name || row.kind) + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink + '</article>';
+                + esc(row.aircraft_name || row.kind) + contact + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink + '</article>';
         }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
     }
     loadInbox();

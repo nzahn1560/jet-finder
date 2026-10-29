@@ -702,6 +702,7 @@
             return {
                 uploaded: (data.created || []).length,
                 errors: (data.rejected || []).map(r => `${r.filename}: ${r.reason}`),
+                pending_review: !!data.pending_review,
             };
         } catch (err) {
             return { uploaded: 0, errors: [String(err)] };
@@ -768,7 +769,7 @@
                 const data = await resp.json().catch(() => ({}));
                 if (resp.status === 403) return fail(data.message || 'You cannot edit this listing.');
                 if (!resp.ok && resp.status !== 400) return fail(data.message || 'Failed to save changes. Please try again.');
-                if (resp.ok && data.amendment) amended = true;
+                if (resp.ok && (data.amendment || data.pending_review)) amended = true;
             } else {
                 const resp = await fetch('/api/listings', {
                     method: 'POST',
@@ -790,6 +791,7 @@
             if (media.errors && media.errors.length) {
                 console.warn('Some photos failed to upload:', media.errors);
             }
+            if (media.pending_review) amended = true;
 
             localStorage.removeItem('listing_draft');
 
@@ -864,7 +866,20 @@
             const profileSearch = document.getElementById('profileSearchInput');
             if (profileSearch) profileSearch.required = false;
             const submitBtn = document.querySelector('#listing-form [type="submit"]');
-            if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-save me-2"></i>Save Changes';
+            const waiting = listing.status === 'active' || listing.pending_review;
+            if (submitBtn) {
+                submitBtn.innerHTML = waiting
+                    ? '<i class="fas fa-paper-plane me-2"></i>Submit for approval'
+                    : '<i class="fas fa-save me-2"></i>Save Changes';
+            }
+            if (waiting && submitBtn && !document.getElementById('edit-approval-note')) {
+                const note = document.createElement('p');
+                note.id = 'edit-approval-note';
+                note.style.margin = '0 0 0.8rem';
+                note.style.color = '#f4f4f4';
+                note.textContent = 'Submit for approval sends this update to review. Price, photos, and other changes go on the listing only after an admin approves them. Until then, the listing stays as it is.';
+                submitBtn.parentNode.insertBefore(note, submitBtn);
+            }
             const header = document.querySelector('.page-header h1, h1');
             if (header) header.textContent = 'Edit Listing';
             // Show existing photos count
