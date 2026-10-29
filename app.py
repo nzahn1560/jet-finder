@@ -107,7 +107,7 @@ def has_active_subscription(user_id, subscription_type):
     subscription = get_user_subscription(user_id, subscription_type)
     if not subscription:
         return False
-    if subscription.get('subscription_status') != 'active':
+    if subscription.get('subscription_status') not in ('active', 'past_due'):
         return False
     if subscription.get('expires_at'):
         try:
@@ -460,7 +460,7 @@ def service_providers():
     """Mechanic directory stays closed while the service model is still being built."""
     return render_template(
         'coming_soon.html',
-        product='Mechanics',
+        product='Maintenance',
         summary='Find a shop and see what they offer.',
     )
     form_error = None
@@ -635,7 +635,7 @@ def api_broker_team_allow(team_id, member_id):
 @app.route('/api/account/team-checkout', methods=['POST'])
 @require_auth
 def api_team_checkout():
-    """Start the $20/month charge for a new broker team."""
+    """Start the $19.99/month charge for a new broker team."""
     user = request.current_user  # type: ignore[attr-defined]
     data = request.get_json(silent=True) or {}
     current = db_module.team_membership(user['id'])
@@ -670,9 +670,26 @@ def api_team_checkout():
         }), 503
     base = request.host_url.rstrip('/')
     try:
+        team_meta = {
+            'user_id': str(user['id']),
+            'purpose': 'broker_team',
+            'team_id': str(team_id),
+        }
         checkout = stripe.checkout.Session.create(
+            ui_mode='hosted',
             mode='subscription',
-            payment_method_types=['card'],
+            billing_address_collection='auto',
+            phone_number_collection={'enabled': True},
+            automatic_tax={'enabled': False},
+            allow_promotion_codes=True,
+            payment_method_collection='always',
+            consent_collection={'terms_of_service': 'required'},
+            name_collection={
+                'individual': {'enabled': True, 'optional': True},
+                'business': {'enabled': True, 'optional': True},
+            },
+            integration_identifier='hosted_web_0001',
+            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
@@ -680,19 +697,17 @@ def api_team_checkout():
                     'recurring': {'interval': 'month'},
                     'product_data': {
                         'name': f'JetSchool broker team — {name}',
-                        'description': 'Broker access to the broker map and the off-market section. $20 per month.',
+                        'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
                     },
                 },
                 'quantity': 1,
             }],
-            metadata={
-                'user_id': str(user['id']),
-                'purpose': 'broker_team',
-                'team_id': str(team_id),
-            },
-            customer_email=user.get('email'),
+            metadata=team_meta,
+            subscription_data={'metadata': team_meta},
             success_url=f'{base}/dashboard?team=1&session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{base}/dashboard?team=0',
+            idempotency_key=_checkout_idempotency(f"broker-team-{user['id']}-{team_id}"),
+            **_stripe_buyer(user),
         )
         return jsonify({'url': checkout.url, 'team_id': team_id}), 200
     except Exception:
@@ -1005,7 +1020,7 @@ _RUNWAY_FEET = None
 
 
 def _runway_feet_table():
-    """Shortest published runway in feet, keyed by IATA and ICAO."""
+    """Longest open runway in feet, keyed by IATA and ICAO."""
     global _RUNWAY_FEET
     if _RUNWAY_FEET is None:
         path = os.path.join(os.path.dirname(__file__), 'static', 'data', 'airport_runways.json')
@@ -1018,7 +1033,7 @@ def _runway_feet_table():
     return _RUNWAY_FEET
 
 
-def _shortest_runway_ft(iata, icao):
+def _longest_runway_ft(iata, icao):
     table = _runway_feet_table()
     for code in (icao, iata):
         key = str(code or '').strip().upper()
@@ -1817,7 +1832,7 @@ def api_airports():
         
         limited = matching_airports[:20]
         for airport in limited:
-            airport['shortest_runway_ft'] = _shortest_runway_ft(airport.get('iata'), airport.get('icao'))
+            airport['longest_runway_ft'] = _longest_runway_ft(airport.get('iata'), airport.get('icao'))
         return jsonify(limited)
         
     except Exception as e:
@@ -2949,7 +2964,56 @@ def refunds():
     return render_template('legal/refunds.html')
 
 
-_SITEMAP_PAGES = ('/', '/privacy', '/terms', '/refunds', '/brokers')
+@app.route('/contact')
+def contact():
+    return render_template('contact.html')
+
+
+def _looks_like_email(value: str) -> bool:
+    if not value or len(value) > 254 or '@' not in value or ' ' in value:
+        return False
+    local, _, domain = value.partition('@')
+    return bool(local) and '.' in domain and len(domain) > 2
+
+
+@app.route('/api/contact', methods=['POST'])
+def api_contact():
+    """Save a public contact-card message and alert every admin."""
+    if _auth_rate_limited():
+        return jsonify({'error': 'rate_limited'}), 429
+    if not _csrf_matches():
+        return jsonify({'error': 'csrf'}), 403
+    data = request.get_json(silent=True) or {}
+    if (data.get('company_url') or '').strip():
+        return jsonify({'ok': True})
+    name = ' '.join(str(data.get('name') or '').split())[:120]
+    email = str(data.get('email') or '').strip().lower()[:254]
+    phone = ' '.join(str(data.get('phone') or '').split())[:40]
+    message = str(data.get('message') or '').strip()[:4000]
+    if len(name) < 2 or not _looks_like_email(email) or len(message) < 10:
+        return jsonify({'error': 'Please enter your name, a valid email, and a message.'}), 400
+    try:
+        db_module.create_contact_message(name, email, phone, message)
+        body = f'{email}' + (f'\n{phone}' if phone else '') + f'\n\n{message}'
+        for admin_id in db_module.list_admin_user_ids():
+            db_module.create_notification(admin_id, 'contact', f'Contact from {name}', body, '/admin#alerts')
+    except Exception:
+        logger.exception('contact message failed')
+        return jsonify({'error': 'Could not send that message.'}), 500
+    return jsonify({'ok': True})
+
+
+@app.route('/api/admin/contacts')
+@require_admin
+def api_admin_contacts():
+    try:
+        return jsonify({'messages': db_module.list_contact_messages()})
+    except Exception:
+        logger.exception('api_admin_contacts failed')
+        return jsonify({'error': 'server_error'}), 500
+
+
+_SITEMAP_PAGES = ('/', '/privacy', '/terms', '/refunds', '/contact', '/brokers')
 _ROBOTS_PRIVATE = (
     '/admin', '/api/', '/dashboard', '/profile', '/my-listings', '/create-listing',
     '/off-market', '/logout', '/login', '/register', '/forgot-password', '/reset-password',
@@ -3165,8 +3229,23 @@ def _stripe_field(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-BROKER_FEE_CENTS = 2000
-BROKER_FEE_LABEL = '$20'
+BROKER_FEE_CENTS = 1999
+BROKER_FEE_LABEL = '$19.99'
+
+
+def _stripe_buyer(user):
+    """Reuse the Stripe customer when this person has already paid JetSchool."""
+    for kind in ('broker', 'broker_team'):
+        row = get_user_subscription(user['id'], kind) or {}
+        if row.get('stripe_customer_id'):
+            return {'customer': row['stripe_customer_id']}
+    email = (user.get('email') or '').strip()
+    return {'customer_email': email} if email else {}
+
+
+def _checkout_idempotency(prefix):
+    bucket = int(datetime.utcnow().timestamp()) // 120
+    return f'{prefix}-{bucket}'
 
 
 def _place_approved_broker(user_id):
@@ -3186,7 +3265,7 @@ def _place_approved_broker(user_id):
 
 
 def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
-    """Turn on broker access after approval or the $20 monthly checkout."""
+    """Turn on broker access after approval or the $19.99 monthly checkout."""
     update_user_subscription(
         user_id,
         subscription_type,
@@ -3260,7 +3339,7 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
 @app.route('/api/account/broker-checkout', methods=['POST'])
 @require_auth
 def api_broker_checkout():
-    """Start the $20/month broker subscription. It opens the broker map and off-market listings."""
+    """Start the $19.99/month broker subscription. It opens the broker map and off-market listings."""
     user = request.current_user  # type: ignore[attr-defined]
     if db_module.user_on_active_team(user['id']):
         return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
@@ -3272,13 +3351,26 @@ def api_broker_checkout():
         return jsonify({
             'error': 'payment_not_ready',
             'application': 'pending',
-            'message': 'Your broker application is waiting for approval. Broker access is $20 a month and includes the broker map and the off-market section.',
+            'message': 'Your broker application is waiting for approval. Broker access is $19.99 a month and includes the broker map and the off-market section.',
         }), 503
     base = request.host_url.rstrip('/')
     try:
+        broker_meta = {'user_id': str(user['id']), 'purpose': 'broker_account'}
         checkout = stripe.checkout.Session.create(
+            ui_mode='hosted',
             mode='subscription',
-            payment_method_types=['card'],
+            billing_address_collection='auto',
+            phone_number_collection={'enabled': True},
+            automatic_tax={'enabled': False},
+            allow_promotion_codes=True,
+            payment_method_collection='always',
+            consent_collection={'terms_of_service': 'required'},
+            name_collection={
+                'individual': {'enabled': True, 'optional': True},
+                'business': {'enabled': True, 'optional': True},
+            },
+            integration_identifier='hosted_web_0001',
+            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
@@ -3286,15 +3378,17 @@ def api_broker_checkout():
                     'recurring': {'interval': 'month'},
                     'product_data': {
                         'name': 'JetSchool broker account',
-                        'description': 'Broker access to the broker map and the off-market section. $20 per month.',
+                        'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
                     },
                 },
                 'quantity': 1,
             }],
-            metadata={'user_id': str(user['id']), 'purpose': 'broker_account'},
-            customer_email=user.get('email'),
+            metadata=broker_meta,
+            subscription_data={'metadata': broker_meta},
             success_url=f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{base}/dashboard?broker=0',
+            idempotency_key=_checkout_idempotency(f"broker-account-{user['id']}"),
+            **_stripe_buyer(user),
         )
         return jsonify({'url': checkout.url}), 200
     except Exception:
@@ -3319,6 +3413,40 @@ def api_broker_confirm():
         return jsonify({'error': 'not_confirmed'}), 400
     fresh = get_user_by_id(user['id']) or user
     return jsonify({'ok': True, 'user': _user_public_dict(fresh)}), 200
+
+
+@app.route('/api/account/billing-portal', methods=['POST'])
+@require_auth
+def api_billing_portal():
+    """Stripe Customer Portal: update the card or cancel at the end of the month."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = None
+    for kind in ('broker', 'broker_team'):
+        candidate = get_user_subscription(user['id'], kind) or {}
+        if candidate.get('stripe_customer_id') and candidate.get('subscription_status') in ('active', 'past_due'):
+            row = candidate
+            break
+    if not row:
+        return jsonify({'error': 'no_subscription', 'message': 'There is no broker subscription to manage.'}), 404
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'payment_not_ready',
+            'message': 'Billing is not available until Stripe is configured.',
+        }), 503
+    base = request.host_url.rstrip('/')
+    params = {
+        'customer': row['stripe_customer_id'],
+        'return_url': f'{base}/dashboard',
+    }
+    configuration = (os.environ.get('STRIPE_PORTAL_CONFIGURATION_ID') or '').strip()
+    if configuration:
+        params['configuration'] = configuration
+    try:
+        portal = stripe.billing_portal.Session.create(**params)
+    except Exception:
+        logger.exception('Billing portal creation failed')
+        return jsonify({'error': 'stripe_error', 'message': 'Billing could not be opened.'}), 500
+    return jsonify({'url': portal.url}), 200
 
 
 @app.route('/api/brokers/directory')
@@ -6232,7 +6360,7 @@ def _show_value(value):
 # end-to-end before Stripe is fully configured.
 # =============================================================================
 def _listing_fee_cents() -> int:
-    """Server-side listing fee. Promo through Dec 31, 2026 Chicago, then $49.99."""
+    """Server-side listing fee. $49.99."""
     return pricing_module.listing_price_cents()
 
 
@@ -6271,8 +6399,21 @@ def api_listing_checkout(listing_id: int):
     base = request.host_url.rstrip('/')
     try:
         checkout = stripe.checkout.Session.create(
+            ui_mode='hosted',
             mode='payment',
-            payment_method_types=['card'],
+            billing_address_collection='auto',
+            phone_number_collection={'enabled': True},
+            automatic_tax={'enabled': False},
+            allow_promotion_codes=True,
+            submit_type='auto',
+            consent_collection={'terms_of_service': 'required'},
+            name_collection={
+                'individual': {'enabled': True, 'optional': True},
+                'business': {'enabled': True, 'optional': True},
+            },
+            saved_payment_method_options={'payment_method_save': 'enabled'},
+            integration_identifier='hosted_web_0001',
+            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
@@ -6284,10 +6425,11 @@ def api_listing_checkout(listing_id: int):
                 },
                 'quantity': 1,
             }],
-            metadata={'listing_id': str(listing_id), 'user_id': str(user['id'])},
-            customer_email=user.get('email'),
+            metadata={'listing_id': str(listing_id), 'user_id': str(user['id']), 'purpose': 'listing_fee'},
             success_url=f'{base}/dashboard?paid=1&submitted={listing_id}',
             cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
+            idempotency_key=_checkout_idempotency(f'listing-{listing_id}-{amount}'),
+            **_stripe_buyer(user),
         )
         db_module.set_listing_payment_session(listing_id, checkout.id)
         return jsonify({'url': checkout.url}), 200
@@ -6298,11 +6440,13 @@ def api_listing_checkout(listing_id: int):
 
 @app.route('/api/stripe/webhook', methods=['POST'])
 def api_stripe_webhook():
-    """Stripe webhook: marks listings paid when checkout completes.
+    """Stripe webhook for listing fees and the broker subscription.
 
-    Configure in Stripe dashboard → Webhooks → endpoint:
-      https://jetschoolusa.com/api/stripe/webhook
-    listening for `checkout.session.completed`.
+    Endpoint: https://jetschoolusa.com/api/stripe/webhook
+    Events: checkout.session.completed, checkout.session.async_payment_succeeded,
+    customer.subscription.updated, customer.subscription.deleted, invoice.paid,
+    invoice.payment_failed, charge.refunded, refund.updated, refund.created,
+    charge.dispute.created, charge.dispute.closed, radar.early_fraud_warning.created.
     Set STRIPE_WEBHOOK_SECRET in Railway to the signing secret.
     """
     payload = request.get_data()
@@ -6356,6 +6500,17 @@ def api_stripe_webhook():
         listing_id, payment_status = _reconcile_stripe_refund(event_type, obj)
         if listing_id:
             logger.info('Stripe webhook: listing %s payment_status %s', listing_id, payment_status)
+        if event_type == 'charge.refunded' and _stripe_field(obj, 'refunded') is True:
+            _end_broker_charge(obj, 'canceled')
+    elif event_type in ('customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed'):
+        obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+        _sync_broker_billing_event(event_type, obj)
+    elif event_type in ('charge.dispute.created', 'charge.dispute.closed'):
+        obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+        _sync_broker_dispute(event_type, obj)
+    elif event_type == 'radar.early_fraud_warning.created':
+        obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+        _sync_broker_fraud_warning(obj)
     return jsonify({'received': True}), 200
 
 
@@ -6365,6 +6520,220 @@ def _stripe_ref(value):
     if isinstance(value, dict):
         return value.get('id')
     return value if isinstance(value, str) else getattr(value, 'id', None)
+
+
+def _stripe_metadata(obj):
+    meta = _stripe_field(obj, 'metadata') or {}
+    if isinstance(meta, dict):
+        return meta
+    try:
+        return dict(meta)
+    except Exception:
+        return {}
+
+
+def _local_subscription_state(stripe_status):
+    if stripe_status in ('active', 'trialing'):
+        return 'active'
+    if stripe_status == 'past_due':
+        return 'past_due'
+    if stripe_status in ('canceled', 'unpaid', 'incomplete_expired'):
+        return 'canceled'
+    return None
+
+
+def _object_subscription_id(obj):
+    """Subscription id on an Invoice, including the current parent shape."""
+    direct = _stripe_ref(_stripe_field(obj, 'subscription'))
+    if direct:
+        return direct
+    parent = _stripe_field(obj, 'parent')
+    details = _stripe_field(parent, 'subscription_details') if parent else None
+    if isinstance(details, dict):
+        return _stripe_ref(details.get('subscription'))
+    return _stripe_ref(_stripe_field(details, 'subscription')) if details else None
+
+
+def _invoice_subscription_id(obj):
+    invoice = _stripe_field(obj, 'invoice')
+    if not invoice:
+        return None
+    if not isinstance(invoice, str):
+        return _object_subscription_id(invoice)
+    if not _stripe_configured():
+        return None
+    try:
+        invoice = stripe.Invoice.retrieve(invoice)
+    except Exception:
+        logger.exception('Stripe invoice lookup failed')
+        return None
+    return _object_subscription_id(invoice)
+
+
+def _linked_subscription_id(obj):
+    """Follow a charge, dispute, or fraud warning to its broker subscription."""
+    found = _invoice_subscription_id(obj)
+    if found:
+        return found
+    charge = _stripe_field(obj, 'charge')
+    if charge and not isinstance(charge, str):
+        found = _invoice_subscription_id(charge)
+        if found:
+            return found
+    charge_id = charge if isinstance(charge, str) else None
+    if _stripe_field(obj, 'object') == 'charge':
+        charge_id = _stripe_ref(_stripe_field(obj, 'id'))
+    if not charge_id or not _stripe_configured():
+        return None
+    try:
+        remote = stripe.Charge.retrieve(charge_id)
+    except Exception:
+        logger.exception('Stripe charge lookup failed')
+        return None
+    return _invoice_subscription_id(remote)
+
+
+def _team_id_for_broker(user_id, metadata):
+    try:
+        team_id = int((metadata or {}).get('team_id') or 0)
+    except (TypeError, ValueError):
+        team_id = 0
+    if team_id:
+        return team_id
+    membership = db_module.team_membership(user_id)
+    if membership and membership.get('is_admin'):
+        return membership['id']
+    return None
+
+
+def _apply_broker_subscription_state(subscription_id, local_status, customer_id=None, metadata=None, allow_restore=False):
+    """Keep broker access aligned with the Stripe subscription. A failed renewal stays open."""
+    if not subscription_id or local_status not in ('active', 'past_due', 'canceled', 'suspended'):
+        return None
+    metadata = metadata or {}
+    row = db_module.find_subscription_by_stripe_id(subscription_id)
+    purpose = metadata.get('purpose')
+    if row:
+        user_id = row.get('user_id')
+        sub_type = row.get('subscription_type') or ('broker_team' if purpose == 'broker_team' else 'broker')
+    elif local_status == 'active' and purpose in ('broker_account', 'broker_team'):
+        try:
+            user_id = int(metadata.get('user_id') or 0)
+        except (TypeError, ValueError):
+            return None
+        sub_type = 'broker_team' if purpose == 'broker_team' else 'broker'
+        if not user_id:
+            return None
+    else:
+        return None
+    previous = (row or {}).get('subscription_status')
+    if previous == 'suspended' and local_status == 'active' and not allow_restore:
+        return row
+    team_id = _team_id_for_broker(user_id, metadata) if sub_type == 'broker_team' else None
+    should_grant = local_status == 'active' and previous not in ('active', 'past_due')
+    if should_grant:
+        if team_id:
+            db_module.set_team_subscription(team_id, 'active')
+        _grant_broker_account(
+            user_id,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            subscription_type=sub_type,
+        )
+    else:
+        update_user_subscription(
+            user_id,
+            sub_type,
+            stripe_customer_id=customer_id,
+            stripe_subscription_id=subscription_id,
+            subscription_status=local_status,
+        )
+        if team_id:
+            db_module.set_team_subscription(team_id, 'active' if local_status in ('active', 'past_due') else 'inactive')
+    if previous == local_status:
+        return row
+    person = get_user_by_id(user_id) or {}
+    if local_status == 'past_due':
+        db_module.notify_user(
+            user_id, 'billing', 'Broker payment failed',
+            'The card for the JetSchool broker subscription was declined. Update it to keep broker access. Access stays on while the payment is retried.',
+            '/dashboard', person.get('email'),
+        )
+    elif local_status == 'canceled':
+        db_module.notify_user(
+            user_id, 'billing', 'Broker subscription ended',
+            'The JetSchool broker subscription is no longer active, so broker access is off.',
+            '/dashboard', person.get('email'),
+        )
+    elif local_status == 'suspended':
+        db_module.notify_user(
+            user_id, 'billing', 'Broker access is paused',
+            'Broker access is paused while a payment dispute or fraud review is open.',
+            '/dashboard', person.get('email'),
+        )
+    return db_module.find_subscription_by_stripe_id(subscription_id)
+
+
+def _sync_broker_billing_event(event_type, obj):
+    metadata = _stripe_metadata(obj)
+    customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
+    if event_type == 'customer.subscription.deleted':
+        subscription_id = _stripe_ref(_stripe_field(obj, 'id'))
+        local_status = 'canceled'
+    elif event_type == 'customer.subscription.updated':
+        subscription_id = _stripe_ref(_stripe_field(obj, 'id'))
+        local_status = _local_subscription_state(_stripe_field(obj, 'status'))
+    else:
+        subscription_id = _object_subscription_id(obj)
+        if event_type == 'invoice.payment_failed':
+            row = db_module.find_subscription_by_stripe_id(subscription_id)
+            if not row or row.get('subscription_status') not in ('active', 'past_due'):
+                return None
+            local_status = 'past_due'
+        elif event_type == 'invoice.paid':
+            row = db_module.find_subscription_by_stripe_id(subscription_id)
+            if not row or row.get('subscription_status') == 'suspended':
+                return None
+            local_status = 'active'
+            metadata = metadata or _stripe_metadata(obj)
+        else:
+            return None
+    if not local_status:
+        return None
+    return _apply_broker_subscription_state(
+        subscription_id, local_status, customer_id=customer_id, metadata=metadata,
+    )
+
+
+def _mark_listing_charge(obj, payment_status):
+    intent_id = _stripe_ref(_stripe_field(obj, 'payment_intent'))
+    if not intent_id:
+        return None
+    return db_module.reconcile_listing_refund(intent_id, payment_status)
+
+
+def _end_broker_charge(obj, local_status):
+    subscription_id = _linked_subscription_id(obj)
+    if not subscription_id:
+        return None
+    return _apply_broker_subscription_state(subscription_id, local_status)
+
+
+def _sync_broker_dispute(event_type, obj):
+    status = _stripe_field(obj, 'status')
+    if event_type == 'charge.dispute.closed' and status == 'won':
+        _mark_listing_charge(obj, 'paid')
+        subscription_id = _linked_subscription_id(obj)
+        if subscription_id:
+            _apply_broker_subscription_state(subscription_id, 'active', allow_restore=True)
+        return
+    _mark_listing_charge(obj, 'disputed')
+    _end_broker_charge(obj, 'suspended')
+
+
+def _sync_broker_fraud_warning(obj):
+    _mark_listing_charge(obj, 'fraud_review')
+    _end_broker_charge(obj, 'suspended')
 
 
 def _reconcile_stripe_refund(event_type: str, obj: dict):

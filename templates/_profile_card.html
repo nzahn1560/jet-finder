@@ -254,13 +254,13 @@
                 </ul>
                 {% endif %}
                 {% elif membership and membership.is_admin %}
-                <p class="identity__line">Broker · $20/month. Includes the broker map and the off-market section.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $20/month</button>
+                <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
+                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $19.99/month</button>
                 {% elif membership and membership.membership_status == 'pending' %}
                 <p class="identity__line">Request pending with {{ membership.name }}.</p>
                 {% else %}
-                <p class="identity__line">Broker · $20/month. Includes the broker map and the off-market section.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $20/month</button>
+                <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
+                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $19.99/month</button>
                 {% if teams %}
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                     <select class="form-select" id="join-team" style="max-width:280px;">

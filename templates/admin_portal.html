@@ -25,6 +25,11 @@
     .ap__filter select, .ap__filter input { padding: 0.5rem 0.75rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-family: 'Rajdhani', sans-serif; }
     .ap__empty { color: #8e8e93; padding: 1rem; text-align: center; }
     .ap__card { cursor: pointer; }
+    .ap__card--note { cursor: default; }
+    .ap__note { display: grid; gap: 0.35rem; }
+    .ap__note h3 { margin: 0; color: #fff; font-family: 'Rajdhani', sans-serif; font-size: 1.35rem; }
+    .ap__note a { color: #F05545; text-decoration: none; }
+    .ap__note p { margin: 0.45rem 0 0; color: #f0f0f0; white-space: pre-wrap; line-height: 1.45; }
     #review-screen { position: fixed; inset: 0; z-index: 80; background: #0c0c0c; overflow: auto; color: #f4f4f4; }
     #review-screen[hidden] { display: none; }
     .review { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; font-family: 'Rajdhani', sans-serif; }
@@ -60,6 +65,7 @@
             <button class="ap__tab" data-tab="approvals">Approvals</button>
             <button class="ap__tab" data-tab="brokerages">Brokerages</button>
             <button class="ap__tab" data-tab="users">Users</button>
+            <button class="ap__tab" data-tab="alerts" id="alerts-tab">Alerts</button>
         </div>
 
         <div id="tab-listings">
@@ -86,6 +92,9 @@
         </div>
         <div id="tab-users" style="display:none;">
             <div id="users-list"></div>
+        </div>
+        <div id="tab-alerts" style="display:none;">
+            <div id="alerts-list"></div>
         </div>
     </div>
 </div>
@@ -259,11 +268,47 @@ document.querySelectorAll('.ap__tab').forEach(function (t) {
         document.getElementById('tab-approvals').style.display = (tab === 'approvals') ? '' : 'none';
         document.getElementById('tab-brokerages').style.display = (tab === 'brokerages') ? '' : 'none';
         document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
+        document.getElementById('tab-alerts').style.display = (tab === 'alerts') ? '' : 'none';
         if (tab === 'users') loadAdminUsers();
         if (tab === 'approvals') loadApprovals();
         if (tab === 'brokerages') loadBrokerages();
+        if (tab === 'alerts') loadAdminAlerts();
     });
 });
+
+async function loadAdminAlerts() {
+    const target = document.getElementById('alerts-list');
+    const tab = document.getElementById('alerts-tab');
+    try {
+        const r = await fetch('/api/admin/contacts', { credentials: 'include' });
+        if (!r.ok) throw new Error('load failed');
+        const data = await r.json();
+        const rows = data.messages || [];
+        if (tab) tab.textContent = 'Alerts' + (rows.length ? ' (' + rows.length + ')' : '');
+        if (!rows.length) {
+            target.innerHTML = '<div class="ap__empty">No contact messages yet.</div>';
+            return;
+        }
+        target.innerHTML = rows.map(function (row) {
+            const when = esc((row.created_at || '').replace('T', ' ').slice(0, 16));
+            const phone = row.phone ? '<div>' + esc(row.phone) + '</div>' : '';
+            return '<article class="ap__card ap__card--note"><div class="ap__note">'
+                + '<h3>' + esc(row.name) + '</h3>'
+                + '<div><a href="mailto:' + esc(row.email) + '">' + esc(row.email) + '</a></div>'
+                + phone
+                + '<div style="color:#8e8e93;">' + when + '</div>'
+                + '<p>' + esc(row.message) + '</p>'
+                + '</div></article>';
+        }).join('');
+    } catch (e) {
+        target.innerHTML = '<div class="ap__empty">Could not load contact messages.</div>';
+    }
+}
+
+if (location.hash === '#alerts') {
+    const alertsTab = document.getElementById('alerts-tab');
+    if (alertsTab) alertsTab.click();
+}
 
 function money(value) {
     const number = Number(value);

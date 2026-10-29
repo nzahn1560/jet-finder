@@ -249,6 +249,23 @@ class BrokerTeamMember(Base):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
+class ContactMessage(Base):
+    """A message sent from the public contact card. Admins read these in Alerts."""
+    __tablename__ = 'contact_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(120), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(40))
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        if data.get('created_at') is not None and not isinstance(data['created_at'], str):
+            data['created_at'] = data['created_at'].isoformat()
+        return data
+
+
 class UserNotification(Base):
     """An alert a person sees on their profile, and that can also be emailed."""
     __tablename__ = 'user_notifications'
@@ -1453,7 +1470,9 @@ def reconcile_listing_refund(payment_intent_id, payment_status):
     Returns the listing id, or None when there is no matching paid listing.
     Does not create a Stripe refund and does not decide that a refund is owed.
     """
-    if not payment_intent_id or payment_status not in ('refunded', 'partially_refunded', 'refund_recorded'):
+    if not payment_intent_id or payment_status not in (
+        'refunded', 'partially_refunded', 'refund_recorded', 'disputed', 'fraud_review', 'paid',
+    ):
         return None
     with get_session() as s:
         row = (
@@ -1461,13 +1480,23 @@ def reconcile_listing_refund(payment_intent_id, payment_status):
             .filter(UserListing.stripe_payment_intent_id == str(payment_intent_id)[:255])
             .first()
         )
-        if not row or row.payment_status not in ('paid', 'partially_refunded', 'refund_recorded', 'refunded'):
+        if not row:
             return None
         lid = int(row.id)  # type: ignore[arg-type]
         current = row.payment_status
+        if payment_status == 'paid':
+            if current != 'disputed':
+                return None
+        elif payment_status in ('disputed', 'fraud_review'):
+            if current not in ('paid', 'partially_refunded', 'refund_recorded', 'disputed', 'fraud_review'):
+                return None
+        elif current not in ('paid', 'partially_refunded', 'refund_recorded', 'refunded', 'disputed', 'fraud_review'):
+            return None
         if current == 'refunded':
             return lid
         if current == 'partially_refunded' and payment_status == 'refund_recorded':
+            return lid
+        if current == payment_status:
             return lid
         s.query(UserListing).filter(UserListing.id == lid).update(
             {'payment_status': payment_status}, synchronize_session=False
@@ -2026,6 +2055,30 @@ def list_team_members(team_id, status=None):
         return out
 
 
+def create_contact_message(name, email, phone, message):
+    with get_session() as s:
+        row = ContactMessage(name=name, email=email, phone=phone or None, message=message)
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_contact_messages(limit=100):
+    with get_session() as s:
+        rows = (
+            s.query(ContactMessage)
+            .order_by(ContactMessage.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [row.to_dict() for row in rows]
+
+
+def list_admin_user_ids():
+    with get_session() as s:
+        return [int(user.id) for user in s.query(User).filter(User.is_admin.is_(True)).all()]
+
+
 def create_notification(user_id, kind, title, body=None, href=None):
     with get_session() as s:
         row = UserNotification(user_id=user_id, kind=kind, title=title, body=body, href=href)
@@ -2502,6 +2555,20 @@ def get_user_subscription(user_id, subscription_type=None):
         else:
             q = q.order_by(UserSubscription.created_at.desc()).limit(1)
         row = q.first()
+        return row.to_dict() if row else None
+
+
+def find_subscription_by_stripe_id(subscription_id):
+    """The local broker subscription row for a Stripe subscription id."""
+    if not subscription_id:
+        return None
+    with get_session() as s:
+        row = (
+            s.query(UserSubscription)
+            .filter(UserSubscription.stripe_subscription_id == str(subscription_id)[:255])
+            .order_by(UserSubscription.id.desc())
+            .first()
+        )
         return row.to_dict() if row else None
 
 

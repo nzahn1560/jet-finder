@@ -267,7 +267,7 @@
     .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
     .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.6rem 0.75rem; font-size: 1.05rem; }
     .fold__tools input { flex: 1; }
-    .alert-item { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 0.9rem 1rem; margin-bottom: 0.6rem; color: #f4f4f4; font-size: 1.05rem; }
+    .alert-item { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 0.9rem 1rem; margin-bottom: 0.6rem; color: #f4f4f4; font-size: 1.05rem; white-space: pre-line; }
     .alert-item strong { display: block; font-size: 1.15rem; margin-bottom: 0.2rem; }
     @media (max-width: 768px) {
         .dash { padding: 1.25rem 0 3rem; }
@@ -287,11 +287,31 @@
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
                 <div>
                     <strong style="color: #fff;">Subscription</strong>
-                    <span style="margin-left: 0.5rem; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: #28a745; color: #fff;">{{ subscription.subscription_status }}</span>
+                    <span style="margin-left: 0.5rem; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
                 </div>
                 <span style="color: #8e8e93;">{{ subscription.subscription_type.replace('_', ' ')|title }}</span>
+                {% if subscription.stripe_customer_id and subscription.subscription_status in ['active', 'past_due'] %}
+                <button type="button" class="dash__btn dash__btn--secondary" id="manage-billing" style="border:0; cursor:pointer;">Manage billing</button>
+                {% endif %}
             </div>
+            {% if subscription.subscription_status == 'past_due' %}
+            <p style="color:#f4d19b; margin:0.8rem 0 0;">The last payment failed. Update the card to keep broker access.</p>
+            {% endif %}
         </div>
+        <script>
+        (function () {
+            const button = document.getElementById('manage-billing');
+            if (!button) return;
+            button.addEventListener('click', async function () {
+                button.disabled = true;
+                const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include' });
+                const data = await response.json().catch(function () { return {}; });
+                if (data.url) { window.location = data.url; return; }
+                button.disabled = false;
+                button.insertAdjacentText('afterend', ' ' + (data.message || 'Billing is unavailable.'));
+            });
+        })();
+        </script>
         {% endif %}
 
         <section class="fold" id="messages">
@@ -682,7 +702,8 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         list.innerHTML = '<p style="color:#d0d0d0;">No alerts yet.</p>';
     } else {
         list.innerHTML = notes.map(function (note) {
-            return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + '</article>';
+            const open = note.href ? '<a href="' + esc(note.href) + '" style="color:#F05545;">Open in admin</a>' : '';
+            return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + (open ? '\n' + open : '') + '</article>';
         }).join('');
     }
     if (data.unread || location.hash === '#alerts') {
