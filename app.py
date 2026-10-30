@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 from marketplace import marketplace, load_listings, recommend_aircraft, get_current_user
 import pricing as pricing_module
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import stripe
@@ -36,6 +37,9 @@ except ImportError:
     avinode_client = None
 
 app = Flask(__name__)
+# Railway terminates TLS and forwards the public host. Checkout return URLs use that host.
+if os.environ.get('RAILWAY_ENVIRONMENT'):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 app.secret_key = os.environ.get('SECRET_KEY') or 'dev-only-change-me'
 if os.environ.get('RAILWAY_ENVIRONMENT') and app.secret_key == 'dev-only-change-me':
     logger.error('SECRET_KEY is not set. Set it in Railway variables before relying on Flask sessions.')
@@ -672,7 +676,7 @@ def api_team_checkout():
             'application': 'pending',
             'message': 'This brokerage is waiting for approval.',
         }), 503
-    base = request.host_url.rstrip('/')
+    base = _public_base()
     try:
         team_meta = {
             'user_id': str(user['id']),
@@ -1377,6 +1381,7 @@ def dashboard():
         user=person,
         is_owner=True,
         subscription=person.get('subscription') if person else None,
+        billing_customer=bool(person and db_module.listing_stripe_customer(person['id'])),
         membership=membership,
         pending_members=pending_members,
         teams=teams,
@@ -3194,6 +3199,12 @@ def api_auth_logout():
 def api_account_delete():
     """Delete the signed-in account, its listings, and its session."""
     user = request.current_user  # type: ignore[attr-defined]
+    if _stripe_configured():
+        for subscription_id in db_module.listing_subscription_ids(user['id']):
+            try:
+                stripe.Subscription.delete(subscription_id)
+            except Exception:
+                logger.exception('Could not cancel listing subscription %s', subscription_id)
     for subscription in db_module.get_user_subscriptions(user['id']):
         subscription_id = subscription.get('stripe_subscription_id')
         if subscription_id and _stripe_configured():
@@ -3272,8 +3283,19 @@ def _stripe_buyer(user):
         row = get_user_subscription(user['id'], kind) or {}
         if row.get('stripe_customer_id'):
             return {'customer': row['stripe_customer_id']}
+    customer = db_module.listing_stripe_customer(user['id'])
+    if customer:
+        return {'customer': customer}
     email = (user.get('email') or '').strip()
     return {'customer_email': email} if email else {}
+
+
+def _public_base() -> str:
+    """Site URL Stripe should send the buyer back to."""
+    configured = (os.environ.get('PUBLIC_BASE_URL') or '').strip().strip('"').strip("'").rstrip('/')
+    if configured.startswith('https://') or configured.startswith('http://'):
+        return configured
+    return request.host_url.rstrip('/')
 
 
 def _checkout_idempotency(prefix):
@@ -3386,7 +3408,7 @@ def api_broker_checkout():
             'application': 'pending',
             'message': 'Your broker application is waiting for approval. Broker access is $19.99 a month and includes the broker map and the off-market section.',
         }), 503
-    base = request.host_url.rstrip('/')
+    base = _public_base()
     try:
         broker_meta = {'user_id': str(user['id']), 'purpose': 'broker_account'}
         checkout = stripe.checkout.Session.create(
@@ -3452,13 +3474,17 @@ def api_billing_portal():
             row = candidate
             break
     if not row:
-        return jsonify({'error': 'no_subscription', 'message': 'There is no broker subscription to manage.'}), 404
+        customer = db_module.listing_stripe_customer(user['id'])
+        if customer:
+            row = {'stripe_customer_id': customer, 'subscription_status': 'active'}
+    if not row:
+        return jsonify({'error': 'no_subscription', 'message': 'There is no subscription to manage.'}), 404
     if not _stripe_configured():
         return jsonify({
             'error': 'payment_not_ready',
             'message': 'Billing is not available until Stripe is configured.',
         }), 503
-    base = request.host_url.rstrip('/')
+    base = _public_base()
     params = {
         'customer': row['stripe_customer_id'],
         'return_url': f'{base}/dashboard',
@@ -3546,6 +3572,25 @@ def api_broker_messages():
     })
 
 
+@app.route('/api/broker/messages/<int:message_id>', methods=['DELETE'])
+@require_auth
+def api_broker_message_delete(message_id):
+    """Remove one broker message from this account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if not db_module.hide_broker_message(user['id'], message_id):
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify({'ok': True})
+
+
+@app.route('/api/broker/messages', methods=['DELETE'])
+@require_auth
+def api_broker_messages_clear():
+    """Remove every broker message from this account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    db_module.hide_broker_messages(user['id'])
+    return jsonify({'ok': True})
+
+
 def _saved_snapshot_from_request(data: dict) -> dict:
     price = data.get('price')
     try:
@@ -3610,6 +3655,25 @@ def api_notifications():
 def api_notifications_read():
     user = request.current_user  # type: ignore[attr-defined]
     db_module.mark_notifications_read(user['id'])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/notifications/<int:notification_id>', methods=['DELETE'])
+@require_auth
+def api_notification_delete(notification_id):
+    """Remove one alert from this account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if not db_module.delete_notification(user['id'], notification_id):
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify({'ok': True})
+
+
+@app.route('/api/notifications', methods=['DELETE'])
+@require_auth
+def api_notifications_clear():
+    """Remove every alert from this account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    db_module.delete_notifications(user['id'])
     return jsonify({'ok': True})
 
 
@@ -6598,7 +6662,7 @@ def _listing_checkout_url(user, listing_id):
     amount = _listing_fee_cents()
     dollars = f'{amount / 100:.2f}'
     title = row.get('title') or f'Listing #{listing_id}'
-    base = request.host_url.rstrip('/')
+    base = _public_base()
     meta = {
         'listing_id': str(listing_id),
         'user_id': str(user['id']),
@@ -6708,8 +6772,11 @@ def api_listing_confirm_payment(listing_id: int):
         return jsonify({'error': 'not_confirmed'}), 400
     intent = _stripe_field(sess, 'payment_intent')
     intent_id = intent.get('id') if isinstance(intent, dict) else intent
+    subscription = _stripe_field(sess, 'subscription')
+    subscription_id = subscription.get('id') if isinstance(subscription, dict) else subscription
+    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
     was_waiting = row.get('status') in ('unpaid', 'draft')
-    if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id):
+    if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id):
         return jsonify({'error': 'server_error'}), 500
     if was_waiting:
         fresh = db_module.get_listing_with_owner(listing_id) or row
@@ -6754,17 +6821,14 @@ def api_stripe_webhook():
     event_type = event.get('type') if isinstance(event, dict) else event.type
     if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         sess = event['data']['object'] if isinstance(event, dict) else event.data.object
-        session_id = sess.get('id') if isinstance(sess, dict) else sess.id
-        paid_state = sess.get('payment_status') if isinstance(sess, dict) else getattr(sess, 'payment_status', None)
-        if paid_state not in ('paid', 'no_payment_required'):
-            logger.info('Stripe webhook: session %s is %s, not applied', session_id, paid_state)
+        session_id = _stripe_field(sess, 'id')
+        if not _checkout_collected(sess):
+            logger.info('Stripe webhook: session %s is not paid yet', session_id)
             return jsonify({'received': True, 'pending': True}), 200
         if _broker_paid_from_checkout(sess):
             logger.info('Stripe webhook: broker account activated from session %s', session_id)
             return jsonify({'received': True}), 200
-        intent = sess.get('payment_intent') if isinstance(sess, dict) else getattr(sess, 'payment_intent', None)
-        intent_id = intent.get('id') if isinstance(intent, dict) else intent
-        listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id)
+        listing_id = _record_listing_checkout(sess)
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
             row = db_module.get_listing_with_owner(listing_id)
@@ -6787,6 +6851,7 @@ def api_stripe_webhook():
     elif event_type in ('customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed'):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
         _sync_broker_billing_event(event_type, obj)
+        _sync_listing_subscription_event(event_type, obj)
         if event_type == 'invoice.paid':
             _activate_listing_from_invoice(obj)
     elif event_type in ('charge.dispute.created', 'charge.dispute.closed'):
@@ -6816,6 +6881,88 @@ def _stripe_metadata(obj):
         return {}
 
 
+def _checkout_collected(sess) -> bool:
+    """A Checkout session counts once the invoice is paid or the subscription is live."""
+    if _stripe_field(sess, 'payment_status') in ('paid', 'no_payment_required'):
+        return True
+    subscription = _stripe_field(sess, 'subscription')
+    if isinstance(subscription, str) and _stripe_configured():
+        try:
+            subscription = stripe.Subscription.retrieve(subscription)
+        except Exception:
+            logger.exception('Stripe subscription lookup failed')
+            return False
+    status = subscription.get('status') if isinstance(subscription, dict) else getattr(subscription, 'status', None)
+    return status in ('active', 'trialing')
+
+
+def _record_listing_checkout(sess):
+    """Mark the listing paid from a Checkout session, including its subscription."""
+    session_id = _stripe_field(sess, 'id')
+    intent = _stripe_field(sess, 'payment_intent')
+    intent_id = intent.get('id') if isinstance(intent, dict) else intent
+    subscription = _stripe_field(sess, 'subscription')
+    subscription_id = subscription.get('id') if isinstance(subscription, dict) else (
+        subscription if isinstance(subscription, str) else None
+    )
+    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
+    listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id, subscription_id, customer_id)
+    if listing_id:
+        return listing_id
+    meta = _stripe_metadata(sess)
+    if meta.get('purpose') != 'listing_fee':
+        return None
+    try:
+        listing_id = int(meta.get('listing_id'))
+    except (TypeError, ValueError):
+        return None
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row or str(meta.get('user_id') or '') != str(row.get('user_id') or ''):
+        return None
+    return db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id)
+
+
+def _sync_listing_subscription_event(event_type, obj):
+    """Keep a listing on the site only while its monthly fee is current."""
+    if event_type == 'invoice.paid':
+        return
+    metadata = _stripe_metadata(obj)
+    if event_type in ('customer.subscription.deleted', 'customer.subscription.updated'):
+        subscription_id = _stripe_ref(_stripe_field(obj, 'id'))
+        stripe_status = 'canceled' if event_type == 'customer.subscription.deleted' else _stripe_field(obj, 'status')
+    elif event_type == 'invoice.payment_failed':
+        subscription_id = _object_subscription_id(obj)
+        stripe_status = 'past_due'
+    else:
+        return
+    if not subscription_id:
+        return
+    listing = db_module.find_listing_by_subscription(subscription_id)
+    if not listing and metadata.get('purpose') == 'listing_fee':
+        try:
+            listing_id = int(metadata.get('listing_id') or 0)
+        except (TypeError, ValueError):
+            listing_id = 0
+        listing = db_module.get_listing_with_owner(listing_id) if listing_id else None
+    if not listing:
+        return
+    owner = get_user_by_id(listing.get('user_id')) or {}
+    if stripe_status in ('canceled', 'unpaid', 'incomplete_expired'):
+        if db_module.end_listing_subscription(listing.get('id')):
+            logger.info('Listing %s left the site because its fee ended', listing.get('id'))
+            db_module.notify_user(
+                listing.get('user_id'), 'billing', 'Listing fee ended',
+                'The monthly listing fee stopped, so the listing is off the site until it is paid again.',
+                '/dashboard', owner.get('email'),
+            )
+    elif stripe_status == 'past_due':
+        db_module.notify_user(
+            listing.get('user_id'), 'billing', 'Listing payment failed',
+            'The card for the monthly listing fee was declined. Update it to keep the listing up.',
+            '/dashboard', owner.get('email'),
+        )
+
+
 def _activate_listing_from_invoice(obj):
     """A paid listing-fee invoice turns the listing on when Checkout did not."""
     meta = _stripe_metadata(obj)
@@ -6840,10 +6987,24 @@ def _activate_listing_from_invoice(obj):
     except (TypeError, ValueError):
         return
     row = db_module.get_listing_with_owner(listing_id)
-    if not row or row.get('payment_status') == 'paid':
+    if not row:
         return
-    was_waiting = row.get('status') in ('unpaid', 'draft')
-    if not db_module.mark_listing_fee_paid(listing_id):
+    if row.get('payment_status') == 'paid':
+        if not row.get('stripe_subscription_id'):
+            db_module.mark_listing_fee_paid(
+                listing_id,
+                subscription_id=_object_subscription_id(obj),
+                customer_id=_stripe_ref(_stripe_field(obj, 'customer')),
+            )
+        return
+    was_waiting = row.get('status') in ('unpaid', 'draft') or (
+        row.get('status') == 'suspended' and row.get('payment_status') == 'canceled'
+    )
+    if not db_module.mark_listing_fee_paid(
+        listing_id,
+        subscription_id=_object_subscription_id(obj),
+        customer_id=_stripe_ref(_stripe_field(obj, 'customer')),
+    ):
         return
     logger.info('Stripe invoice paid the fee for listing %s', listing_id)
     if was_waiting:

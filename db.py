@@ -181,6 +181,8 @@ class UserListing(Base):
     payment_status = Column(String(50), default='pending')
     payment_session_id = Column(String(255))
     stripe_payment_intent_id = Column(String(255))
+    stripe_subscription_id = Column(String(255))
+    stripe_customer_id = Column(String(255))
     approved_by = Column(Integer, ForeignKey('users.id'))
     approved_at = Column(DateTime)
     rejection_reason = Column(Text)
@@ -354,6 +356,8 @@ class BrokerMessage(Base):
     notes = Column(Text)
     contact_email = Column(String(255))
     contact_phone = Column(String(40))
+    sender_hidden = Column(Boolean, default=False)
+    recipient_hidden = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -796,6 +800,8 @@ def init_db():
                 'payment_status TEXT DEFAULT \'pending\'',
                 'payment_session_id TEXT',
                 'stripe_payment_intent_id TEXT',
+                'stripe_subscription_id TEXT',
+                'stripe_customer_id TEXT',
                 'approved_by INTEGER',
                 'approved_at TIMESTAMP',
                 'rejection_reason TEXT',
@@ -906,6 +912,8 @@ def init_db():
                 ('state', 'VARCHAR(40)'),
                 ('listing_intent', "VARCHAR(20) DEFAULT 'sale'"),
                 ('pending_changes', 'TEXT'),
+                ('stripe_subscription_id', 'VARCHAR(255)'),
+                ('stripe_customer_id', 'VARCHAR(255)'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE user_listings ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -928,6 +936,8 @@ def init_db():
             for col, typ in (
                 ('contact_email', 'VARCHAR(255)'),
                 ('contact_phone', 'VARCHAR(40)'),
+                ('sender_hidden', 'BOOLEAN DEFAULT FALSE'),
+                ('recipient_hidden', 'BOOLEAN DEFAULT FALSE'),
             ):
                 try:
                     conn.execute(text(f'ALTER TABLE broker_messages ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -941,7 +951,12 @@ def init_db():
                 conn.commit()
             except Exception:
                 conn.rollback()
-            for col_def in ('contact_email VARCHAR(255)', 'contact_phone VARCHAR(40)'):
+            for col_def in (
+                'contact_email VARCHAR(255)',
+                'contact_phone VARCHAR(40)',
+                'sender_hidden BOOLEAN DEFAULT 0',
+                'recipient_hidden BOOLEAN DEFAULT 0',
+            ):
                 try:
                     conn.execute(text(f'ALTER TABLE broker_messages ADD COLUMN {col_def}'))
                     conn.commit()
@@ -1545,7 +1560,7 @@ def set_listing_payment_session(listing_id, session_id):
         return n > 0
 
 
-def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None):
+def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, subscription_id=None, customer_id=None):
     """Mark a listing fee paid and send an unpaid or draft listing to review."""
     if not listing_id:
         return None
@@ -1559,13 +1574,19 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None):
             updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
         if session_id:
             updates['payment_session_id'] = str(session_id)[:255]
+        if subscription_id:
+            updates['stripe_subscription_id'] = str(subscription_id)[:255]
+        if customer_id:
+            updates['stripe_customer_id'] = str(customer_id)[:255]
         if row.status in ('unpaid', 'draft'):
+            updates['status'] = 'pending'
+        elif row.status == 'suspended' and row.payment_status == 'canceled':
             updates['status'] = 'pending'
         s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
         return lid
 
 
-def mark_listing_paid_by_session(session_id, payment_intent_id=None):
+def mark_listing_paid_by_session(session_id, payment_intent_id=None, subscription_id=None, customer_id=None):
     """Stripe webhook: mark the listing paid and move it to 'pending' review.
 
     Returns the listing_id, or None if no listing matches the checkout session.
@@ -1577,7 +1598,63 @@ def mark_listing_paid_by_session(session_id, payment_intent_id=None):
         listing_id = int(row.id) if row else None  # type: ignore[arg-type]
     if not listing_id:
         return None
-    return mark_listing_fee_paid(listing_id, payment_intent_id, session_id)
+    return mark_listing_fee_paid(listing_id, payment_intent_id, session_id, subscription_id, customer_id)
+
+
+def find_listing_by_subscription(subscription_id):
+    """The listing whose monthly fee is this Stripe subscription."""
+    if not subscription_id:
+        return None
+    with get_session() as s:
+        row = s.query(UserListing).filter(
+            UserListing.stripe_subscription_id == str(subscription_id)[:255]
+        ).first()
+        return row.to_dict() if row else None
+
+
+def listing_stripe_customer(user_id):
+    """Stripe customer from a listing fee, so later Checkout and the portal reuse it."""
+    with get_session() as s:
+        row = (
+            s.query(UserListing.stripe_customer_id)
+            .filter(UserListing.user_id == int(user_id), UserListing.stripe_customer_id.isnot(None))
+            .order_by(UserListing.id.desc())
+            .first()
+        )
+        return row[0] if row and row[0] else None
+
+
+def listing_subscription_ids(user_id):
+    """Listing-fee subscriptions to cancel when the account is deleted."""
+    with get_session() as s:
+        rows = (
+            s.query(UserListing.stripe_subscription_id)
+            .filter(UserListing.user_id == int(user_id), UserListing.stripe_subscription_id.isnot(None))
+            .all()
+        )
+        return [row[0] for row in rows if row[0]]
+
+
+def end_listing_subscription(listing_id):
+    """Take a listing off the public page when its monthly fee ends.
+
+    An already-approved listing is suspended. A listing still in review keeps
+    its place in the queue but is no longer marked paid. Returns True when
+    the row changed.
+    """
+    if not listing_id:
+        return False
+    with get_session() as s:
+        row = s.query(UserListing).filter(UserListing.id == int(listing_id)).first()
+        if not row or row.payment_status == 'canceled':
+            return False
+        updates = {'payment_status': 'canceled'}
+        if row.status == 'active':
+            updates['status'] = 'suspended'
+        elif row.status == 'pending':
+            updates['status'] = 'unpaid'
+        s.query(UserListing).filter(UserListing.id == row.id).update(updates, synchronize_session=False)
+        return True
 
 
 def reconcile_listing_refund(payment_intent_id, payment_status):
@@ -2315,6 +2392,26 @@ def mark_notifications_read(user_id):
         return True
 
 
+def delete_notification(user_id, notification_id):
+    """Remove one alert from this account."""
+    with get_session() as s:
+        row = s.query(UserNotification).filter(
+            UserNotification.id == int(notification_id),
+            UserNotification.user_id == int(user_id),
+        ).first()
+        if not row:
+            return False
+        s.delete(row)
+        return True
+
+
+def delete_notifications(user_id):
+    """Remove every alert from this account."""
+    with get_session() as s:
+        s.query(UserNotification).filter(UserNotification.user_id == int(user_id)).delete(synchronize_session=False)
+        return True
+
+
 def _send_notice_email(email, title, body):
     if not email:
         return False
@@ -2384,9 +2481,10 @@ def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_nam
 def list_broker_messages(user_id, box='in'):
     with get_session() as s:
         column = BrokerMessage.to_user_id if box == 'in' else BrokerMessage.from_user_id
+        hidden = BrokerMessage.recipient_hidden if box == 'in' else BrokerMessage.sender_hidden
         rows = (
             s.query(BrokerMessage)
-            .filter(column == int(user_id))
+            .filter(column == int(user_id), or_(hidden.is_(False), hidden.is_(None)))
             .order_by(BrokerMessage.created_at.desc(), BrokerMessage.id.desc())
             .limit(100)
             .all()
@@ -2410,6 +2508,41 @@ def list_broker_messages(user_id, box='in'):
                 'created_at': str(row.created_at) if row.created_at else None,
             })
         return out
+
+
+def hide_broker_message(user_id, message_id):
+    """Hide one broker message from this account. The other person still has it."""
+    with get_session() as s:
+        row = s.query(BrokerMessage).filter(BrokerMessage.id == int(message_id)).first()
+        if not row:
+            return False
+        uid = int(user_id)
+        if int(row.from_user_id) == uid:
+            row.sender_hidden = True
+        elif int(row.to_user_id) == uid:
+            row.recipient_hidden = True
+        else:
+            return False
+        if row.sender_hidden and row.recipient_hidden:
+            s.delete(row)
+        return True
+
+
+def hide_broker_messages(user_id):
+    """Hide every broker message this account sent or received."""
+    uid = int(user_id)
+    with get_session() as s:
+        rows = s.query(BrokerMessage).filter(
+            or_(BrokerMessage.from_user_id == uid, BrokerMessage.to_user_id == uid)
+        ).all()
+        for row in rows:
+            if int(row.from_user_id) == uid:
+                row.sender_hidden = True
+            if int(row.to_user_id) == uid:
+                row.recipient_hidden = True
+            if row.sender_hidden and row.recipient_hidden:
+                s.delete(row)
+        return True
 
 
 def notify_user(user_id, kind, title, body=None, href=None, email=None):
