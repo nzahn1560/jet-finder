@@ -498,6 +498,55 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(row.get('payment_status'), 'paid')
         self.assertEqual(row.get('status'), 'pending')
 
+    def test_listing_fee_follows_the_subscription(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Fee Follows Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.set_user_listing_status(listing_id, 'unpaid')
+        db_module.set_listing_payment_session(listing_id, 'cs_test_live_sub')
+        paid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_live_sub',
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_test_live_sub',
+                'payment_status': 'unpaid',
+                'customer': 'cus_listing_fee',
+                'metadata': {
+                    'purpose': 'listing_fee',
+                    'listing_id': str(listing_id),
+                    'user_id': str(self.seller['id']),
+                },
+                'subscription': {'id': 'sub_listing_fee', 'status': 'active'},
+            }},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        self.assertFalse(paid.get_json().get('pending'))
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('payment_status'), 'paid')
+        self.assertEqual(row.get('status'), 'pending')
+        self.assertEqual(row.get('stripe_subscription_id'), 'sub_listing_fee')
+        self.assertEqual(row.get('stripe_customer_id'), 'cus_listing_fee')
+        self.assertTrue(db_module.admin_approve_listing_any(listing_id, self.admin['id']))
+        visible = self.client.get('/api/user-listings')
+        self.assertIn('Fee Follows Jet', visible.get_data(as_text=True))
+        page = self.client.get('/dashboard')
+        self.assertIn(b'Manage billing', page.data)
+        ended = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_end_sub',
+            'type': 'customer.subscription.deleted',
+            'data': {'object': {
+                'id': 'sub_listing_fee',
+                'status': 'canceled',
+                'metadata': {'purpose': 'listing_fee', 'listing_id': str(listing_id)},
+            }},
+        })
+        self.assertEqual(ended.status_code, 200, ended.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('status'), 'suspended')
+        self.assertEqual(row.get('payment_status'), 'canceled')
+        hidden = self.client.get('/api/user-listings')
+        self.assertNotIn('Fee Follows Jet', hidden.get_data(as_text=True))
+
     def test_stripe_checkout_namespace_loads(self):
         import stripe
         self.assertIsNotNone(stripe.checkout)
@@ -965,6 +1014,32 @@ class ProductTests(unittest.TestCase):
         self.assertIn('request', kinds)
         self.assertIn('listing', kinds)
         self.assertTrue(all(row['contact_email'] == 'buyer@example.com' and row['contact_phone'] == '555-0199' for row in inbox.get_json()['inbox']))
+        request_id = next(row['id'] for row in inbox.get_json()['inbox'] if row['kind'] == 'request')
+        removed = self.client.delete(f'/api/broker/messages/{request_id}')
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        left = self.client.get('/api/broker/messages').get_json()['inbox']
+        self.assertEqual([row['kind'] for row in left], ['listing'])
+        self._login('seller@example.com', 'seller-pass-1')
+        blocked = self.client.delete(f'/api/broker/messages/{left[0]["id"]}')
+        self.assertEqual(blocked.status_code, 404)
+        self._login('broker@example.com', 'broker-pass-1')
+        self.assertEqual(len(self.client.get('/api/broker/messages').get_json()['inbox']), 1)
+        cleared = self.client.delete('/api/broker/messages')
+        self.assertEqual(cleared.status_code, 200, cleared.get_json())
+        self.assertEqual(self.client.get('/api/broker/messages').get_json()['inbox'], [])
+        self._login('buyer@example.com', 'buyer-pass-1')
+        sent = self.client.get('/api/broker/messages').get_json()['sent']
+        self.assertEqual(len(sent), 2)
+        note = self.client.get('/api/notifications')
+        self.assertEqual(note.status_code, 200)
+        if note.get_json()['notifications']:
+            one = note.get_json()['notifications'][0]['id']
+            self.assertEqual(self.client.delete(f'/api/notifications/{one}').status_code, 200)
+        self.assertEqual(self.client.delete('/api/notifications').status_code, 200)
+        self.assertEqual(self.client.get('/api/notifications').get_json()['notifications'], [])
+        portal = self.client.get('/dashboard')
+        self.assertIn(b'id="clear-messages"', portal.data)
+        self.assertIn(b'id="clear-alerts"', portal.data)
         self._login('buyer@example.com', 'buyer-pass-1')
         profile = self.client.get(f"/people/{self.broker['id']}")
         self.assertIn(b'name="contact_email"', profile.data)

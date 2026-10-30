@@ -317,6 +317,25 @@
         })();
         </script>
         {% endif %}
+        {% if billing_customer and not (subscription and subscription.stripe_customer_id and subscription.subscription_status in ['active', 'past_due']) %}
+        <div style="margin-top: 1.5rem;">
+            <button type="button" class="dash__btn dash__btn--secondary" id="manage-billing" style="border:0; cursor:pointer;">Manage billing</button>
+        </div>
+        <script>
+        (function () {
+            const button = document.getElementById('manage-billing');
+            if (!button) return;
+            button.addEventListener('click', async function () {
+                button.disabled = true;
+                const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include' });
+                const data = await response.json().catch(function () { return {}; });
+                if (data.url) { window.location = data.url; return; }
+                button.disabled = false;
+                button.insertAdjacentText('afterend', ' ' + (data.message || 'Billing is unavailable.'));
+            });
+        })();
+        </script>
+        {% endif %}
 
         <section class="fold" id="messages">
             <button type="button" class="fold__toggle" id="messages-toggle" aria-expanded="true">Broker messages</button>
@@ -340,6 +359,7 @@
                     <span id="portal-status" style="color:#c8c8c8;"></span>
                 </form>
                 <div id="portal-inbox"></div>
+                <button type="button" class="dash__btn" id="clear-messages" hidden style="border:1px solid rgba(255,255,255,0.25); color:#fff; background:transparent; cursor:pointer; margin-top:0.4rem;">Clear messages</button>
             </div>
         </section>
 
@@ -347,6 +367,7 @@
             <button type="button" class="fold__toggle" id="alerts-toggle" aria-expanded="false">Alerts</button>
             <div class="fold__body" id="alerts-body" hidden>
                 <div id="alerts-list"></div>
+                <button type="button" class="dash__btn" id="clear-alerts" hidden style="border:1px solid rgba(255,255,255,0.25); color:#fff; background:transparent; cursor:pointer; margin-top:0.4rem;">Clear alerts</button>
             </div>
         </section>
 
@@ -706,6 +727,8 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         if (!response.ok) return;
         const data = await response.json();
         const rows = (data.inbox || []).concat(data.sent || []);
+        const clear = document.getElementById('clear-messages');
+        if (clear) clear.hidden = !rows.length;
         inbox.innerHTML = rows.length ? rows.map(function (row) {
             const mine = row.from_user_id === {{ user.id }};
             const personId = mine ? row.to_user_id : row.from_user_id;
@@ -714,8 +737,29 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
                 ? '<br>Email: ' + esc(row.contact_email || '') + '<br>Phone: ' + esc(row.contact_phone || '')
                 : '';
             return '<article class="alert-item"><strong><a href="/people/' + personId + '">' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</a></strong>'
-                + esc(row.aircraft_name || row.kind) + contact + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink + '</article>';
+                + esc(row.aircraft_name || row.kind) + contact + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink
+                + '<br><button type="button" class="dash__btn" data-delete-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Delete</button></article>';
         }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
+        inbox.querySelectorAll('[data-delete-message]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                button.disabled = true;
+                const response = await fetch('/api/broker/messages/' + button.getAttribute('data-delete-message'), {
+                    method: 'DELETE', credentials: 'include',
+                });
+                if (response.ok) loadInbox();
+                else button.disabled = false;
+            });
+        });
+    }
+    const clearMessages = document.getElementById('clear-messages');
+    if (clearMessages) {
+        clearMessages.addEventListener('click', async function () {
+            if (!window.confirm('Clear all broker messages from this profile?')) return;
+            clearMessages.disabled = true;
+            const response = await fetch('/api/broker/messages', { method: 'DELETE', credentials: 'include' });
+            clearMessages.disabled = false;
+            if (response.ok) loadInbox();
+        });
     }
     loadInbox();
     if (location.hash === '#messages') {
@@ -723,33 +767,58 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
     }
 })();
 
-(async function loadAlerts() {
+(async function () {
     const list = document.getElementById('alerts-list');
     const toggle = document.getElementById('alerts-toggle');
     const body = document.getElementById('alerts-body');
+    const clearAlerts = document.getElementById('clear-alerts');
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
         });
     }
-    const response = await fetch('/api/notifications', { credentials: 'include' });
-    if (!response.ok) return;
-    const data = await response.json();
-    const notes = data.notifications || [];
-    toggle.textContent = 'Alerts' + (data.unread ? ' (' + data.unread + ')' : '');
-    if (!notes.length) {
-        list.innerHTML = '<p style="color:#d0d0d0;">No alerts yet.</p>';
-    } else {
-        list.innerHTML = notes.map(function (note) {
-            const open = note.href ? '<a href="' + esc(note.href) + '" style="color:#F05545;">Open in admin</a>' : '';
-            return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + (open ? '\n' + open : '') + '</article>';
-        }).join('');
+    async function loadAlerts() {
+        const response = await fetch('/api/notifications', { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const notes = data.notifications || [];
+        if (clearAlerts) clearAlerts.hidden = !notes.length;
+        toggle.textContent = 'Alerts' + (data.unread ? ' (' + data.unread + ')' : '');
+        if (!notes.length) {
+            list.innerHTML = '<p style="color:#d0d0d0;">No alerts yet.</p>';
+        } else {
+            list.innerHTML = notes.map(function (note) {
+                const open = note.href ? '<a href="' + esc(note.href) + '" style="color:#F05545;">Open in admin</a>' : '';
+                return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + (open ? '\n' + open : '')
+                    + '<br><button type="button" class="dash__btn" data-delete-alert="' + note.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Delete</button></article>';
+            }).join('');
+            list.querySelectorAll('[data-delete-alert]').forEach(function (button) {
+                button.addEventListener('click', async function () {
+                    button.disabled = true;
+                    const removed = await fetch('/api/notifications/' + button.getAttribute('data-delete-alert'), {
+                        method: 'DELETE', credentials: 'include',
+                    });
+                    if (removed.ok) loadAlerts();
+                    else button.disabled = false;
+                });
+            });
+        }
+        if (data.unread || location.hash === '#alerts') {
+            body.hidden = false;
+            toggle.setAttribute('aria-expanded', 'true');
+            if (data.unread) fetch('/api/notifications/read', { method: 'POST', credentials: 'include' });
+        }
     }
-    if (data.unread || location.hash === '#alerts') {
-        body.hidden = false;
-        toggle.setAttribute('aria-expanded', 'true');
-        if (data.unread) fetch('/api/notifications/read', { method: 'POST', credentials: 'include' });
+    if (clearAlerts) {
+        clearAlerts.addEventListener('click', async function () {
+            if (!window.confirm('Clear all alerts from this profile?')) return;
+            clearAlerts.disabled = true;
+            const response = await fetch('/api/notifications', { method: 'DELETE', credentials: 'include' });
+            clearAlerts.disabled = false;
+            if (response.ok) loadAlerts();
+        });
     }
+    loadAlerts();
 })();
 </script>
 {% endblock %}
