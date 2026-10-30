@@ -178,6 +178,48 @@ class ProductTests(unittest.TestCase):
         created = self.client.post('/api/listings', json=self._payload('Broker Quiet', 'broker_only'))
         self.assertEqual(created.status_code, 201, created.get_json())
 
+    def test_only_public_listings_open_the_paywall(self):
+        previous_flag = os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS')
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallonly'
+        try:
+            self._login('seller@example.com', 'seller-pass-1')
+            public = self.client.post('/api/listings', json=self._payload('Paywall Jet', 'public'))
+            self.assertEqual(public.status_code, 201, public.get_json())
+            self.assertTrue(public.get_json()['payment_required'])
+            self.assertEqual(public.get_json()['status'], 'unpaid')
+            page = self.client.get('/create-listing')
+            self.assertIn(b'opens checkout', page.data)
+            self.assertIn(b'window.location.href = payData.url', page.data)
+            self._login('broker@example.com', 'broker-pass-1')
+            sale = self.client.post('/api/listings', json=dict(
+                self._payload('Free Off Market', 'broker_only'), listing_intent='sale',
+            ))
+            self.assertEqual(sale.status_code, 201, sale.get_json())
+            self.assertFalse(sale.get_json()['payment_required'])
+            self.assertEqual(sale.get_json()['status'], 'pending')
+            wanted = self.client.post('/api/listings', json=dict(
+                self._payload('Wanted Jet', 'broker_only'), listing_intent='wanted', price=0,
+            ))
+            self.assertEqual(wanted.status_code, 201, wanted.get_json())
+            self.assertFalse(wanted.get_json()['payment_required'])
+            self.assertEqual(wanted.get_json()['status'], 'pending')
+            skip = self.client.post(f"/api/listings/{sale.get_json()['id']}/checkout")
+            self.assertEqual(skip.status_code, 200, skip.get_json())
+            self.assertTrue(skip.get_json().get('skip'))
+            form = self.client.get('/create-listing?market=off_market')
+            self.assertIn(b'There is no listing fee', form.data)
+        finally:
+            if previous_flag is None:
+                os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
+            else:
+                os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = previous_flag
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
+
     def test_off_market_listing_needs_only_name_profile_and_year(self):
         self._login('broker@example.com', 'broker-pass-1')
         created = self.client.post('/api/listings', json={
@@ -1026,7 +1068,14 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(len(self.client.get('/api/broker/messages').get_json()['inbox']), 1)
         cleared = self.client.delete('/api/broker/messages')
         self.assertEqual(cleared.status_code, 200, cleared.get_json())
-        self.assertEqual(self.client.get('/api/broker/messages').get_json()['inbox'], [])
+        archived = self.client.get('/api/broker/messages').get_json()
+        self.assertEqual(archived['inbox'], [])
+        self.assertEqual(len(archived['deleted']), 2)
+        put_back = self.client.post(f'/api/broker/messages/{request_id}/restore')
+        self.assertEqual(put_back.status_code, 200, put_back.get_json())
+        restored = self.client.get('/api/broker/messages').get_json()
+        self.assertEqual([row['kind'] for row in restored['inbox']], ['request'])
+        self.assertEqual(len(restored['deleted']), 1)
         self._login('buyer@example.com', 'buyer-pass-1')
         sent = self.client.get('/api/broker/messages').get_json()['sent']
         self.assertEqual(len(sent), 2)
@@ -1040,6 +1089,10 @@ class ProductTests(unittest.TestCase):
         portal = self.client.get('/dashboard')
         self.assertIn(b'id="clear-messages"', portal.data)
         self.assertIn(b'id="clear-alerts"', portal.data)
+        self.assertIn(b'Deleted messages', portal.data)
+        self.assertIn(b'data-expand-message', portal.data)
+        self.assertIn(b'mailto:', portal.data)
+        self.assertIn(b'tel:', portal.data)
         self._login('buyer@example.com', 'buyer-pass-1')
         profile = self.client.get(f"/people/{self.broker['id']}")
         self.assertIn(b'name="contact_email"', profile.data)

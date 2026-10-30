@@ -502,7 +502,7 @@
                     </div>
 
                     <input type="hidden" name="pricing_plan" value="monthly">
-                    <div class="form-section">
+                    <div class="form-section" id="listing-fee-section">
                         <div class="section-title">
                             <i class="fas fa-tag"></i>Listing fee
                         </div>
@@ -540,6 +540,14 @@
         if (intent) {
             intent.hidden = !off;
             intent.querySelectorAll('input').forEach(function (input) { input.required = !!off; });
+        }
+        const fee = document.getElementById('listing-fee-section');
+        const next = document.getElementById('listing-next-step');
+        if (fee) fee.hidden = !!off;
+        if (next) {
+            next.textContent = off
+                ? 'Off-market listings go to an admin for approval. There is no listing fee.'
+                : 'Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.';
         }
     }
     document.querySelectorAll('[name="market"]').forEach(function (radio) {
