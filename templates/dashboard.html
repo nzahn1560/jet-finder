@@ -363,6 +363,14 @@
             </div>
         </section>
 
+        <section class="fold" id="deleted-messages">
+            <button type="button" class="fold__toggle" id="deleted-messages-toggle" aria-expanded="false">Deleted messages</button>
+            <div class="fold__body" id="deleted-messages-body" hidden>
+                <p style="color:#d0d0d0; margin:0 0 0.8rem;">Messages you deleted stay here. Open one to read the note, the email, and the phone number.</p>
+                <div id="deleted-inbox"></div>
+            </div>
+        </section>
+
         <section class="fold" id="alerts">
             <button type="button" class="fold__toggle" id="alerts-toggle" aria-expanded="false">Alerts</button>
             <div class="fold__body" id="alerts-body" hidden>
@@ -488,7 +496,7 @@
                 + rej + amendment + review + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
-                + (l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49.99 per month</button>' : '')
+                + (!offMarket && l.status === 'unpaid' ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49.99 per month</button>' : '')
                 + (l.status === 'rejected' ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Send back for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
@@ -552,7 +560,13 @@
                 const resp = await fetch('/api/listings/' + id + '/resubmit', { method: 'POST', credentials: 'include' });
                 const data = await resp.json().catch(function () { return {}; });
                 if (resp.ok) { window.location.href = '/dashboard'; return; }
-                if (data.payment_required) { alert('This listing still needs the listing fee before review.'); return; }
+                if (data.payment_required) {
+                    const pay = await fetch('/api/listings/' + id + '/checkout', { method: 'POST', credentials: 'include' });
+                    const payData = await pay.json().catch(function () { return {}; });
+                    if (pay.ok && payData.url) { window.location.href = payData.url; return; }
+                    alert(payData.message || 'This listing still needs the listing fee before review.');
+                    return;
+                }
                 alert(data.message || data.error || 'Could not send it back.');
             });
         });
@@ -722,25 +736,51 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         status.textContent = response.ok ? 'Sent.' : (data.message || 'Could not send that.');
         if (response.ok) loadInbox();
     });
-    async function loadInbox() {
-        const response = await fetch('/api/broker/messages', { credentials: 'include' });
-        if (!response.ok) return;
-        const data = await response.json();
-        const rows = (data.inbox || []).concat(data.sent || []);
-        const clear = document.getElementById('clear-messages');
-        if (clear) clear.hidden = !rows.length;
-        inbox.innerHTML = rows.length ? rows.map(function (row) {
-            const mine = row.from_user_id === {{ user.id }};
-            const personId = mine ? row.to_user_id : row.from_user_id;
-            const listingLink = row.listing_id ? '<br><a href="/listing/' + row.listing_id + '">Open the listing</a>' : '';
-            const contact = (row.contact_email || row.contact_phone)
-                ? '<br>Email: ' + esc(row.contact_email || '') + '<br>Phone: ' + esc(row.contact_phone || '')
-                : '';
-            return '<article class="alert-item"><strong><a href="/people/' + personId + '">' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</a></strong>'
-                + esc(row.aircraft_name || row.kind) + contact + (row.notes ? '<br>' + esc(row.notes) : '') + listingLink
-                + '<br><button type="button" class="dash__btn" data-delete-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Delete</button></article>';
-        }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
-        inbox.querySelectorAll('[data-delete-message]').forEach(function (button) {
+    function contactLinks(row) {
+        const email = (row.contact_email || '').trim();
+        const phone = (row.contact_phone || '').trim();
+        const dial = phone.replace(/[^\d+]/g, '');
+        const parts = [];
+        if (email) {
+            parts.push('<a href="mailto:' + esc(email) + '" style="color:#F05545; font-weight:600;">' + esc(email) + '</a>');
+        }
+        if (phone) {
+            parts.push('<a href="tel:' + esc(dial || phone) + '" style="color:#F05545; font-weight:600;">' + esc(phone) + '</a>');
+        }
+        if (!parts.length) return '';
+        return '<p style="margin:0.45rem 0 0; display:flex; gap:1rem; flex-wrap:wrap;">' + parts.join('') + '</p>';
+    }
+    function messageCard(row, deleted) {
+        const mine = row.mine === true || row.from_user_id === {{ user.id }};
+        const personId = mine ? row.to_user_id : row.from_user_id;
+        const listingLink = row.listing_id ? '<p style="margin:0.45rem 0 0;"><a href="/listing/' + row.listing_id + '" style="color:#F05545;">Open the listing</a></p>' : '';
+        const notes = row.notes ? '<p style="margin:0.45rem 0 0; white-space:pre-wrap;">' + esc(row.notes) + '</p>' : '';
+        const action = deleted
+            ? '<button type="button" class="dash__btn" data-restore-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Put back</button>'
+            : '<button type="button" class="dash__btn" data-delete-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Delete</button>';
+        return '<article class="alert-item">'
+            + '<button type="button" data-expand-message aria-expanded="false" style="display:block; width:100%; text-align:left; background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0;">'
+            + '<strong>' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</strong> · ' + esc(row.aircraft_name || row.kind)
+            + ' <span style="color:#8e8e93;">Show</span></button>'
+            + contactLinks(row)
+            + '<div hidden data-message-body style="margin-top:0.45rem;">'
+            + '<p style="margin:0;"><a href="/people/' + personId + '" style="color:#F05545;">Open profile</a></p>'
+            + notes + listingLink
+            + '<p style="margin:0.45rem 0 0;">' + action + '</p>'
+            + '</div></article>';
+    }
+    function wireMessages(root) {
+        root.querySelectorAll('[data-expand-message]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const body = button.parentElement.querySelector('[data-message-body]');
+                const open = body.hidden;
+                body.hidden = !open;
+                button.setAttribute('aria-expanded', open ? 'true' : 'false');
+                const label = button.querySelector('span');
+                if (label) label.textContent = open ? 'Hide' : 'Show';
+            });
+        });
+        root.querySelectorAll('[data-delete-message]').forEach(function (button) {
             button.addEventListener('click', async function () {
                 button.disabled = true;
                 const response = await fetch('/api/broker/messages/' + button.getAttribute('data-delete-message'), {
@@ -750,6 +790,34 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
                 else button.disabled = false;
             });
         });
+        root.querySelectorAll('[data-restore-message]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                button.disabled = true;
+                const response = await fetch('/api/broker/messages/' + button.getAttribute('data-restore-message') + '/restore', {
+                    method: 'POST', credentials: 'include',
+                });
+                if (response.ok) loadInbox();
+                else button.disabled = false;
+            });
+        });
+    }
+    async function loadInbox() {
+        const response = await fetch('/api/broker/messages', { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const rows = (data.inbox || []).concat(data.sent || []);
+        const deleted = data.deleted || [];
+        const clear = document.getElementById('clear-messages');
+        if (clear) clear.hidden = !rows.length;
+        inbox.innerHTML = rows.length ? rows.map(function (row) { return messageCard(row, false); }).join('') : '<p style="color:#d0d0d0;">No broker messages yet.</p>';
+        wireMessages(inbox);
+        const deletedBox = document.getElementById('deleted-inbox');
+        const deletedToggle = document.getElementById('deleted-messages-toggle');
+        if (deletedToggle) deletedToggle.textContent = 'Deleted messages' + (deleted.length ? ' (' + deleted.length + ')' : '');
+        if (deletedBox) {
+            deletedBox.innerHTML = deleted.length ? deleted.map(function (row) { return messageCard(row, true); }).join('') : '<p style="color:#d0d0d0;">No deleted messages.</p>';
+            wireMessages(deletedBox);
+        }
     }
     const clearMessages = document.getElementById('clear-messages');
     if (clearMessages) {

@@ -23,7 +23,7 @@ import json
 import os
 import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text, UniqueConstraint, or_
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, text, UniqueConstraint, and_, or_
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
@@ -1578,7 +1578,7 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, s
             updates['stripe_subscription_id'] = str(subscription_id)[:255]
         if customer_id:
             updates['stripe_customer_id'] = str(customer_id)[:255]
-        if row.status in ('unpaid', 'draft'):
+        if row.status in ('unpaid', 'draft', 'rejected'):
             updates['status'] = 'pending'
         elif row.status == 'suspended' and row.payment_status == 'canceled':
             updates['status'] = 'pending'
@@ -2480,18 +2480,27 @@ def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_nam
 
 def list_broker_messages(user_id, box='in'):
     with get_session() as s:
-        column = BrokerMessage.to_user_id if box == 'in' else BrokerMessage.from_user_id
-        hidden = BrokerMessage.recipient_hidden if box == 'in' else BrokerMessage.sender_hidden
+        uid = int(user_id)
+        query = s.query(BrokerMessage)
+        if box == 'deleted':
+            query = query.filter(or_(
+                and_(BrokerMessage.from_user_id == uid, BrokerMessage.sender_hidden.is_(True)),
+                and_(BrokerMessage.to_user_id == uid, BrokerMessage.recipient_hidden.is_(True)),
+            ))
+        else:
+            column = BrokerMessage.to_user_id if box == 'in' else BrokerMessage.from_user_id
+            hidden = BrokerMessage.recipient_hidden if box == 'in' else BrokerMessage.sender_hidden
+            query = query.filter(column == uid, or_(hidden.is_(False), hidden.is_(None)))
         rows = (
-            s.query(BrokerMessage)
-            .filter(column == int(user_id), or_(hidden.is_(False), hidden.is_(None)))
+            query
             .order_by(BrokerMessage.created_at.desc(), BrokerMessage.id.desc())
             .limit(100)
             .all()
         )
         out = []
         for row in rows:
-            other_id = row.from_user_id if box == 'in' else row.to_user_id
+            mine = int(row.from_user_id) == uid if box == 'deleted' else box != 'in'
+            other_id = row.to_user_id if mine else row.from_user_id
             other = s.query(User).filter(User.id == other_id).first()
             other_name = ' '.join(part for part in [getattr(other, 'first_name', None), getattr(other, 'last_name', None)] if part) if other else 'Member'
             out.append({
@@ -2505,6 +2514,7 @@ def list_broker_messages(user_id, box='in'):
                 'from_user_id': int(row.from_user_id),
                 'to_user_id': int(row.to_user_id),
                 'person_name': other_name or 'Member',
+                'mine': mine,
                 'created_at': str(row.created_at) if row.created_at else None,
             })
         return out
@@ -2523,8 +2533,6 @@ def hide_broker_message(user_id, message_id):
             row.recipient_hidden = True
         else:
             return False
-        if row.sender_hidden and row.recipient_hidden:
-            s.delete(row)
         return True
 
 
@@ -2540,9 +2548,23 @@ def hide_broker_messages(user_id):
                 row.sender_hidden = True
             if int(row.to_user_id) == uid:
                 row.recipient_hidden = True
-            if row.sender_hidden and row.recipient_hidden:
-                s.delete(row)
         return True
+
+
+def restore_broker_message(user_id, message_id):
+    """Put a deleted broker message back on this account."""
+    with get_session() as s:
+        row = s.query(BrokerMessage).filter(BrokerMessage.id == int(message_id)).first()
+        if not row:
+            return False
+        uid = int(user_id)
+        if int(row.from_user_id) == uid and row.sender_hidden:
+            row.sender_hidden = False
+            return True
+        if int(row.to_user_id) == uid and row.recipient_hidden:
+            row.recipient_hidden = False
+            return True
+        return False
 
 
 def notify_user(user_id, kind, title, body=None, href=None, email=None):

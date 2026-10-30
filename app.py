@@ -3569,6 +3569,7 @@ def api_broker_messages():
     return jsonify({
         'inbox': db_module.list_broker_messages(user['id'], 'in'),
         'sent': db_module.list_broker_messages(user['id'], 'out'),
+        'deleted': db_module.list_broker_messages(user['id'], 'deleted'),
     })
 
 
@@ -3588,6 +3589,16 @@ def api_broker_messages_clear():
     """Remove every broker message from this account."""
     user = request.current_user  # type: ignore[attr-defined]
     db_module.hide_broker_messages(user['id'])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/broker/messages/<int:message_id>/restore', methods=['POST'])
+@require_auth
+def api_broker_message_restore(message_id):
+    """Put a deleted broker message back on this account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    if not db_module.restore_broker_message(user['id'], message_id):
+        return jsonify({'error': 'not_found'}), 404
     return jsonify({'ok': True})
 
 
@@ -6204,7 +6215,7 @@ def _attach_listing_photos(listings):
 
 
 def _create_listing_for_user(user, data):
-    """Save a listing for this account. Pending review, or unpaid when Stripe is required.
+    """Save a listing for this account. A public listing is unpaid until Checkout. Off-market is pending.
 
     Returns (result_dict, None) or (None, (payload, status_code)).
     """
@@ -6284,7 +6295,9 @@ def _create_listing_for_user(user, data):
     pricing_plan = data.get('pricing_plan') or 'monthly'
     if pricing_plan not in {'monthly', 'six_month'}:
         pricing_plan = 'monthly'
-    initial_status = 'unpaid' if _payment_required() else 'pending'
+    market = sections_module.normalize_market(data.get('market'))
+    needs_payment = _listing_needs_checkout(market)
+    initial_status = 'unpaid' if needs_payment else 'pending'
     try:
         listing_id = db_module.create_user_listing(
             profile_id, title, year_value, price, hours,
@@ -6295,18 +6308,18 @@ def _create_listing_for_user(user, data):
             pricing_plan,
             user_id=user['id'],
             status=initial_status,
-            market=sections_module.normalize_market(data.get('market')),
+            market=market,
             details=data,
         )
         _notify_admins_new_listing(
             listing_id, title, data.get('email') or user.get('email'),
-            market=sections_module.normalize_market(data.get('market')),
+            market=market,
         )
         return {
             'ok': True,
             'id': listing_id,
             'status': initial_status,
-            'payment_required': initial_status == 'unpaid',
+            'payment_required': needs_payment,
         }, None
     except Exception:
         logger.exception('create listing failed')
@@ -6341,7 +6354,7 @@ def api_listings_resubmit(listing_id: int):
         return jsonify({'error': 'forbidden'}), 403
     if row.get('status') not in ('rejected', 'draft', 'suspended'):
         return jsonify({'error': 'cannot_resubmit', 'message': 'Only a rejected, draft, or suspended listing can be sent back.'}), 409
-    if _payment_required() and row.get('payment_status') != 'paid':
+    if _listing_needs_checkout(row.get('market')) and row.get('payment_status') != 'paid':
         return jsonify({'error': 'payment_required', 'payment_required': True}), 402
     previous = row.get('status')
     db_module.set_user_listing_status(listing_id, 'pending')
@@ -6652,12 +6665,21 @@ def _payment_required() -> bool:
     return True
 
 
+def _listing_needs_checkout(market) -> bool:
+    """The monthly fee applies to public listings. Off-market sale and wanted listings are free."""
+    if not _payment_required():
+        return False
+    return sections_module.normalize_market(market) != 'broker_only'
+
+
 def _listing_checkout_url(user, listing_id):
     """Open Stripe Checkout for the monthly listing fee. None when it cannot start."""
     if not _payment_required():
         return None
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
+        return None
+    if sections_module.normalize_market(row.get('market')) == 'broker_only':
         return None
     amount = _listing_fee_cents()
     dollars = f'{amount / 100:.2f}'
@@ -6724,6 +6746,8 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'skip': True, 'message': 'Payment not required'}), 200
     if row.get('payment_status') == 'paid':
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
+    if sections_module.normalize_market(row.get('market')) == 'broker_only':
+        return jsonify({'skip': True, 'message': 'Off-market listings do not have a listing fee.'}), 200
     url = _listing_checkout_url(user, listing_id)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
