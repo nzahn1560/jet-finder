@@ -283,6 +283,23 @@
     font-size: 0.85rem;
 }
 
+.broker-count {
+    background: transparent;
+    border: 0;
+}
+.broker-count span {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: #F05545;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    box-shadow: 0 0 0 3px rgba(240, 85, 69, 0.35);
+}
+
 .leaflet-tooltip.broker-tip {
     background: #12141a;
     color: #fff;

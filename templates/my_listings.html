@@ -52,11 +52,14 @@
         .then(r => r.json())
         .then(listings => {
             loadingEl.style.display = 'none';
-            if (!Array.isArray(listings) || listings.length === 0) {
+            const visible = Array.isArray(listings)
+                ? listings.filter(l => l.status !== 'deleted' && l.status !== 'archived')
+                : [];
+            if (visible.length === 0) {
                 emptyEl.style.display = 'block';
                 return;
             }
-            listings.forEach(l => {
+            visible.forEach(l => {
                 const card = document.createElement('div');
                 card.className = 'listing-card';
                 const img = l.image || '/static/images/aircraft_placeholder.jpg';

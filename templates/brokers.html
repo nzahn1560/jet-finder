@@ -9,7 +9,8 @@
 {% block content %}
 <div class="section-page">
     <h1>Broker map</h1>
-        <p class="section-lead">Approved brokerages and brokers appear on the map.</p>
+        <p class="section-lead">The number is how many brokers are in that area. Zoom in and it splits into the people there.</p>
+        <p id="broker-in-view" class="section-lead"></p>
 
     <div class="broker-shell">
         <div class="broker-stage">
@@ -27,7 +28,8 @@
         {% if get_current_user_info() %}
         <a href="{{ url_for('dashboard') }}">Your profile</a>
         {% else %}
-        <a href="{{ url_for('register') }}">Create an account</a>.
+        <a href="{{ url_for('register', broker=1) }}">Sign up as a broker</a>.
+        The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.
         {% endif %}
     </p>
 </div>
@@ -60,9 +62,11 @@
         pane: 'overlayPane'
     }).addTo(map);
 
-    const markers = new Map();
+    const clusterLayer = L.layerGroup().addTo(map);
     let activeId = null;
     let pinClickAt = 0;
+    let shownBrokers = teams.filter(function (broker) { return broker.lat != null && broker.lon != null; });
+    const viewCount = document.getElementById('broker-in-view');
     map.createPane('brokers');
     map.getPane('brokers').style.zIndex = 620;
 
@@ -72,16 +76,13 @@
 
     function miniHtml(team) {
         const initial = esc((team.display_name || 'T').slice(0, 1));
-        const count = team.member_count || 0;
         return '<div class="broker-mini">'
             + '<div class="broker-mini__banner" style="' + photoStyle(team.logo) + '"></div>'
             + '<div class="broker-mini__photo" style="' + photoStyle(team.logo) + '">' + (team.logo ? '' : initial) + '</div>'
             + '<strong>' + esc(team.display_name) + '</strong>'
-            + '<span>' + count + (count === 1 ? ' broker' : ' brokers') + '</span>'
-            + (team.category ? '<span>' + esc(team.category) + '</span>' : '')
+            + (team.team_name ? '<span>' + esc(team.team_name) + (team.is_main ? ' · Main' : '') + '</span>' : '')
             + (team.specialties ? '<span>' + esc(team.specialties) + '</span>' : '')
             + (team.years ? '<span>' + esc(team.years) + ' years in business</span>' : '')
-            + (team.leader ? '<span>Leader · ' + esc(team.leader) + '</span>' : '')
             + (team.place ? '<span class="broker-mini__place">' + esc(team.place) + '</span>' : '')
             + '</div>';
     }
@@ -112,18 +113,82 @@
             + (people || '<p>No brokers are on this team yet.</p>');
     }
 
-    function paintMarkers() {
-        markers.forEach(function (marker, id) {
-            const on = id === activeId;
-            marker.setStyle({ radius: on ? 10 : 7, weight: on ? 2 : 0, color: '#fff', fillColor: '#F05545', fillOpacity: 1 });
+    function cellDegrees(zoom) {
+        if (zoom >= 11) return 0;
+        const steps = [14, 10, 7, 4.5, 2.8, 1.6, 0.9, 0.5, 0.28, 0.14, 0.07];
+        return steps[Math.max(0, Math.min(steps.length - 1, zoom))];
+    }
+
+    function groupBrokers(rows) {
+        const size = cellDegrees(map.getZoom());
+        if (!size) return rows.map(function (broker) { return [broker]; });
+        const groups = {};
+        rows.forEach(function (broker) {
+            const key = Math.floor(Number(broker.lat) / size) + ':' + Math.floor(Number(broker.lon) / size);
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(broker);
         });
+        return Object.keys(groups).map(function (key) { return groups[key]; });
+    }
+
+    function groupCenter(group) {
+        let lat = 0;
+        let lon = 0;
+        group.forEach(function (broker) {
+            lat += Number(broker.lat);
+            lon += Number(broker.lon);
+        });
+        return [lat / group.length, lon / group.length];
+    }
+
+    function countIcon(count) {
+        const size = count > 99 ? 54 : count > 9 ? 46 : 40;
+        return L.divIcon({
+            className: 'broker-count',
+            html: '<span>' + count + '</span>',
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2]
+        });
+    }
+
+    function updateViewCount() {
+        if (!viewCount) return;
+        const bounds = map.getBounds();
+        const inside = shownBrokers.filter(function (broker) {
+            return bounds.contains([Number(broker.lat), Number(broker.lon)]);
+        }).length;
+        const noun = inside === 1 ? 'broker' : 'brokers';
+        viewCount.textContent = inside + ' ' + noun + ' in this view';
+    }
+
+    function drawClusters() {
+        clusterLayer.clearLayers();
+        groupBrokers(shownBrokers).forEach(function (group) {
+            const spot = groupCenter(group);
+            const count = group.length;
+            const marker = L.marker(spot, { icon: countIcon(count), pane: 'brokers' });
+            if (count === 1) {
+                marker.bindTooltip(miniHtml(group[0]), {
+                    direction: 'top', opacity: 1, className: 'broker-tip', offset: [0, -8]
+                });
+            } else {
+                marker.bindTooltip(count + ' brokers in this area', { direction: 'top', offset: [0, -8] });
+            }
+            marker.on('click', function (event) {
+                pinClickAt = Date.now();
+                if (event) L.DomEvent.stopPropagation(event);
+                if (count === 1) selectBroker(group[0]);
+                else map.flyTo(spot, Math.min(map.getZoom() + 2, 12), { duration: 0.45 });
+            });
+            marker.addTo(clusterLayer);
+        });
+        updateViewCount();
     }
 
     function clearSelection() {
         activeId = null;
         selectedEl.hidden = true;
         selectedEl.innerHTML = '';
-        paintMarkers();
     }
 
     function searchText(team) {
@@ -143,18 +208,12 @@
     }
 
     function showMarkers(shown) {
-        const visible = {};
-        shown.forEach(function (team) { visible[team.pin_id] = true; });
-        markers.forEach(function (marker, id) {
-            if (visible[id]) marker.addTo(map);
-            else map.removeLayer(marker);
-        });
+        shownBrokers = shown;
+        drawClusters();
     }
 
     function choose(team) {
-        if (!team) return;
-        if (team.kind === 'broker') selectBroker(team);
-        else selectTeam(team);
+        if (team) selectBroker(team);
     }
 
     function renderResults(shown, area) {
@@ -182,61 +241,16 @@
 
     function selectBroker(broker) {
         activeId = broker.pin_id;
-        paintMarkers();
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(broker)
             + (broker.bio ? '<p>' + esc(broker.bio) + '</p>' : '')
             + '<p><a href="/people/' + broker.user_id + '" style="color:#F05545;">Open profile</a></p>';
-        const marker = markers.get(broker.pin_id);
-        if (marker) map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 7), { duration: 0.6 });
+        if (broker.lat != null && broker.lon != null) {
+            map.flyTo([Number(broker.lat), Number(broker.lon)], Math.max(map.getZoom(), 11), { duration: 0.6 });
+        }
     }
 
-    async function selectTeam(team) {
-        activeId = team.pin_id;
-        document.querySelectorAll('.broker-person[data-id]').forEach(function (node) {
-            node.classList.toggle('is-selected', node.getAttribute('data-id') === team.pin_id);
-        });
-        paintMarkers();
-        selectedEl.hidden = false;
-        selectedEl.innerHTML = miniHtml(team) + '<p>Loading brokers...</p>';
-        const marker = markers.get(team.pin_id);
-        if (marker) map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 7), { duration: 0.6 });
-        const resp = await fetch('/api/broker-teams/' + team.id);
-        const detail = await resp.json().catch(function () { return {}; });
-        showTeam(team, detail);
-    }
-
-    const bounds = [];
-    const occupied = {};
-    teams.forEach(function (team) {
-        if (team.lat == null || team.lon == null) return;
-        const key = Number(team.lat).toFixed(3) + ',' + Number(team.lon).toFixed(3);
-        const slot = occupied[key] || 0;
-        occupied[key] = slot + 1;
-        const angle = slot * 0.9;
-        const lat = Number(team.lat) + Math.sin(angle) * 0.05 * slot;
-        const lon = Number(team.lon) + Math.cos(angle) * 0.05 * slot;
-        const marker = L.circleMarker([lat, lon], {
-            radius: 7, pane: 'brokers', color: '#F05545', weight: 0, fillColor: '#F05545', fillOpacity: 1
-        }).addTo(map);
-        marker.bindTooltip(miniHtml(team), {
-            direction: 'top',
-            opacity: 1,
-            className: 'broker-tip',
-            offset: [0, -8]
-        });
-        marker.on('click', function (event) {
-            pinClickAt = Date.now();
-            if (event) L.DomEvent.stopPropagation(event);
-            choose(team);
-        });
-        markers.set(team.pin_id, marker);
-        bounds.push([team.lat, team.lon]);
-    });
-    map.on('click', function () {
-        if (Date.now() - pinClickAt < 400) return;
-        clearSelection();
-    });
+    const bounds = shownBrokers.map(function (broker) { return [Number(broker.lat), Number(broker.lon)]; });
     findEl.addEventListener('submit', function (event) { event.preventDefault(); });
     findEl.addEventListener('mousedown', function (event) { event.stopPropagation(); });
     let searchToken = 0;
@@ -264,13 +278,19 @@
                 });
                 renderResults(shown, area);
                 showMarkers(shown);
-                const spots = shown.map(function (team) { return markers.get(team.pin_id).getLatLng(); });
+                const spots = shown.map(function (team) { return [Number(team.lat), Number(team.lon)]; });
                 if (spots.length) map.fitBounds(L.latLngBounds(spots), { padding: [64, 64], maxZoom: 9 });
                 else if (area && area.lat != null && area.lon != null) map.flyTo([area.lat, area.lon], 9, { duration: 0.45 });
             });
     });
+    map.on('zoomend moveend', drawClusters);
+    map.on('click', function () {
+        if (Date.now() - pinClickAt < 400) return;
+        clearSelection();
+    });
     if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 8 });
-    setTimeout(function () { map.invalidateSize(); }, 200);
+    else drawClusters();
+    setTimeout(function () { map.invalidateSize(); drawClusters(); }, 200);
 })();
 </script>
 {% endblock %}

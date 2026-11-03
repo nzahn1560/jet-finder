@@ -546,13 +546,9 @@ def _team_map_point(team):
 
 @app.route('/brokers')
 def brokers_page():
-    """Map of approved brokerages and approved brokers."""
-    teams = [_team_map_point(team) for team in db_module.list_public_teams()]
-    for team in teams:
-        team['kind'] = 'team'
-        team['pin_id'] = f"team-{team.get('id')}"
+    """Map of brokers. A number is how many brokers are in that area."""
     people = []
-    for broker in db_module.list_approved_brokers():
+    for broker in db_module.list_directory_brokers():
         geography = _point_geography(broker.get('place') or '', broker.get('lat'), broker.get('lon'))
         people.append({
             'kind': 'broker',
@@ -565,12 +561,13 @@ def brokers_page():
             'bio': broker.get('bio') or '',
             'specialties': broker.get('specialties') or '',
             'years': broker.get('years'),
-            'member_count': 1,
-            'category': broker.get('company') or 'Broker',
+            'team_name': broker.get('team_name') or '',
+            'is_main': bool(broker.get('is_main')),
+            'category': broker.get('team_name') or broker.get('company') or 'Broker',
             'leader': broker.get('name') or '',
             **geography,
         })
-    return render_template('brokers.html', map_points=teams + people)
+    return render_template('brokers.html', map_points=people)
 
 
 @app.route('/api/broker-teams/<int:team_id>')
@@ -637,11 +634,51 @@ def api_broker_team_allow(team_id, member_id):
     """The team admin lets an individual onto the team. That person pays nothing."""
     user = request.current_user  # type: ignore[attr-defined]
     if not db_module.allow_team_member(team_id, user['id'], member_id):
+        team = db_module.get_broker_team(team_id) or {}
+        if team.get('admin_user_id') == user['id'] and team.get('subscription_status') != 'active':
+            return jsonify({
+                'error': 'payment_required',
+                'message': 'Pay the brokerage subscription before adding someone.',
+            }), 402
         return jsonify({'error': 'forbidden'}), 403
-    db_module.update_user_profile(member_id, {'profile_role': 'broker'})
-    db_module.set_broker_application(member_id, 'approved')
-    _place_approved_broker(member_id)
+    _seat_broker_on_team(member_id)
     return jsonify({'ok': True}), 200
+
+
+@app.route('/api/broker-teams/<int:team_id>/members', methods=['POST'])
+@require_auth
+def api_broker_team_add(team_id):
+    """The main account adds a person to the paid subscription."""
+    user = request.current_user  # type: ignore[attr-defined]
+    email = ((request.get_json(silent=True) or {}).get('email') or '').strip()
+    added = db_module.add_team_member_by_email(team_id, user['id'], email)
+    if added == 'unpaid':
+        return jsonify({
+            'error': 'payment_required',
+            'message': 'Pay the brokerage subscription before adding someone.',
+        }), 402
+    if added == 'missing':
+        return jsonify({'error': 'not_found', 'message': 'No account uses that email.'}), 404
+    if added == 'already_on_team':
+        return jsonify({'error': 'already_on_team', 'message': 'That person is already on a brokerage.'}), 400
+    if not added:
+        return jsonify({'error': 'forbidden'}), 403
+    _seat_broker_on_team(added)
+    person = get_user_by_id(added) or {}
+    team = db_module.get_broker_team(team_id) or {}
+    db_module.notify_user(
+        added, 'team', 'You are on the brokerage',
+        f'{team.get("name") or "The brokerage"} added you. Your listings stay on your account.',
+        '/dashboard', person.get('email'),
+    )
+    return jsonify({'ok': True, 'user_id': added}), 200
+
+
+def _seat_broker_on_team(user_id):
+    """A person added by a paid brokerage is a broker. They do not pay on their own."""
+    db_module.update_user_profile(user_id, {'profile_role': 'broker'})
+    db_module.set_broker_application(user_id, 'approved')
+    _place_approved_broker(user_id)
 
 
 @app.route('/api/account/team-checkout', methods=['POST'])
@@ -1379,7 +1416,7 @@ def marketplace_search():
 def dashboard():
     """Customer profile: aircraft they sell, and aircraft they are watching."""
     user = get_current_user_info()
-    person, membership, pending_members, teams = _profile_page_context(user)
+    person, membership, pending_members, teams, team_people = _profile_page_context(user)
     return render_template(
         'dashboard.html',
         user=person,
@@ -1389,6 +1426,7 @@ def dashboard():
         membership=membership,
         pending_members=pending_members,
         teams=teams,
+        team_people=team_people,
     )
 
 
@@ -1403,17 +1441,28 @@ def _place_parts(location):
 def _profile_page_context(person):
     """Public profile fields plus brokerage details for the account owner."""
     if not person:
-        return person, None, [], []
+        return person, None, [], [], []
     person = {key: value for key, value in person.items() if key not in {'password_hash', 'verification_documents'}}
     city, state = _place_parts(person.get('profile_location'))
     person['profile_city'] = city
     person['profile_state'] = state
     membership = db_module.team_membership(person['id'])
     pending_members = []
-    if membership and membership.get('is_admin') and membership.get('subscription_status') == 'active':
+    team_people = []
+    paid_team = membership and membership.get('subscription_status') == 'active'
+    if paid_team and membership.get('is_admin'):
         pending_members = db_module.list_team_members(membership['id'], status='pending')
+    if paid_team and membership.get('admin_user_id') == person.get('id'):
+        for member in db_module.list_team_members(membership['id'], status='active'):
+            team_people.append({
+                'user_id': member.get('user_id'),
+                'name': ' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) or 'Broker',
+                'photo': member.get('profile_photo_url') or '',
+                'specialties': member.get('broker_specialties') or '',
+                'is_admin': bool(member.get('is_admin')),
+            })
     teams = db_module.list_public_teams()
-    return person, membership, pending_members, teams
+    return person, membership, pending_members, teams, team_people
 
 
 @app.route('/people/<int:user_id>')
@@ -1424,7 +1473,7 @@ def public_profile(user_id):
         return render_template('error.html', error_code=404, message='Profile not found'), 404
     viewer = get_current_user_from_request()
     is_owner = bool(viewer and viewer.get('id') == person.get('id'))
-    person, membership, pending_members, teams = _profile_page_context(person)
+    person, membership, pending_members, teams, team_people = _profile_page_context(person)
     if not is_owner:
         pending_members = []
         teams = []
@@ -1435,6 +1484,7 @@ def public_profile(user_id):
         membership=membership,
         pending_members=pending_members,
         teams=teams,
+        team_people=team_people,
     )
 
 
@@ -1446,7 +1496,12 @@ def api_public_person_listings(user_id):
         return jsonify({'error': 'not_found'}), 404
     viewer = get_current_user_from_request()
     include_off_market = _broker_market_access(viewer)
-    return jsonify({'listings': db_module.listings_for_user(user_id, include_off_market=include_off_market)})
+    team = db_module.user_on_active_team(user_id)
+    if team and team.get('admin_user_id') == user_id:
+        listings = db_module.listings_for_team(team['id'], include_off_market=include_off_market)
+    else:
+        listings = db_module.listings_for_user(user_id, include_off_market=include_off_market)
+    return jsonify({'listings': listings})
 
 @app.route('/airplane-stock-market')
 def airplane_stock_market():
@@ -2747,13 +2802,26 @@ def login():
     return render_template('auth/login.html')
 
 
+def _register_page(**extra):
+    broker_open = request.args.get('broker') == '1' or extra.get('broker_open')
+    return render_template(
+        'auth/register.html',
+        teams=db_module.list_public_teams(),
+        broker_open=bool(broker_open),
+        broker_path=extra.get('broker_path') or '',
+        team_id=extra.get('team_id') or '',
+        broker_specialties=extra.get('broker_specialties') or '',
+        broker_years=extra.get('broker_years') or '',
+    )
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     """User registration page"""
     if request.method == 'POST':
         if _auth_rate_limited():
             flash('Too many attempts. Wait a minute and try again.', 'error')
-            return render_template('auth/register.html'), 429
+            return _register_page(), 429
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password') or ''
         first_name = request.form.get('first_name')
@@ -2761,9 +2829,13 @@ def register():
         company = request.form.get('company')
         phone = request.form.get('phone')
         profile_role = request.form.get('profile_role')
-        wants_broker = (profile_role or '').strip().lower() == 'broker'
+        wants_broker = (
+            (profile_role or '').strip().lower() == 'broker'
+            or request.form.get('broker_signup') == '1'
+        )
         if wants_broker:
             profile_role = 'buyer'
+        broker_path = (request.form.get('broker_path') or 'main').strip().lower()
         profile_city = (request.form.get('profile_city') or '').strip()
         profile_state = (request.form.get('profile_state') or '').strip()
         profile_location = (request.form.get('profile_location') or '').strip()
@@ -2772,6 +2844,13 @@ def register():
 
         if not email or not password:
             flash('Email and password are required', 'error')
+            return _register_page(
+                broker_open=wants_broker,
+                broker_path=broker_path,
+                team_id=request.form.get('team_id') or '',
+                broker_specialties=request.form.get('broker_specialties') or '',
+                broker_years=request.form.get('broker_years') or '',
+            )
         elif get_user_by_email(email):
             flash('Email already registered', 'error')
         else:
@@ -2781,12 +2860,30 @@ def register():
                 user_id_int = cast(int, user_id)
                 if wants_broker:
                     _save_broker_application_details(user_id_int, request.form)
+                    db_module.set_broker_application(user_id_int, 'pending')
                 session['user_id'] = user_id_int
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
-                if wants_broker:
-                    db_module.set_broker_application(user_id_int, 'pending')
-                    flash('Account created. Finish broker access in checkout.', 'success')
+                if wants_broker and broker_path == 'assign':
+                    try:
+                        team_id = int(request.form.get('team_id') or 0)
+                    except (TypeError, ValueError):
+                        team_id = 0
+                    if team_id:
+                        db_module.request_team_join(team_id, user_id_int)
+                    flash('Account created. Assigning to a team is free. The main company account has to approve you.', 'success')
+                    resp = redirect(url_for('dashboard'))
+                elif wants_broker:
+                    name = (company or '').strip() or ' '.join(part for part in (first_name, last_name) if part)
+                    if name and profile_city and profile_state:
+                        place = sections_module.resolve_place(f'{profile_city}, {profile_state}', country='US')
+                        db_module.create_broker_team(
+                            user_id_int, name, profile_city, profile_state,
+                            latitude=(place or {}).get('lat'),
+                            longitude=(place or {}).get('lon'),
+                            active=False,
+                        )
+                    flash('Account created. The main brokerage is the only account that pays.', 'success')
                     resp = redirect(_broker_payment_link({'id': user_id_int, 'email': email}))
                 else:
                     flash('Account created successfully!', 'success')
@@ -2795,7 +2892,7 @@ def register():
                 return resp
             else:
                 flash('Error creating account', 'error')
-    return render_template('auth/register.html')
+    return _register_page()
 
 
 def _csrf_token() -> str:
@@ -3289,24 +3386,31 @@ def api_auth_logout():
     return resp, 200
 
 
+def _cancel_user_billing(user_id):
+    """Stop Stripe subscriptions for an account before it is deleted."""
+    if not _stripe_configured():
+        return
+    for subscription_id in db_module.listing_subscription_ids(user_id):
+        try:
+            stripe.Subscription.delete(subscription_id)
+        except Exception:
+            logger.exception('Could not cancel listing subscription %s', subscription_id)
+    for subscription in db_module.get_user_subscriptions(user_id):
+        subscription_id = subscription.get('stripe_subscription_id')
+        if not subscription_id:
+            continue
+        try:
+            stripe.Subscription.delete(subscription_id)
+        except Exception:
+            logger.exception('Could not cancel Stripe subscription %s', subscription_id)
+
+
 @app.route('/api/account', methods=['DELETE'])
 @require_auth
 def api_account_delete():
     """Delete the signed-in account, its listings, and its session."""
     user = request.current_user  # type: ignore[attr-defined]
-    if _stripe_configured():
-        for subscription_id in db_module.listing_subscription_ids(user['id']):
-            try:
-                stripe.Subscription.delete(subscription_id)
-            except Exception:
-                logger.exception('Could not cancel listing subscription %s', subscription_id)
-    for subscription in db_module.get_user_subscriptions(user['id']):
-        subscription_id = subscription.get('stripe_subscription_id')
-        if subscription_id and _stripe_configured():
-            try:
-                stripe.Subscription.delete(subscription_id)
-            except Exception:
-                logger.exception('Could not cancel Stripe subscription %s', subscription_id)
+    _cancel_user_billing(user['id'])
     if not db_module.delete_user_account(user['id']):
         return jsonify({'error': 'not_found'}), 404
     session.clear()
@@ -3540,6 +3644,7 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
         customer_id=_stripe_field(sess, 'customer'),
         subscription_id=_stripe_field(sess, 'subscription'),
     )
+    db_module.ensure_main_brokerage(user_id)
     return True
 
 
@@ -3555,6 +3660,65 @@ def api_broker_checkout():
         return jsonify({'already': True}), 200
     db_module.set_broker_application(user['id'], 'pending')
     return jsonify({'url': _broker_payment_link(user)}), 200
+
+
+@app.route('/api/account/broker-application', methods=['POST'])
+@require_auth
+def api_broker_application():
+    """Ask to be the main brokerage, or ask a paid brokerage to add you. Neither makes you a broker."""
+    user = request.current_user  # type: ignore[attr-defined]
+    data = request.get_json(silent=True) or {}
+    kind = (data.get('kind') or '').strip().lower()
+    if db_module.user_on_active_team(user['id']):
+        return jsonify({'already': True}), 200
+    if kind == 'assign':
+        try:
+            team_id = int(data.get('team_id') or 0)
+        except (TypeError, ValueError):
+            team_id = 0
+        status = db_module.request_team_join(team_id, user['id']) if team_id else None
+        if not status:
+            return jsonify({'error': 'not_found', 'message': 'Choose a brokerage.'}), 404
+        db_module.set_broker_application(user['id'], 'pending')
+        team = db_module.get_broker_team(team_id) or {}
+        leader = get_user_by_id(team.get('admin_user_id')) if team.get('admin_user_id') else None
+        applicant = ' '.join(part for part in [user.get('first_name'), user.get('last_name')] if part) or user.get('email')
+        if leader and status == 'pending':
+            db_module.notify_user(
+                leader['id'], 'team', 'A broker wants to join your brokerage',
+                f'{applicant} asked to be assigned to {team.get("name") or "your brokerage"}.',
+                '/dashboard', leader.get('email'),
+            )
+        return jsonify({'ok': True, 'status': status, 'broker': False}), 200
+    name = (data.get('name') or user.get('company') or '').strip()
+    city = (data.get('city') or '').strip()
+    state = (data.get('state') or '').strip()
+    current = db_module.team_membership(user['id'])
+    if current and not current.get('is_admin'):
+        return jsonify({'error': 'already_on_team', 'message': 'You already asked to join a brokerage.'}), 400
+    if not (current and current.get('is_admin')):
+        if name and city and state:
+            place = sections_module.resolve_place(f'{city}, {state}', country='US')
+            db_module.create_broker_team(
+                user['id'], name, city, state,
+                latitude=(place or {}).get('lat'),
+                longitude=(place or {}).get('lon'),
+                logo_url=user.get('company_logo_url'),
+                active=False,
+            )
+    fields = {}
+    if name:
+        fields['company'] = name
+    if data.get('broker_specialties'):
+        fields['broker_specialties'] = data.get('broker_specialties')
+    if data.get('broker_years') not in (None, ''):
+        fields['broker_years'] = data.get('broker_years')
+    if city or state:
+        fields['profile_location'] = ', '.join(part for part in (city, state) if part)
+    if fields:
+        db_module.update_user_profile(user['id'], fields)
+    db_module.set_broker_application(user['id'], 'pending')
+    return jsonify({'url': _broker_payment_link(user), 'broker': False}), 200
 
 
 @app.route('/api/account/broker-confirm', methods=['POST'])
@@ -6206,6 +6370,8 @@ def api_listings_me():
         media_by_listing = db_module.list_media_for_listings(listing_ids)
         out = []
         for row in rows:
+            if row.get('status') in ('archived', 'deleted'):
+                continue
             combined = _row_to_combined_listing(row, aircraft_map)
             media = media_by_listing.get(int(row.get('id') or 0), [])
             # cover_image = first photo URL (lazy-load gallery on detail page)
@@ -7695,6 +7861,8 @@ def api_my_listings():
         aircraft_map = {a.get('id'): a for a in aircraft_data}
         out = []
         for row in rows:
+            if row.get('status') in ('archived', 'deleted'):
+                continue
             combined = _row_to_combined_listing(row, aircraft_map)
             if combined:
                 combined['status'] = row.get('status')
@@ -7855,6 +8023,10 @@ def api_admin_listings():
         rows = db_module.admin_list_user_listings(status=status_filter)
         aircraft_data = get_unified_aircraft_data()
         aircraft_map = {a.get('id'): a for a in aircraft_data}
+        media_map = db_module.list_media_for_listings(
+            [int(row['id']) for row in rows if row.get('id')],
+            include_unpublished=True,
+        )
         out = []
         for row in rows:
             combined = _row_to_combined_listing(row, aircraft_map) or {}
@@ -7880,6 +8052,7 @@ def api_admin_listings():
                 'manufacturer': combined.get('manufacturer'),
                 'category': combined.get('category'),
                 'image': combined.get('image'),
+                'photos': _admin_listing_photos(row, media_map.get(int(row['id']), []) if row.get('id') else []),
                 'owner': {
                     'id': owner['id'], 'email': owner['email'],
                     'first_name': owner.get('first_name'), 'last_name': owner.get('last_name'),
@@ -7901,6 +8074,68 @@ def api_admin_users():
     except Exception:
         logger.exception('api_admin_users failed')
         return jsonify({'error': 'server_error'}), 500
+
+
+def _admin_user_listings(user_id):
+    rows = []
+    for row in db_module.get_listings_by_user_id(user_id):
+        rows.append({
+            'id': row.get('id'),
+            'title': row.get('title'),
+            'status': row.get('status'),
+            'price': row.get('price'),
+            'location': row.get('location'),
+            'market': row.get('market'),
+            'payment_status': row.get('payment_status'),
+        })
+    return rows
+
+
+@app.route('/api/admin/users/<int:user_id>', methods=['GET', 'DELETE'])
+@require_admin
+def api_admin_user_account(user_id):
+    """Open one account, or delete it. Admin accounts stay."""
+    admin = request.current_user  # type: ignore[attr-defined]
+    person = get_user_by_id(user_id)
+    if not person:
+        return jsonify({'error': 'not_found'}), 404
+    if request.method == 'DELETE':
+        if person.get('is_admin') or person.get('id') == admin.get('id'):
+            return jsonify({
+                'error': 'forbidden',
+                'message': 'An admin account cannot be deleted here.',
+            }), 403
+        _cancel_user_billing(user_id)
+        if not db_module.delete_user_account(user_id):
+            return jsonify({'error': 'not_found'}), 404
+        return jsonify({'ok': True})
+    return jsonify({
+        'user': _user_public_dict(person),
+        'listings': _admin_user_listings(user_id),
+    })
+
+
+@app.route('/api/admin/users/<int:user_id>/message', methods=['POST'])
+@require_admin
+def api_admin_user_message(user_id):
+    """Send a note the person sees in Alerts."""
+    person = get_user_by_id(user_id)
+    if not person:
+        return jsonify({'error': 'not_found'}), 404
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message') or '').strip()
+    if not message:
+        return jsonify({'error': 'message_required', 'message': 'Write a message first.'}), 400
+    message = message[:4000]
+    db_module.notify_user(
+        user_id,
+        'account',
+        'Message from JetSchool',
+        message,
+        '/dashboard#alerts',
+        person.get('email'),
+    )
+    return jsonify({'ok': True})
 
 
 @app.route('/api/admin/approvals')
@@ -7931,12 +8166,29 @@ def api_admin_brokerages():
     })
 
 
+@app.route('/api/admin/brokers')
+@require_admin
+def api_admin_brokers():
+    """Brokers on a paid account. Applying does not put someone on this list."""
+    return jsonify({'brokers': db_module.list_directory_brokers()})
+
+
 @app.route('/api/admin/brokers/<int:user_id>/approve', methods=['POST'])
 @require_admin
 def api_admin_approve_broker(user_id):
     person = get_user_by_id(user_id)
     if not person:
         return jsonify({'error': 'not_found'}), 404
+    paid = (
+        has_active_subscription(user_id, 'broker')
+        or has_active_subscription(user_id, 'broker_team')
+        or bool(db_module.user_on_active_team(user_id))
+    )
+    if not paid:
+        return jsonify({
+            'error': 'payment_required',
+            'message': 'A person is a broker when a main account has paid and adds them.',
+        }), 402
     _grant_broker_account(user_id)
     db_module.notify_user(
         user_id, 'broker', 'Broker access is approved',
@@ -7965,6 +8217,11 @@ def api_admin_approve_brokerage(team_id):
     team = db_module.get_broker_team(team_id)
     if not team:
         return jsonify({'error': 'not_found'}), 404
+    if team.get('subscription_status') != 'active':
+        return jsonify({
+            'error': 'payment_required',
+            'message': 'The main account pays before this brokerage is active.',
+        }), 402
     db_module.set_team_subscription(team_id, 'active')
     _grant_broker_account(team['admin_user_id'], subscription_type='broker_team')
     leader = get_user_by_id(team['admin_user_id'])
@@ -8002,6 +8259,14 @@ def api_admin_brokerage_leader(team_id):
 @app.route('/api/admin/brokerages/<int:team_id>/members/<int:member_id>/approve', methods=['POST'])
 @require_admin
 def api_admin_approve_member(team_id, member_id):
+    team = db_module.get_broker_team(team_id)
+    if not team:
+        return jsonify({'error': 'not_found'}), 404
+    if team.get('subscription_status') != 'active':
+        return jsonify({
+            'error': 'payment_required',
+            'message': 'The main account pays before someone can be added.',
+        }), 402
     if not db_module.admin_allow_team_member(team_id, member_id):
         return jsonify({'error': 'not_found'}), 404
     db_module.update_user_profile(member_id, {'profile_role': 'broker'})
@@ -8044,6 +8309,68 @@ def _money(value):
     if number <= 0:
         return None
     return number
+
+
+def _safe_photo_url(url) -> str:
+    value = str(url or '').strip()
+    if value.startswith('/') and not value.startswith('//'):
+        return value
+    if value.startswith('https://') or value.startswith('http://'):
+        return value
+    return ''
+
+
+def _admin_listing_photos(row, media_rows=None) -> list[dict]:
+    """Photos an admin should see before approving, in the seller's order."""
+    pending = db_module.parse_listing_pending(row.get('pending_changes')) or {}
+    removed = set()
+    for item in pending.get('media_remove') or []:
+        try:
+            removed.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    order = []
+    for item in pending.get('media_order') or []:
+        try:
+            media_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if media_id not in order:
+            order.append(media_id)
+    if media_rows is None and row.get('id'):
+        media_rows = db_module.list_listing_media(int(row['id']), include_unpublished=True)
+    photos_media = [item for item in (media_rows or []) if item.get('media_type') == 'photo']
+    by_id = {}
+    for item in photos_media:
+        try:
+            by_id[int(item['id'])] = item
+        except (TypeError, ValueError, KeyError):
+            continue
+    ordered = [by_id[media_id] for media_id in order if media_id in by_id]
+    seen = set(order)
+    ordered.extend(item for key, item in by_id.items() if key not in seen)
+    photos = []
+    for item in ordered:
+        url = _safe_photo_url(item.get('url') or item.get('thumbnail_url'))
+        if not url:
+            continue
+        media_id = int(item['id'])
+        label = ''
+        if media_id in removed:
+            label = 'Removing'
+        elif item.get('published') is False:
+            label = 'New'
+        photos.append({'url': url, 'label': label})
+    if photos:
+        return photos
+    extra = row.get('images') or ''
+    if isinstance(extra, str):
+        extra = [part.strip() for part in extra.split(',') if part.strip()]
+    for url in extra:
+        safe = _safe_photo_url(url)
+        if safe:
+            photos.append({'url': safe, 'label': ''})
+    return photos
 
 
 def _admin_listing_review(row):
@@ -8108,6 +8435,7 @@ def _admin_listing_review(row):
             'payment_status': row.get('payment_status'),
             'currently_live': ', '.join(live_bits),
             'image': row.get('images'),
+            'photos': _admin_listing_photos(row),
         },
         'aircraft_data': {
             'manufacturer': profile.get('manufacturer'),
@@ -8139,7 +8467,7 @@ def admin_listing_review(listing_id):
 @app.route('/api/admin/listings/<int:listing_id>/message', methods=['POST'])
 @require_admin
 def admin_listing_message(listing_id):
-    """Keep the listing pending and tell the seller what to fix."""
+    """Tell the seller what to fix. A live listing stays up. Anything else goes back to the seller to resubmit."""
     admin = request.current_user  # type: ignore[attr-defined]
     data = request.get_json(silent=True) or {}
     message = str(data.get('message') or '').strip()

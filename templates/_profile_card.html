@@ -208,8 +208,8 @@
             {% if user.broker_bio %}
             <p class="identity__bio">{{ user.broker_bio }}</p>
             {% endif %}
-            {% if is_owner and user.broker_application_status == 'pending' %}
-            <p class="identity__line">Broker application is waiting for approval.</p>
+            {% if is_owner and user.broker_application_status == 'pending' and membership and not membership.is_admin and membership.membership_status == 'pending' %}
+            <p class="identity__line">The main company account has to approve you.</p>
             {% endif %}
             {% if is_owner %}
             <button type="button" class="identity__edit-btn" id="open-profile-edit">Edit</button>
@@ -229,9 +229,12 @@
                 <label style="grid-column: 1 / -1;">Bio<textarea class="form-control" name="broker_bio" maxlength="1000" rows="4">{{ user.broker_bio or '' }}</textarea></label>
                 <label>Role
                     <select class="form-select" name="profile_role">
-                        {% for role in ['buyer', 'seller', 'broker', 'mechanic', 'charter_operator', 'other'] %}
+                        {% for role in ['buyer', 'seller', 'mechanic', 'charter_operator', 'other'] %}
                         <option value="{{ role }}" {% if (user.profile_role or 'other') == role %}selected{% endif %}>{{ role|replace('_', ' ')|title }}</option>
                         {% endfor %}
+                        {% if (user.profile_role or '') == 'broker' %}
+                        <option value="broker" selected>Broker</option>
+                        {% endif %}
                     </select>
                 </label>
             </div>
@@ -248,41 +251,68 @@
                 <button type="button" class="dash__btn" id="delete-account" style="border:1px solid #ef4444; color:#ef4444; background:transparent; cursor:pointer;">Delete account</button>
                 <span id="profile-save-status" style="margin-left:0.75rem; color:#8e8e93;"></span>
             </div>
-            {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
-            <div>
-                {% if on_team %}
-                <p class="identity__line">Brokerage {{ membership.name }}{% if membership.is_admin %} · Admin{% endif %}</p>
-                {% if membership.is_admin and pending_members %}
+        </form>
+        {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
+        <div style="margin-top:1rem;">
+                {% if on_team and membership.is_admin %}
+                <p class="identity__line">{{ membership.name }} is paid. People you add are on this subscription. They keep their own listings, and those listings also show here.</p>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                    <input class="form-control" id="team-member-email" type="email" placeholder="Email of the person to add" style="max-width:280px;">
+                    <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add to the team</button>
+                </div>
+                {% if team_people %}
+                <p class="identity__line">Meet our team</p>
+                <ul style="list-style:none; padding:0; margin:0.2rem 0 0.6rem;">
+                    {% for person in team_people %}
+                    <li style="margin-bottom:0.3rem;"><a href="/people/{{ person.user_id }}" style="color:#fff;">{{ person.name }}</a>{% if person.is_admin %} · Main{% endif %}{% if person.specialties %} · {{ person.specialties }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if pending_members %}
                 <ul id="pending-members" style="list-style:none; padding:0; margin:0.4rem 0 0;">
                     {% for member in pending_members %}
                     <li style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.4rem; color:#fff;">
-                        <span>{{ member.first_name or 'Broker' }} {{ member.last_name or '' }}</span>
-                        <button type="button" class="dash__btn dash__btn--primary allow-member" data-user="{{ member.user_id }}" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Allow</button>
+                        <span>{{ member.first_name or 'Broker' }} {{ member.last_name or '' }} asked to be assigned</span>
+                        <button type="button" class="dash__btn dash__btn--primary allow-member" data-user="{{ member.user_id }}" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add</button>
                     </li>
                     {% endfor %}
                 </ul>
                 {% endif %}
+                {% elif on_team %}
+                <p class="identity__line">You are on {{ membership.name }}. Your listings stay on this account, and they also show on the brokerage.</p>
                 {% elif membership and membership.is_admin %}
-                <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
-                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Broker · $19.99/month</a>
+                <p class="identity__line">You are the main account. The main brokerage is the only account that has to pay. Pay $19.99 a month, then you can add your team.</p>
+                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
                 {% elif membership and membership.membership_status == 'pending' %}
-                <p class="identity__line">Request pending with {{ membership.name }}.</p>
+                <p class="identity__line">{{ membership.name }} has not added you yet. Assigning to a team is free. You are not a broker until the main company account approves you.</p>
                 {% else %}
-                <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
-                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Broker · $19.99/month</a>
-                {% if teams %}
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                    <select class="form-select" id="join-team" style="max-width:280px;">
-                        {% for team in teams %}
-                        <option value="{{ team.id }}">{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
-                        {% endfor %}
-                    </select>
-                    <button type="button" class="dash__btn dash__btn--secondary" id="request-join" style="border:0; cursor:pointer;">Request to join</button>
+                <p class="identity__line">Sign up as a broker. The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.</p>
+                <label style="color:#fff; display:block; margin:0.4rem 0;"><input type="radio" name="broker-path" value="main" checked> I am the main brokerage</label>
+                <p class="identity__line">Only this account pays $19.99 a month.</p>
+                <label style="color:#fff; display:block; margin:0.4rem 0 0.7rem;"><input type="radio" name="broker-path" value="assign"> Assign me to a team</label>
+                <p class="identity__line">Free. The main company account has to approve you.</p>
+                <div id="broker-main-fields" style="display:grid; gap:0.45rem; max-width:360px;">
+                    <input class="form-control" id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}">
+                    <input class="form-control" id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}">
+                    <input class="form-control" id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}">
+                    <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
+                </div>
+                <div id="broker-assign-fields" hidden>
+                    {% if teams %}
+                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                        <select class="form-select" id="join-team" style="max-width:280px;">
+                            {% for team in teams %}
+                            <option value="{{ team.id }}">{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" class="dash__btn dash__btn--secondary" id="request-join" style="border:0; cursor:pointer;">Assign me to this team</button>
+                    </div>
+                    {% else %}
+                    <p class="identity__line">No paid brokerage is on the map yet.</p>
+                    {% endif %}
                 </div>
                 {% endif %}
-                {% endif %}
-            </div>
-        </form>
+        </div>
         {% endif %}
     </div>
 </article>
@@ -430,19 +460,63 @@ document.getElementById('broker-note').addEventListener('submit', async function
             window.location.href = '/';
         });
     }
+    document.querySelectorAll('input[name="broker-path"]').forEach(function (input) {
+        input.addEventListener('change', function () {
+            const main = document.getElementById('broker-main-fields');
+            const assign = document.getElementById('broker-assign-fields');
+            if (main) main.hidden = input.value !== 'main' || !input.checked;
+            if (assign) assign.hidden = input.value !== 'assign' || !input.checked;
+        });
+    });
     const becomeBroker = document.getElementById('become-broker');
-    if (becomeBroker) becomeBroker.addEventListener('click', function (event) {
+    if (becomeBroker) becomeBroker.addEventListener('click', async function (event) {
         event.preventDefault();
-        startBrokerCheckout(document.getElementById('profile-save-status'));
+        const status = document.getElementById('profile-save-status');
+        const response = await fetch('/api/account/broker-application', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'main',
+                name: (document.getElementById('brokerage-name') || {}).value || '',
+                city: (document.getElementById('brokerage-city') || {}).value || '',
+                state: (document.getElementById('brokerage-state') || {}).value || '',
+            }),
+        });
+        const data = await response.json().catch(function () { return {}; });
+        if (data.url) { window.location = data.url; return; }
+        startBrokerCheckout(status);
     });
     const requestJoin = document.getElementById('request-join');
     if (requestJoin) {
         requestJoin.addEventListener('click', async function () {
             const status = document.getElementById('profile-save-status');
             const teamId = document.getElementById('join-team').value;
-            const resp = await fetch('/api/broker-teams/' + teamId + '/join', { method: 'POST', credentials: 'include' });
+            const resp = await fetch('/api/account/broker-application', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'assign', team_id: Number(teamId) }),
+            });
             const data = await resp.json().catch(function () { return {}; });
-            status.textContent = resp.ok ? 'Request sent.' : (data.message || 'Could not send the request.');
+            status.textContent = resp.ok ? 'Asked. You are not a broker until they add you.' : (data.message || 'Could not send the request.');
+            if (resp.ok) setTimeout(function () { window.location.reload(); }, 700);
+        });
+    }
+    const addMember = document.getElementById('add-team-member');
+    if (addMember) {
+        addMember.addEventListener('click', async function () {
+            const status = document.getElementById('profile-save-status');
+            const email = document.getElementById('team-member-email').value.trim();
+            if (!email) { if (status) status.textContent = 'Enter their email.'; return; }
+            const resp = await fetch('/api/broker-teams/' + addMember.getAttribute('data-team') + '/members', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email }),
+            });
+            const data = await resp.json().catch(function () { return {}; });
+            if (status) status.textContent = resp.ok ? 'Added. They have their own listings, and those listings show here.' : (data.message || 'Could not add that person.');
             if (resp.ok) setTimeout(function () { window.location.reload(); }, 500);
         });
     }

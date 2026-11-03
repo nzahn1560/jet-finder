@@ -46,6 +46,12 @@
     .review textarea { width: 100%; min-height: 120px; margin-top: 0.5rem; background: #111; color: #fff; border: 1px solid #444; padding: 0.75rem; font-size: 1.1rem; font-family: inherit; }
     .review label { display: block; margin-top: 1.25rem; font-size: 1.15rem; }
     .review__actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
+    .review__photos, .ap__photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.55rem; margin: 0.75rem 0; }
+    .ap__photos { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); max-width: 640px; }
+    .review__photos a, .ap__photos a { position: relative; display: block; background: #111; }
+    .review__photos img, .ap__photos img { width: 100%; height: 160px; object-fit: cover; display: block; }
+    .ap__photos img { height: 92px; }
+    .review__photos span, .ap__photos span { position: absolute; left: 0.35rem; top: 0.35rem; background: #F05545; color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 0.1rem 0.4rem; }
     @media (max-width: 860px) { .review__grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -63,7 +69,7 @@
         <div class="ap__tabs">
             <button class="ap__tab active" data-tab="listings">Listings</button>
             <button class="ap__tab" data-tab="approvals">Approvals</button>
-            <button class="ap__tab" data-tab="brokerages">Brokerages</button>
+            <button class="ap__tab" data-tab="brokers">Brokers</button>
             <button class="ap__tab" data-tab="users">Users</button>
             <button class="ap__tab" data-tab="alerts" id="alerts-tab">Alerts</button>
         </div>
@@ -87,8 +93,8 @@
         <div id="tab-approvals" style="display:none;">
             <div id="approvals-list"></div>
         </div>
-        <div id="tab-brokerages" style="display:none;">
-            <div id="brokerages-list"></div>
+        <div id="tab-brokers" style="display:none;">
+            <div id="brokers-list"></div>
         </div>
         <div id="tab-users" style="display:none;">
             <div id="users-list"></div>
@@ -96,6 +102,24 @@
         <div id="tab-alerts" style="display:none;">
             <div id="alerts-list"></div>
         </div>
+    </div>
+</div>
+
+<div id="account-screen" hidden>
+    <div class="review">
+        <div class="review__top">
+            <h2 id="account-heading">Account</h2>
+            <button type="button" class="ap__btn ap__btn--secondary" id="account-close">Close</button>
+        </div>
+        <section class="review__panel" id="account-body"></section>
+        <label for="account-message">Message this person. It shows in their alerts.</label>
+        <textarea id="account-message" maxlength="4000" placeholder="Write the message"></textarea>
+        <div class="review__actions">
+            <button type="button" class="ap__btn ap__btn--approve" id="account-send">Send message</button>
+            <a class="ap__btn ap__btn--secondary" id="account-profile" href="/people/0">Open public profile</a>
+            <button type="button" class="ap__btn ap__btn--reject" id="account-delete">Delete account</button>
+        </div>
+        <p id="account-status"></p>
     </div>
 </div>
 
@@ -109,7 +133,7 @@
             <section class="review__panel" id="review-listing"></section>
             <section class="review__panel" id="review-data"></section>
         </div>
-        <label for="review-message">Message to the seller. Approval stays pending.</label>
+        <label for="review-message">Message to the seller. They can edit and send it back. A live listing stays up.</label>
         <textarea id="review-message" placeholder="What they need to fix"></textarea>
         <div class="review__actions">
             <button type="button" class="ap__btn ap__btn--secondary" id="review-send">Send message</button>
@@ -146,6 +170,19 @@ function paymentMark(listing) {
     };
     if (named[listing.payment_status]) return { label: named[listing.payment_status], color: '#fbbf24', paid: 'other' };
     return { label: 'Not paid', color: '#ef4444', paid: 'unpaid' };
+}
+
+function photoStrip(photos, large) {
+    const items = Array.isArray(photos) ? photos : [];
+    if (!items.length) {
+        return large ? '<p>No photos on this listing.</p>' : '';
+    }
+    return '<div class="' + (large ? 'review__photos' : 'ap__photos') + '">' + items.map(function (photo) {
+        const url = String(photo && photo.url || '');
+        if (!/^https?:\/\//.test(url) && url.charAt(0) !== '/') return '';
+        const label = photo.label ? '<span>' + esc(photo.label) + '</span>' : '';
+        return '<a href="' + esc(url) + '" target="_blank" rel="noopener"><img src="' + esc(url) + '" alt="Listing photo">' + label + '</a>';
+    }).join('') + '</div>';
 }
 
 function paymentBadge(mark) {
@@ -199,6 +236,7 @@ async function loadAdminListings() {
                 + '      <button class="ap__btn ap__btn--reject"  data-act="delete"  data-id="' + l.id + '">Delete</button>'
                 + '    </div>'
                 + '  </div>'
+                + photoStrip(l.photos, false)
                 + (l.amendment_note ? '<div class="ap__col" style="margin-top:0.5rem;color:#f4f4f4;">' + esc(l.amendment_note) + '</div>' : '')
                 + (l.review_message ? '<div class="ap__col" style="margin-top:0.5rem;color:#fbbf24;">' + esc(l.review_message) + '</div>' : '')
                 + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
@@ -206,6 +244,9 @@ async function loadAdminListings() {
         }).join('');
         target.querySelectorAll('.ap__card').forEach(function (card) {
             card.addEventListener('click', function () { openReview(card.getAttribute('data-id')); });
+        });
+        target.querySelectorAll('.ap__photos a').forEach(function (link) {
+            link.addEventListener('click', function (event) { event.stopPropagation(); });
         });
         target.querySelectorAll('button[data-act]').forEach(function (btn) {
             btn.addEventListener('click', async function (event) {
@@ -271,22 +312,129 @@ async function loadAdminUsers() {
         const users = data.users || [];
         if (!users.length) { target.innerHTML = '<div class="ap__empty">No users.</div>'; return; }
         target.innerHTML = users.map(function (u) {
+            const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email;
             return ''
-                + '<div class="ap__card">'
+                + '<div class="ap__card" data-user="' + u.id + '">'
                 + '  <div class="ap__row">'
                 + '    <div class="ap__col" style="flex:1;min-width:220px;">'
-                + '      <strong>' + esc(u.email) + '</strong> ' + (u.is_admin ? '<span class="ap__badge" style="background:#F0554522;color:#F05545;margin-left:0.5rem;">ADMIN</span>' : '') + '<br>'
-                + '      ' + esc(u.first_name || '') + ' ' + esc(u.last_name || '') + ' &middot; ' + esc(u.company || '—') + '<br>'
-                + '      <span style="color:#8e8e93;font-size:0.85rem;">Role: ' + esc(u.profile_role || 'other') + ' &middot; Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
+                + '      <strong>' + esc(name) + '</strong> ' + (u.is_admin ? '<span class="ap__badge" style="background:#F0554522;color:#F05545;margin-left:0.5rem;">ADMIN</span>' : '') + '<br>'
+                + '      ' + esc(u.email) + (u.phone ? ' · ' + esc(u.phone) : '') + '<br>'
+                + '      <span style="color:#8e8e93;font-size:0.85rem;">Role: ' + esc(u.profile_role || 'other') + ' · Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
+                + '    </div>'
+                + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+                + '      <button class="ap__btn ap__btn--secondary" data-user-view="' + u.id + '">View</button>'
+                + '      <button class="ap__btn ap__btn--approve" data-user-message="' + u.id + '">Message</button>'
+                + (u.is_admin ? '' : '      <button class="ap__btn ap__btn--reject" data-user-delete="' + u.id + '">Delete</button>')
                 + '    </div>'
                 + '  </div>'
                 + '</div>';
         }).join('');
+        target.querySelectorAll('[data-user-view], [data-user-message]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                openAccount(button.getAttribute('data-user-view') || button.getAttribute('data-user-message'), !!button.getAttribute('data-user-message'));
+            });
+        });
+        target.querySelectorAll('[data-user-delete]').forEach(function (button) {
+            button.addEventListener('click', function () { deleteAccount(button.getAttribute('data-user-delete')); });
+        });
     } catch (e) {
         target.innerHTML = '<div class="ap__empty">Failed to load users.</div>';
         console.error(e);
     }
 }
+
+let accountId = null;
+
+function accountLine(label, value) {
+    return '<p><span style="color:#bdbdbd;">' + esc(label) + '</span> ' + esc(value || '—') + '</p>';
+}
+
+async function openAccount(id, focusMessage) {
+    accountId = id;
+    const screen = document.getElementById('account-screen');
+    const body = document.getElementById('account-body');
+    const status = document.getElementById('account-status');
+    status.textContent = '';
+    document.getElementById('account-message').value = '';
+    body.innerHTML = '<p>Loading</p>';
+    screen.hidden = false;
+    const response = await fetch('/api/admin/users/' + id, { credentials: 'include' });
+    if (!response.ok) {
+        body.innerHTML = '<p>Could not open this account.</p>';
+        return;
+    }
+    const data = await response.json();
+    const user = data.user || {};
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email || 'Account';
+    document.getElementById('account-heading').textContent = name;
+    const profile = document.getElementById('account-profile');
+    profile.href = '/people/' + user.id;
+    const remove = document.getElementById('account-delete');
+    remove.hidden = !!user.is_admin;
+    const listings = data.listings || [];
+    const listingText = listings.length
+        ? listings.map(function (listing) {
+            const price = Number(listing.price) ? '$' + Number(listing.price).toLocaleString() : 'Price not set';
+            return '<p>' + esc(listing.title || 'Listing') + ' · ' + esc(listing.status || '') + ' · ' + esc(price) + (listing.location ? ' · ' + esc(listing.location) : '') + '</p>';
+        }).join('')
+        : '<p>No listings.</p>';
+    body.innerHTML = ''
+        + accountLine('Email', user.email)
+        + accountLine('Phone', user.phone)
+        + accountLine('Company', user.company)
+        + accountLine('Role', user.profile_role)
+        + accountLine('Location', user.profile_location)
+        + accountLine('Specialty', user.broker_specialties)
+        + accountLine('Years in business', user.broker_years)
+        + accountLine('Joined', (user.created_at || '').split('T')[0])
+        + (user.broker_bio ? '<p>' + esc(user.broker_bio) + '</p>' : '')
+        + '<p style="color:#bdbdbd;margin-top:0.8rem;">Listings</p>'
+        + listingText;
+    if (focusMessage) document.getElementById('account-message').focus();
+}
+
+async function deleteAccount(id) {
+    if (!confirm('Delete this account? Their listings leave the site.')) return;
+    const response = await fetch('/api/admin/users/' + id, { method: 'DELETE', credentials: 'include' });
+    const body = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+        alert(body.message || 'Could not delete this account.');
+        return;
+    }
+    document.getElementById('account-screen').hidden = true;
+    accountId = null;
+    loadAdminUsers();
+}
+
+document.getElementById('account-close').addEventListener('click', function () {
+    document.getElementById('account-screen').hidden = true;
+    accountId = null;
+});
+document.getElementById('account-send').addEventListener('click', async function () {
+    if (!accountId) return;
+    const status = document.getElementById('account-status');
+    const message = document.getElementById('account-message').value.trim();
+    if (!message) {
+        status.textContent = 'Write a message first.';
+        return;
+    }
+    const response = await fetch('/api/admin/users/' + accountId + '/message', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message }),
+    });
+    const body = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+        status.textContent = body.message || 'Message was not sent.';
+        return;
+    }
+    document.getElementById('account-message').value = '';
+    status.textContent = 'Sent. They will see it in Alerts.';
+});
+document.getElementById('account-delete').addEventListener('click', function () {
+    if (accountId) deleteAccount(accountId);
+});
 
 document.querySelectorAll('.ap__tab').forEach(function (t) {
     t.addEventListener('click', function () {
@@ -295,12 +443,12 @@ document.querySelectorAll('.ap__tab').forEach(function (t) {
         const tab = t.getAttribute('data-tab');
         document.getElementById('tab-listings').style.display = (tab === 'listings') ? '' : 'none';
         document.getElementById('tab-approvals').style.display = (tab === 'approvals') ? '' : 'none';
-        document.getElementById('tab-brokerages').style.display = (tab === 'brokerages') ? '' : 'none';
+        document.getElementById('tab-brokers').style.display = (tab === 'brokers') ? '' : 'none';
         document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
         document.getElementById('tab-alerts').style.display = (tab === 'alerts') ? '' : 'none';
         if (tab === 'users') loadAdminUsers();
         if (tab === 'approvals') loadApprovals();
-        if (tab === 'brokerages') loadBrokerages();
+        if (tab === 'brokers') loadAdminBrokers();
         if (tab === 'alerts') loadAdminAlerts();
     });
 });
@@ -376,6 +524,7 @@ async function openReview(id) {
     document.getElementById('review-heading').textContent = ask.title || 'Listing';
     document.getElementById('review-message').value = ask.review_message || '';
     listing.innerHTML = ''
+        + photoStrip(ask.photos, true)
         + '<p style="color:' + pay.color + ';font-size:1.45rem;font-weight:800;margin-bottom:0.6rem;">Stripe: ' + esc(pay.label) + '</p>'
         + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">This listing</p>'
         + '<h2>' + esc(ask.title || '') + '</h2>'
@@ -438,9 +587,7 @@ document.getElementById('review-send').addEventListener('click', async function 
     }
     status.textContent = body.kept_live
         ? 'The seller has the message. The live listing is unchanged.'
-        : (body.emailed
-        ? 'Approval stays pending. The seller has the message.'
-        : 'Approval stays pending. The seller will see this on their listings.');
+        : 'Sent back. The seller can edit it and use Resubmit for review. They are not charged again.';
     loadAdminListings();
 });
 document.getElementById('review-approve').addEventListener('click', async function () {
@@ -479,94 +626,35 @@ async function loadApprovals() {
     const data = await response.json();
     const brokers = (data.brokers || []).map(function (person) {
         const name = ((person.first_name || '') + ' ' + (person.last_name || '')).trim() || person.email;
-        const paid = person.stripe_paid ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">Paid</span>' : '<span class="ap__badge" style="background:#ef444422;color:#ef4444;">Not paid</span>';
+        const paid = person.stripe_paid ? 'Paid' : 'Not a broker until a main account pays';
         const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong> ' + paid + '<br>' + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>Broker application</div>'
-            + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + esc(paid) + '</div>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div>';
     }).join('');
-    const brokerages = (data.brokerages || []).map(function (team) {
-        const leader = team.leader ? team.leader.name : 'No leader';
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(team.name) + '</strong> <span class="ap__badge" style="background:#ef444422;color:#ef4444;">Not paid</span><br>Leader ' + esc(leader) + '</div>'
-            + '<button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div></div>';
-    }).join('');
     const members = (data.members || []).map(function (member) {
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' · ' + esc(member.team_name) + '</div>'
-            + '<button class="ap__btn ap__btn--approve" data-approve-member="' + member.team_id + ':' + member.user_id + '">Approve</button></div></div>';
+        return '<div class="ap__card"><div class="ap__col"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' asked to join ' + esc(member.team_name) + '. The main account adds them.</div></div>';
     }).join('');
-    target.innerHTML = (brokers || brokerages || members) ? (brokers + brokerages + members) : '<div class="ap__empty">Nothing is waiting for approval.</div>';
-    target.querySelectorAll('[data-approve-broker]').forEach(function (btn) {
-        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-approve-broker') + '/approve')) loadApprovals(); });
-    });
+    target.innerHTML = (brokers || members) ? (brokers + members) : '<div class="ap__empty">Nothing is waiting.</div>';
     target.querySelectorAll('[data-deny-broker]').forEach(function (btn) {
         btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals(); });
     });
-    target.querySelectorAll('[data-approve-team]').forEach(function (btn) {
-        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokerages/' + btn.getAttribute('data-approve-team') + '/approve')) loadApprovals(); });
-    });
-    target.querySelectorAll('[data-approve-member]').forEach(function (btn) {
-        btn.addEventListener('click', async function () {
-            const parts = btn.getAttribute('data-approve-member').split(':');
-            if (await postAdmin('/api/admin/brokerages/' + parts[0] + '/members/' + parts[1] + '/approve')) loadApprovals();
-        });
-    });
 }
 
-async function loadBrokerages() {
-    const target = document.getElementById('brokerages-list');
+async function loadAdminBrokers() {
+    const target = document.getElementById('brokers-list');
     target.innerHTML = '<div class="ap__empty">Loading...</div>';
-    const response = await fetch('/api/admin/brokerages', { credentials: 'include' });
+    const response = await fetch('/api/admin/brokers', { credentials: 'include' });
     if (!response.ok) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
     const data = await response.json();
-    const categories = data.categories || [];
-    const teams = data.brokerages || [];
-    if (!teams.length) { target.innerHTML = '<div class="ap__empty">No brokerages yet.</div>'; return; }
-    target.innerHTML = teams.map(function (team) {
-        const options = [''].concat(categories).map(function (category) {
-            return '<option value="' + esc(category) + '"' + (team.category === category ? ' selected' : '') + '>' + esc(category || 'Category') + '</option>';
-        }).join('');
-        const members = (team.members || []).map(function (member) {
-            const name = ((member.first_name || '') + ' ' + (member.last_name || '')).trim() || member.email;
-            const leader = member.is_admin ? ' · Leader' : '';
-            return '<div style="display:flex; gap:0.6rem; align-items:center; margin-top:0.45rem;"><span>' + esc(name) + esc(leader) + ' · ' + esc(member.status) + '</span>'
-                + (member.is_admin ? '' : '<button class="ap__btn ap__btn--secondary" data-leader="' + team.id + ':' + member.user_id + '">Make leader</button>')
-                + (member.status === 'pending' ? '<button class="ap__btn ap__btn--approve" data-approve-member="' + team.id + ':' + member.user_id + '">Approve</button>' : '')
-                + '</div>';
-        }).join('');
-        return '<div class="ap__card"><strong style="color:#fff; font-size:1.2rem;">' + esc(team.name) + '</strong>'
-            + '<div class="ap__col">Leader ' + esc(team.leader ? team.leader.name : '—') + ' · ' + (team.subscription_status === 'active' ? 'Paid' : 'Not paid') + '</div>'
-            + '<div style="margin-top:0.6rem;"><select data-category="' + team.id + '">' + options + '</select></div>'
-            + members
-            + (team.subscription_status === 'active' ? '' : '<div style="margin-top:0.7rem;"><button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div>')
-            + '</div>';
+    const brokers = data.brokers || [];
+    if (!brokers.length) { target.innerHTML = '<div class="ap__empty">No brokers yet. A person appears here after a main account pays and adds them.</div>'; return; }
+    target.innerHTML = brokers.map(function (broker) {
+        const place = [broker.team_name, broker.place].filter(Boolean).join(' · ');
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;">'
+            + '<strong>' + esc(broker.name) + '</strong> ' + (broker.is_main ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">MAIN</span>' : '<span class="ap__badge">TEAM</span>')
+            + '<br>' + esc(broker.email) + (place ? '<br>' + esc(place) : '')
+            + '</div><a class="ap__btn ap__btn--secondary" href="/people/' + broker.id + '">View</a></div></div>';
     }).join('');
-    target.querySelectorAll('[data-category]').forEach(function (select) {
-        select.addEventListener('change', async function () {
-            await fetch('/api/admin/brokerages/' + select.getAttribute('data-category') + '/category', {
-                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ category: select.value }),
-            });
-        });
-    });
-    target.querySelectorAll('[data-leader]').forEach(function (btn) {
-        btn.addEventListener('click', async function () {
-            const parts = btn.getAttribute('data-leader').split(':');
-            const response = await fetch('/api/admin/brokerages/' + parts[0] + '/leader', {
-                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: Number(parts[1]) }),
-            });
-            if (response.ok) loadBrokerages();
-        });
-    });
-    target.querySelectorAll('[data-approve-member]').forEach(function (btn) {
-        btn.addEventListener('click', async function () {
-            const parts = btn.getAttribute('data-approve-member').split(':');
-            if (await postAdmin('/api/admin/brokerages/' + parts[0] + '/members/' + parts[1] + '/approve')) loadBrokerages();
-        });
-    });
-    target.querySelectorAll('[data-approve-team]').forEach(function (btn) {
-        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokerages/' + btn.getAttribute('data-approve-team') + '/approve')) loadBrokerages(); });
-    });
 }
 
 document.getElementById('status-filter').addEventListener('change', loadAdminListings);
