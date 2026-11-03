@@ -3324,19 +3324,11 @@
         background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
     }
 
-    .listing-metrics-title {
-        margin: 0.35rem 0 0.15rem;
-        color: #f4f4f4;
-        font-size: 0.72rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-    }
-
     .listing-scroll {
         display: flex;
         flex: 1;
         min-height: 0;
-        max-height: 16rem;
+        max-height: calc(5 * 2.35rem + 14px);
         gap: 4px;
     }
 
@@ -6699,11 +6691,10 @@
                             $${(priceValue || 0).toLocaleString()}
                         </div>
                     </div>
-                    <div class="listing-metrics-title">Per dollar</div>
-                    <div class="performance-scores mb-1" id="performance-scores-${index}"></div>
                 </div>
                 <div class="listing-scroll">
                 <div class="aircraft-content" style="padding: 6px 8px 8px;">
+                    <div class="performance-scores mb-1" id="performance-scores-${index}"></div>
                     <div class="spec-bars">
                         ${specRows.map(function (bar) {
                             return scoredBar('stat-box', bar.label, bar.value, bar.pct);
