@@ -477,6 +477,10 @@
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
             const amendment = l.amendment_note ? '<p style="margin:0.4rem 0 0;color:#f4f4f4;font-size:0.85rem;">' + escapeHtml(l.amendment_note) + '</p>' : '';
             const review = l.review_message ? '<p style="margin:0.4rem 0 0;color:#fbbf24;font-size:0.95rem;">' + escapeHtml(l.review_message) + '</p>' : '';
+            const feeRefund = l.payment_status === 'partially_refunded'
+                ? 'Listing fee partly refunded'
+                : ((l.payment_status === 'refunded' || l.payment_status === 'refund_recorded') ? 'Listing fee refunded' : '');
+            const feeNote = feeRefund ? '<p style="margin:0.4rem 0 0;color:#fbbf24;font-weight:700;">' + feeRefund + '</p>' : '';
             const canEdit = l.status !== 'archived' && l.status !== 'deleted';
             const canDelete = l.status !== 'deleted' && l.status !== 'archived';
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
@@ -496,7 +500,7 @@
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
                 + '  <span class="dash__badge" style="color:' + statusColor + ';">' + escapeHtml(copy) + '</span>\n'
-                + rej + amendment + review + '\n'
+                + rej + amendment + review + feeNote + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/?listing=' + encodeURIComponent(l.id)) + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
                 + (!offMarket && l.status === 'unpaid' ? '<a class="dash__card-link" href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01?client_reference_id=' + encodeURIComponent('listing-' + l.id + '-user-{{ user.id }}') + '&prefilled_email=' + encodeURIComponent({{ (user.email or '')|tojson }}) + '" style="color:#fbbf24;">Pay $49.99 per month</a>' : '')

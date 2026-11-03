@@ -176,6 +176,7 @@ function paymentMark(listing) {
     if (listing.payment_status === 'paid') return { label: 'Paid', color: '#22c55e', paid: 'paid' };
     const named = {
         refunded: 'Refunded',
+        refund_recorded: 'Refunded',
         partially_refunded: 'Partly refunded',
         canceled: 'Payment ended',
         disputed: 'Disputed',
@@ -183,6 +184,15 @@ function paymentMark(listing) {
     };
     if (named[listing.payment_status]) return { label: named[listing.payment_status], color: '#fbbf24', paid: 'other' };
     return { label: 'Not paid', color: '#ef4444', paid: 'unpaid' };
+}
+
+function stripeSearchLine(listing) {
+    const off = listing.market === 'off_market' || listing.market === 'broker_only';
+    if (off) return '';
+    const ref = listing.stripe_reference || '';
+    if (!ref) return '';
+    const customer = listing.stripe_customer_id ? ' · customer ' + listing.stripe_customer_id : '';
+    return '<br><span style="color:#c8c8c8;font-size:0.85rem;">Search Stripe for ' + esc(ref) + esc(customer) + '. The customer name is the company typed at checkout.</span>';
 }
 
 function photoStrip(photos, large) {
@@ -235,8 +245,9 @@ async function loadAdminListings() {
                 + ' &middot; ' + esc(l.year || 'year n/a')
                 + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
                 + ' &middot; ' + esc(l.location || '') + '<br>'
-                + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + '</span>'
+                + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + (l.owner && l.owner.company ? ' · ' + esc(l.owner.company) : '') + '</span>'
                 + ' <span style="color:' + pay.color + ';font-weight:700;">Stripe: ' + esc(pay.label) + '</span>'
+                + stripeSearchLine(l)
                 + ((l.market === 'off_market' || l.market === 'broker_only') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
                 + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
@@ -570,6 +581,7 @@ async function openReview(id) {
     listing.innerHTML = ''
         + photoStrip(ask.photos, true)
         + '<p style="color:' + pay.color + ';font-size:1.45rem;font-weight:800;margin-bottom:0.6rem;">Stripe: ' + esc(pay.label) + '</p>'
+        + (ask.stripe_reference ? '<p style="color:#c8c8c8;">Search Stripe for ' + esc(ask.stripe_reference) + (ask.stripe_customer_id ? ' · customer ' + esc(ask.stripe_customer_id) : '') + '. The customer name is the company typed at checkout.</p>' : '')
         + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">This listing</p>'
         + '<h2>' + esc(ask.title || '') + '</h2>'
         + '<div class="ask">' + money(ask.price) + '</div>'

@@ -7079,6 +7079,8 @@ def _stripe_configured() -> bool:
 
 
 _payment_links_restored = False
+_checkouts_reconciled = False
+_refunds_reconciled = False
 
 
 def _restore_payment_links():
@@ -7301,16 +7303,16 @@ def api_stripe_webhook():
         if not _checkout_collected(sess):
             logger.info('Stripe webhook: session %s is not paid yet', session_id)
             return jsonify({'received': True, 'pending': True}), 200
-        if _broker_paid_from_checkout(sess):
-            logger.info('Stripe webhook: broker account activated from session %s', session_id)
-            _email_checkout_receipt(sess)
-            return jsonify({'received': True}), 200
-        listing_id = _record_listing_checkout(sess)
+        outcome = _fulfill_paid_checkout(sess)
         _email_checkout_receipt(sess)
+        if outcome.get('broker'):
+            logger.info('Stripe webhook: broker account activated from session %s', session_id)
+            return jsonify({'received': True}), 200
+        listing_id = outcome.get('listing_id')
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
             row = db_module.get_listing_with_owner(listing_id)
-            if row and row.get('status') == 'pending':
+            if outcome.get('newly_paid') and row and row.get('status') == 'pending':
                 _notify_admins_new_listing(
                     listing_id, row.get('title'), row.get('email'),
                     market=sections_module.normalize_market(row.get('market')),
@@ -7332,6 +7334,7 @@ def api_stripe_webhook():
         _sync_listing_subscription_event(event_type, obj)
         if event_type == 'invoice.paid':
             _activate_listing_from_invoice(obj)
+            _match_invoice_checkout(obj)
             _email_invoice_receipt(obj)
     elif event_type in ('charge.dispute.created', 'charge.dispute.closed'):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
@@ -7474,6 +7477,219 @@ def _checkout_collected(sess) -> bool:
     return status in ('active', 'trialing')
 
 
+def _payment_amount(sess):
+    """Dollars Stripe collected, in cents. A coupon or a blank amount does not match."""
+    for key in ('amount_total', 'amount_subtotal'):
+        try:
+            amount = int(_stripe_field(sess, key))
+        except (TypeError, ValueError):
+            continue
+        if amount:
+            return amount
+    return 0
+
+
+def _payment_email(sess):
+    details = _stripe_field(sess, 'customer_details') or {}
+    email = _stripe_field(details, 'email') or _stripe_field(sess, 'customer_email') or ''
+    return str(email).strip().lower()
+
+
+def _identity_from_payment(sess):
+    """Match a charge that has no listing or broker reference.
+
+    The email has to be the JetSchool account. $49.99 matches only when that
+    account has one open public listing. $19.99 is the broker subscription.
+    Two open listings stay unmatched instead of guessing.
+    """
+    email = _payment_email(sess)
+    user = db_module.get_user_by_email(email) if email else None
+    if not user:
+        return {}
+    amount = _payment_amount(sess)
+    if amount == BROKER_FEE_CENTS:
+        return {'purpose': 'broker_account', 'user_id': str(user['id'])}
+    if amount != _listing_fee_cents():
+        return {}
+    open_rows = []
+    for row in db_module.get_listings_by_user_id(user['id']):
+        if row.get('payment_status') == 'paid':
+            continue
+        if row.get('status') in ('deleted', 'archived'):
+            continue
+        if sections_module.normalize_market(row.get('market')) == 'broker_only':
+            continue
+        open_rows.append(row)
+    if len(open_rows) != 1:
+        return {}
+    return {
+        'purpose': 'listing_fee',
+        'listing_id': str(open_rows[0]['id']),
+        'user_id': str(user['id']),
+    }
+
+
+def _session_carrying(sess, identity):
+    """Copy the paid session and attach the reference the rest of checkout already reads."""
+    fields = {}
+    for key in (
+        'id', 'status', 'payment_status', 'customer', 'subscription', 'payment_intent',
+        'customer_details', 'customer_email', 'amount_total', 'amount_subtotal', 'metadata', 'invoice',
+    ):
+        fields[key] = _stripe_field(sess, key)
+    fields['client_reference_id'] = _checkout_reference(identity)
+    fields['status'] = fields.get('status') or 'complete'
+    return fields
+
+
+def _label_stripe_purchase(sess, identity):
+    """Put the JetSchool account and product on the Stripe customer.
+
+    Checkout saves the company name the buyer typed. The description says whether
+    this was a listing or a broker subscription, and which account it belongs to.
+    """
+    if not _stripe_configured():
+        return
+    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
+    subscription = _stripe_field(sess, 'subscription')
+    subscription_id = subscription.get('id') if isinstance(subscription, dict) else (
+        subscription if isinstance(subscription, str) else None
+    )
+    identity = identity or {}
+    try:
+        user_id = int(identity.get('user_id') or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    user = db_module.get_user_by_id(user_id) if user_id else None
+    email = ((user or {}).get('email') or _payment_email(sess) or '').strip()
+    purpose = identity.get('purpose')
+    meta = {}
+    if purpose == 'listing_fee':
+        try:
+            listing = db_module.get_listing_with_owner(int(identity.get('listing_id'))) or {}
+        except (TypeError, ValueError):
+            listing = {}
+        title = listing.get('title') or 'listing'
+        text = f"JetSchool listing #{identity.get('listing_id')} — {title} — {email}"
+        meta = {
+            'purpose': 'listing_fee',
+            'listing_id': str(identity.get('listing_id') or ''),
+            'user_id': str(user_id or ''),
+            'email': email,
+        }
+    elif purpose in ('broker_account', 'broker_team'):
+        company = ((user or {}).get('company') or '').strip()
+        text = 'JetSchool broker subscription'
+        if company:
+            text += f' — {company}'
+        if email:
+            text += f' — {email}'
+        meta = {'purpose': purpose, 'user_id': str(user_id or ''), 'email': email}
+        if identity.get('team_id'):
+            meta['team_id'] = str(identity.get('team_id'))
+    else:
+        amount = _payment_amount(sess)
+        if amount == _listing_fee_cents():
+            text = f"JetSchool listing fee $49.99/month — {email or 'no email on the payment'}"
+            meta = {'purpose': 'listing_fee', 'email': email}
+        elif amount == BROKER_FEE_CENTS:
+            text = f"JetSchool broker fee $19.99/month — {email or 'no email on the payment'}"
+            meta = {'purpose': 'broker_account', 'email': email}
+        else:
+            return
+    meta = {key: str(value)[:500] for key, value in meta.items() if value}
+    text = text[:350]
+    try:
+        if customer_id:
+            stripe.Customer.modify(customer_id, description=text, metadata=meta)
+        if subscription_id:
+            stripe.Subscription.modify(subscription_id, description=text, metadata=meta)
+    except Exception:
+        logger.exception('Could not name this purchase in Stripe')
+
+
+def _listing_before_payment(sess):
+    identity = _checkout_identity(sess)
+    if identity.get('purpose') != 'listing_fee':
+        return None
+    try:
+        return db_module.get_listing_with_owner(int(identity.get('listing_id')))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fulfill_paid_checkout(sess):
+    """Mark the listing or broker paid, then name that purchase on the Stripe customer."""
+    if not _checkout_collected(sess):
+        return {}
+    identity = _checkout_identity(sess)
+    before = _listing_before_payment(sess)
+    broker = False
+    if identity.get('purpose') in ('broker_account', 'broker_team'):
+        broker = bool(_broker_paid_from_checkout(sess))
+    listing_id = _record_listing_checkout(sess)
+    if not broker and not listing_id:
+        fallback = _identity_from_payment(sess)
+        if fallback.get('purpose'):
+            carried = _session_carrying(sess, fallback)
+            if not before and fallback.get('purpose') == 'listing_fee':
+                before = _listing_before_payment(carried)
+            if fallback.get('purpose') in ('broker_account', 'broker_team'):
+                broker = bool(_broker_paid_from_checkout(carried))
+            if fallback.get('purpose') == 'listing_fee':
+                listing_id = _record_listing_checkout(carried)
+            identity = fallback
+            sess = carried
+    _label_stripe_purchase(sess, identity)
+    newly_paid = bool(listing_id) and (not before or before.get('payment_status') != 'paid')
+    return {'broker': broker, 'listing_id': listing_id, 'newly_paid': newly_paid}
+
+
+def _reconcile_paid_checkouts():
+    """Apply Checkout sessions Stripe already completed.
+
+    A buyer who paid and closed the tab never returns here. The customer list in
+    Stripe shows the company name they typed, so this is what connects that charge
+    to the account and the listing.
+    """
+    global _checkouts_reconciled
+    if _checkouts_reconciled or not _stripe_configured():
+        return
+    try:
+        page = stripe.checkout.Session.list(limit=100, status='complete')
+        for sess in page.data or []:
+            _fulfill_paid_checkout(sess)
+        _checkouts_reconciled = True
+    except Exception:
+        logger.exception('Could not match Stripe payments to accounts')
+
+
+def _match_invoice_checkout(obj):
+    """A payment-link invoice does not name the listing. The checkout session does."""
+    if not _stripe_configured():
+        return
+    customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
+    subscription_id = _object_subscription_id(obj)
+    if subscription_id and (
+        db_module.find_listing_by_subscription(subscription_id)
+        or db_module.find_subscription_by_stripe_id(subscription_id)
+    ):
+        return
+    if not customer_id:
+        return
+    try:
+        page = stripe.checkout.Session.list(customer=customer_id, limit=10)
+    except Exception:
+        logger.exception('Could not match a paid invoice to checkout')
+        return
+    for sess in page.data or []:
+        sess_subscription = _stripe_field(sess, 'subscription')
+        sess_subscription_id = sess_subscription.get('id') if isinstance(sess_subscription, dict) else sess_subscription
+        if subscription_id and sess_subscription_id and sess_subscription_id != subscription_id:
+            continue
+        _fulfill_paid_checkout(sess)
+
+
 def _record_listing_checkout(sess):
     """Mark the listing paid from a Checkout session, including its subscription."""
     session_id = _stripe_field(sess, 'id')
@@ -7503,6 +7719,9 @@ def _record_listing_checkout(sess):
     if paid:
         db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
     return paid
+
+
+_reconcile_paid_checkouts()
 
 
 def _sync_listing_subscription_event(event_type, obj):
@@ -7801,12 +8020,79 @@ def _sync_broker_fraud_warning(obj):
     _end_broker_charge(obj, 'suspended')
 
 
+def _stripe_dict(obj):
+    if isinstance(obj, dict):
+        return obj
+    keys = (
+        'id', 'object', 'status', 'amount', 'amount_refunded', 'refunded',
+        'payment_intent', 'charge', 'invoice', 'customer', 'metadata',
+    )
+    return {key: _stripe_field(obj, key) for key in keys}
+
+
+def _refund_listing_target(obj):
+    """The listing this charge belongs to, and the subscription on that charge."""
+    sources = [obj]
+    charge = obj.get('charge') if isinstance(obj.get('charge'), dict) else None
+    if charge:
+        sources.append(charge)
+    for source in sources:
+        meta = _stripe_metadata(source)
+        if meta.get('purpose') == 'listing_fee' and meta.get('listing_id'):
+            return meta.get('listing_id'), _linked_subscription_id(source)
+    source = charge or obj
+    subscription_id = _linked_subscription_id(source)
+    if subscription_id and db_module.find_subscription_by_stripe_id(subscription_id):
+        return None, subscription_id
+    if subscription_id:
+        listing = db_module.find_listing_by_subscription(subscription_id)
+        if listing:
+            return listing.get('id'), subscription_id
+        if _stripe_configured():
+            try:
+                remote = stripe.Subscription.retrieve(subscription_id)
+            except Exception:
+                logger.exception('Stripe subscription lookup failed')
+                remote = None
+            meta = _stripe_metadata(remote) if remote is not None else {}
+            if meta.get('purpose') == 'listing_fee' and meta.get('listing_id'):
+                return meta.get('listing_id'), subscription_id
+    customer_id = _stripe_ref(_stripe_field(source, 'customer'))
+    intent_id = _stripe_ref(obj.get('payment_intent'))
+    if customer_id and _stripe_configured():
+        try:
+            page = stripe.checkout.Session.list(customer=customer_id, limit=20)
+        except Exception:
+            logger.exception('Could not match a refund to checkout')
+            page = None
+        for sess in (page.data if page is not None else []) or []:
+            identity = _checkout_identity(sess)
+            if identity.get('purpose') != 'listing_fee':
+                continue
+            sess_intent = _stripe_ref(_stripe_field(sess, 'payment_intent'))
+            sess_subscription = _stripe_field(sess, 'subscription')
+            sess_subscription_id = sess_subscription.get('id') if isinstance(sess_subscription, dict) else sess_subscription
+            if intent_id and sess_intent and sess_intent != intent_id:
+                continue
+            if subscription_id and sess_subscription_id and sess_subscription_id != subscription_id:
+                continue
+            return identity.get('listing_id'), subscription_id or sess_subscription_id
+        rows = [
+            row for row in db_module.find_listings_by_stripe_customer(customer_id)
+            if row.get('payment_status') != 'refunded'
+        ]
+        if len(rows) == 1:
+            return rows[0].get('id'), subscription_id
+    return None, subscription_id
+
+
 def _reconcile_stripe_refund(event_type: str, obj: dict):
-    """Map a settled Stripe refund onto the listing payment record.
+    """Map a settled Stripe refund onto the listing it paid for.
 
     A pending, failed, or unmatched event does not mark a refund and does not
     change whether the listing is published.
     """
+    obj = _stripe_dict(obj)
     intent_id = _stripe_ref(obj.get('payment_intent'))
     payment_status = None
     if event_type == 'charge.refunded':
@@ -7826,6 +8112,17 @@ def _reconcile_stripe_refund(event_type: str, obj: dict):
         if refund_amount <= 0:
             return None, None
         charge = obj.get('charge') if isinstance(obj.get('charge'), dict) else None
+        if isinstance(obj.get('charge'), str) and _stripe_configured():
+            try:
+                remote = stripe.Charge.retrieve(obj.get('charge'))
+                charge = _stripe_dict(remote)
+                obj = dict(obj)
+                obj['charge'] = charge
+                if not intent_id:
+                    intent_id = _stripe_ref(charge.get('payment_intent'))
+            except Exception:
+                logger.exception('Stripe charge lookup failed')
+                charge = None
         if charge:
             try:
                 charge_amount = int(charge.get('amount') or 0)
@@ -7835,11 +8132,35 @@ def _reconcile_stripe_refund(event_type: str, obj: dict):
             if charge_amount <= 0 or charge_refunded <= 0:
                 return None, None
             payment_status = 'refunded' if charge.get('refunded') is True or charge_refunded >= charge_amount else 'partially_refunded'
+            if not intent_id:
+                intent_id = _stripe_ref(charge.get('payment_intent'))
         else:
             payment_status = 'refund_recorded'
     if not payment_status:
         return None, None
-    return db_module.reconcile_listing_refund(intent_id, payment_status), payment_status
+    listing_id, subscription_id = _refund_listing_target(obj)
+    return db_module.reconcile_listing_refund(
+        intent_id, payment_status, listing_id=listing_id, subscription_id=subscription_id,
+    ), payment_status
+
+
+def _reconcile_refunds():
+    """Show refunds Stripe already issued on the listing that was paid."""
+    global _refunds_reconciled
+    if _refunds_reconciled or not _stripe_configured():
+        return
+    try:
+        page = stripe.Refund.list(limit=100)
+        for refund in page.data or []:
+            if _stripe_field(refund, 'status') != 'succeeded':
+                continue
+            _reconcile_stripe_refund('refund.updated', refund)
+        _refunds_reconciled = True
+    except Exception:
+        logger.exception('Could not apply Stripe refunds to listings')
+
+
+_reconcile_refunds()
 
 
 @app.route('/api/listings/<int:listing_id>/mine', methods=['GET'])
@@ -8339,6 +8660,11 @@ def api_admin_listings():
                 'status': row.get('status'),
                 'market': sections_module.normalize_market(row.get('market')),
                 'payment_status': row.get('payment_status'),
+                'stripe_customer_id': row.get('stripe_customer_id'),
+                'stripe_reference': (
+                    f"listing-{row.get('id')}-user-{row.get('user_id')}"
+                    if row.get('id') and row.get('user_id') else ''
+                ),
                 'rejection_reason': row.get('rejection_reason'),
                 'amendment_note': row.get('amendment_note'),
                 'review_message': row.get('review_message'),
@@ -8352,6 +8678,7 @@ def api_admin_listings():
                 'owner': {
                     'id': owner['id'], 'email': owner['email'],
                     'first_name': owner.get('first_name'), 'last_name': owner.get('last_name'),
+                    'company': owner.get('company'),
                 } if owner else None,
             })
         return jsonify({'listings': out, 'total': len(out)}), 200
@@ -8753,6 +9080,11 @@ def _admin_listing_review(row):
             'review_message': row.get('review_message'),
             'pending_review': bool(pending),
             'payment_status': row.get('payment_status'),
+            'stripe_customer_id': row.get('stripe_customer_id'),
+            'stripe_reference': (
+                f"listing-{row.get('id')}-user-{row.get('user_id')}"
+                if row.get('id') and row.get('user_id') else ''
+            ),
             'currently_live': ', '.join(live_bits),
             'image': row.get('images'),
             'photos': _admin_listing_photos(row),

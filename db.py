@@ -1581,6 +1581,14 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, s
         if not row:
             return None
         lid = int(row.id)  # type: ignore[arg-type]
+        if row.payment_status == 'refunded':
+            same_subscription = (
+                subscription_id
+                and row.stripe_subscription_id
+                and str(row.stripe_subscription_id) == str(subscription_id)[:255]
+            )
+            if same_subscription or not subscription_id:
+                return lid
         updates: dict = {'payment_status': 'paid'}
         if payment_intent_id:
             updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
@@ -1622,6 +1630,19 @@ def find_listing_by_subscription(subscription_id):
             UserListing.stripe_subscription_id == str(subscription_id)[:255]
         ).first()
         return row.to_dict() if row else None
+
+
+def find_listings_by_stripe_customer(customer_id):
+    """Listings paid by this Stripe customer."""
+    if not customer_id:
+        return []
+    with get_session() as s:
+        rows = (
+            s.query(UserListing)
+            .filter(UserListing.stripe_customer_id == str(customer_id)[:255])
+            .all()
+        )
+        return [row.to_dict() for row in rows]
 
 
 def set_user_stripe_customer(user_id, customer_id, replace=False):
@@ -1684,22 +1705,40 @@ def end_listing_subscription(listing_id):
         return True
 
 
-def reconcile_listing_refund(payment_intent_id, payment_status):
+def reconcile_listing_refund(payment_intent_id, payment_status, listing_id=None, subscription_id=None):
     """Record a refund Stripe has already settled. Listing visibility stays as it is.
 
-    Returns the listing id, or None when there is no matching paid listing.
+    Returns the listing id, or None when there is no matching listing.
     Does not create a Stripe refund and does not decide that a refund is owed.
+    The payment intent, the listing subscription, or the listing id can identify it.
     """
-    if not payment_intent_id or payment_status not in (
+    if payment_status not in (
         'refunded', 'partially_refunded', 'refund_recorded', 'disputed', 'fraud_review', 'paid',
     ):
         return None
+    if not payment_intent_id and not listing_id and not subscription_id:
+        return None
     with get_session() as s:
-        row = (
-            s.query(UserListing)
-            .filter(UserListing.stripe_payment_intent_id == str(payment_intent_id)[:255])
-            .first()
-        )
+        row = None
+        if payment_intent_id:
+            row = (
+                s.query(UserListing)
+                .filter(UserListing.stripe_payment_intent_id == str(payment_intent_id)[:255])
+                .first()
+            )
+        if row is None and subscription_id:
+            row = (
+                s.query(UserListing)
+                .filter(UserListing.stripe_subscription_id == str(subscription_id)[:255])
+                .first()
+            )
+        if row is None and listing_id:
+            try:
+                wanted = int(listing_id)
+            except (TypeError, ValueError):
+                wanted = 0
+            if wanted:
+                row = s.query(UserListing).filter(UserListing.id == wanted).first()
         if not row:
             return None
         lid = int(row.id)  # type: ignore[arg-type]
@@ -1708,19 +1747,27 @@ def reconcile_listing_refund(payment_intent_id, payment_status):
             if current != 'disputed':
                 return None
         elif payment_status in ('disputed', 'fraud_review'):
-            if current not in ('paid', 'partially_refunded', 'refund_recorded', 'disputed', 'fraud_review'):
+            if current not in (
+                'paid', 'pending', 'unpaid', 'canceled', 'partially_refunded',
+                'refund_recorded', 'disputed', 'fraud_review',
+            ):
                 return None
-        elif current not in ('paid', 'partially_refunded', 'refund_recorded', 'refunded', 'disputed', 'fraud_review'):
+        elif current not in (
+            None, '', 'pending', 'unpaid', 'paid', 'canceled', 'partially_refunded',
+            'refund_recorded', 'refunded', 'disputed', 'fraud_review',
+        ):
             return None
-        if current == 'refunded':
+        updates = {}
+        if payment_intent_id and not row.stripe_payment_intent_id:
+            updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
+        if subscription_id and not row.stripe_subscription_id:
+            updates['stripe_subscription_id'] = str(subscription_id)[:255]
+        if current == 'refunded' or (current == 'partially_refunded' and payment_status == 'refund_recorded') or current == payment_status:
+            if updates:
+                s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
             return lid
-        if current == 'partially_refunded' and payment_status == 'refund_recorded':
-            return lid
-        if current == payment_status:
-            return lid
-        s.query(UserListing).filter(UserListing.id == lid).update(
-            {'payment_status': payment_status}, synchronize_session=False
-        )
+        updates['payment_status'] = payment_status
+        s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
         return lid
 
 
