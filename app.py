@@ -726,12 +726,17 @@ def api_team_checkout():
             'team_id': str(team_id),
         }
         checkout = stripe.checkout.Session.create(
+            ui_mode='hosted',
             mode='subscription',
             billing_address_collection='auto',
-            phone_number_collection={'enabled': True},
+            phone_number_collection={'enabled': False},
             automatic_tax={'enabled': False},
             allow_promotion_codes=True,
             payment_method_collection='always',
+            submit_type='auto',
+            saved_payment_method_options={'payment_method_save': 'enabled'},
+            integration_identifier='hosted_web_0003',
+            origin_context='web',
             line_items=[{
                 'price_data': {
                     'currency': 'usd',
@@ -744,12 +749,8 @@ def api_team_checkout():
                 },
                 'quantity': 1,
             }],
-            metadata=team_meta,
-            subscription_data={'metadata': team_meta},
             success_url=f'{base}/dashboard?team=1&session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{base}/dashboard?team=0',
-            idempotency_key=_checkout_idempotency(f"broker-team-{user['id']}-{team_id}"),
-            **_stripe_buyer(user),
         )
         return jsonify({'url': checkout.url, 'team_id': team_id}), 200
     except Exception:
@@ -3652,13 +3653,17 @@ def _open_paid_checkout(user, meta, amount_cents, product_name, product_descript
     if not customer_id:
         return None
     checkout = stripe.checkout.Session.create(
+        ui_mode='hosted',
         mode='subscription',
-        customer=customer_id,
-        client_reference_id=_checkout_reference(meta),
         billing_address_collection='auto',
+        phone_number_collection={'enabled': False},
         automatic_tax={'enabled': False},
         allow_promotion_codes=True,
         payment_method_collection='always',
+        submit_type='auto',
+        saved_payment_method_options={'payment_method_save': 'enabled'},
+        integration_identifier='hosted_web_0003',
+        origin_context='web',
         line_items=[{
             'price_data': {
                 'currency': 'usd',
@@ -3671,11 +3676,8 @@ def _open_paid_checkout(user, meta, amount_cents, product_name, product_descript
             },
             'quantity': 1,
         }],
-        metadata=meta,
-        subscription_data={'metadata': meta, 'description': product_name},
         success_url=success_url,
         cancel_url=cancel_url,
-        idempotency_key=_checkout_idempotency(idem_prefix),
     )
     customer_id = _stripe_ref(_stripe_field(checkout, 'customer'))
     if customer_id:

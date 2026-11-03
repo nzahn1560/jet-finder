@@ -1,65 +1,57 @@
 # Stripe Checkout
 
-Hosted Checkout is already wired in [app.py](app.py). Submit for approval redirects to a Stripe-hosted payment page when `STRIPE_SECRET_KEY` is set. The installed SDK is `stripe==7.8.0` in [requirements.txt](requirements.txt), which sends API version 2023-10-16. Parameters that version rejects (`ui_mode`, `name_collection`, `consent_collection`, `integration_identifier`, `origin_context`, `saved_payment_method_options`, `submit_type`) are not sent, because they stopped Checkout from opening.
-
-A listing fee is $49.99 per month. A broker account is $19.99 per month. A broker team is $19.99 per month. Coupon codes are accepted at Checkout. Set `REQUIRE_PAYMENT_FOR_LISTINGS=false` only to skip Checkout.
+Hosted Checkout is already wired in [app.py](app.py). The installed SDK is `stripe==7.8.0` in [requirements.txt](requirements.txt), which is below 21.0.0, so `ui_mode` is `hosted` rather than `hosted_page`.
 
 ## Values to Replace
 
-No sample-only placeholders are left in the Checkout Session calls. `mode`, `success_url`, `cancel_url`, and `line_items` already use live JetSchool values and were not replaced.
+No sample-only placeholders are left in the Checkout Session calls. `mode`, `success_url`, `cancel_url`, and `line_items` already use JetSchool values and were kept.
 
-**Files:**
+**Files containing these values:**
 - [app.py](app.py)
 
-| Field | Current value | What to set |
+| Field | Current Value | What to Set |
 | --- | --- | --- |
-| mode | `subscription` for a listing, a broker account, and a broker team. Each price uses `recurring.interval` `month`, so Checkout shows per month. | Leave these. |
-| success_url | Dashboard URL on this site. Broker checkout keeps `{CHECKOUT_SESSION_ID}`. | Leave these. |
-| cancel_url | Dashboard URL on this site. | Leave these. |
-| line_items | Inline prices: $49.99 per month for a listing, $19.99 per month for a broker account, $19.99 per month for a broker team. | Leave these. They are not `price_...` placeholders. |
+| mode | `subscription` | Leave this. Both sessions bill a monthly subscription. |
+| success_url | This site's dashboard URL, with `{CHECKOUT_SESSION_ID}` on the team checkout | Leave this. |
+| cancel_url | This site's dashboard URL | Leave this. |
+| line_items | Inline monthly prices, not `price_...` placeholders | Leave these. |
 
 ## Configured Parameters
 
-These Checkout Studio values are set on the `stripe.checkout.Session.create` calls in [app.py](app.py).
+These parameters were configured in Checkout Studio and are already set on both `stripe.checkout.Session.create` calls.
 
-**Files:**
+**Files containing these parameters:**
 - [app.py](app.py)
 
 | Parameter | Value |
 | --- | --- |
+| ui_mode | `hosted` |
 | billing_address_collection | `auto` |
-| phone_number_collection | `{"enabled": true}` |
+| phone_number_collection | `{"enabled": false}` |
 | automatic_tax | `{"enabled": false}` |
 | allow_promotion_codes | `true` |
-| payment_method_collection | `always` on every subscription, including the listing fee |
-| recurring.interval | `month` on the listing fee, the broker account, and the broker team |
-
-Customer, metadata, and subscription metadata stay on the calls so a paid session can still be matched to the listing or the broker account.
+| payment_method_collection | `always` |
+| submit_type | `auto` |
+| saved_payment_method_options | `{"payment_method_save": "enabled"}` |
+| integration_identifier | `hosted_web_0003` |
+| origin_context | `web` |
 
 ## Setup and next steps
 
-Environment variables already match the code and [.env.example](.env.example). Set them in Railway, not in the repo:
+Environment variables already match the code. Set them in the host environment, not in the repo:
 
-- `STRIPE_SECRET_KEY` — server only
-- `STRIPE_PUBLISHABLE_KEY` — server only. This app does not use Vite for Checkout.
-- `STRIPE_WEBHOOK_SECRET` — signing secret for `https://jetschoolusa.com/api/stripe/webhook`
+- `STRIPE_SECRET_KEY` — server only. Find it at https://dashboard.stripe.com/apikeys
+- `STRIPE_PUBLISHABLE_KEY` — server only. This app does not use Vite, so it is not prefixed with `VITE_`
+- `STRIPE_WEBHOOK_SECRET` — signing secret for the existing webhook
 
-No new routes were added. The three existing sessions are:
+No new routes or files were added. The Checkout Session calls are the broker team checkout and the shared paid-checkout helper in [app.py](app.py). Each one redirects the customer to a Stripe-hosted payment page. `mode` is `subscription`, so a card is collected and a monthly subscription starts. Promotion codes are accepted. Tax calculation is off. Phone collection is off.
 
-1. `POST /api/listings/<id>/checkout` — $49.99 listing fee, then back to the dashboard.
-2. `POST /api/account/broker-checkout` — $19.99 per month broker account.
-3. `POST /api/account/team-checkout` — $19.99 per month broker team.
+Test cards, in Stripe test mode: `4242 4242 4242 4242`, any future expiry, any CVC, any postal code.
 
-Stripe hosts the payment page. Checkout asks for a phone number, an optional individual or business name, and acceptance of the terms. A promotion code box is shown, and Stripe applies the coupons created in the Dashboard. Tax calculation is off. The webhook marks a listing paid, turns broker access on, and turns it off when the subscription ends, a charge is fully refunded, or a dispute or fraud review is open.
+Next steps:
 
-Before the first live checkout, set the Terms of service URL in the Stripe Dashboard to `https://jetschoolusa.com/terms`. Checkout will not start while terms are required and that URL is missing.
-
-Test cards, in Stripe test mode: `4242 4242 4242 4242`, any future expiry, any CVC, any postal code. Do not use those on the live JetschoolUSA account.
-
-Remaining Dashboard steps:
-
-- Webhook endpoint `https://jetschoolusa.com/api/stripe/webhook` with the events already handled in [app.py](app.py), and the signing secret stored as `STRIPE_WEBHOOK_SECRET`.
-- Customer Portal, so **Manage billing** can update a card or cancel at the end of the paid month.
-- Terms of service URL, required by the Checkout consent setting above.
+- Confirm `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are set where the app runs.
+- Fulfillment for a completed Checkout Session stays on the existing webhook in [app.py](app.py).
+- Listing and solo broker payments still open the hosted payment links. Those links are separate from these Checkout Session calls.
 
 Support: https://support.stripe.com and https://docs.stripe.com/mcp
