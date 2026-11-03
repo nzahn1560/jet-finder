@@ -556,18 +556,17 @@ input[type="number"] {
 .score-fair { background: linear-gradient(135deg, #ffab91, #ff8a80); color: white; }
 .score-poor { background: linear-gradient(135deg, #ffcdd2, #ffab91); color: white; }
 
-/* Aircraft grid layout - Square Cards */
 .aircraft-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
     margin-top: 24px;
 }
 
 .aircraft-card {
-    aspect-ratio: 1;
-    height: 350px;
-    width: 350px;
+    aspect-ratio: auto;
+    height: auto;
+    width: 100%;
     margin: 0 auto;
 }
 

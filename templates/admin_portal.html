@@ -97,6 +97,19 @@
             <div id="brokers-list"></div>
         </div>
         <div id="tab-users" style="display:none;">
+            <div class="ap__filter">
+                <input id="user-search" type="search" placeholder="Name, email, or phone" aria-label="Search users">
+                <select id="user-role" aria-label="Filter by role">
+                    <option value="">All roles</option>
+                    <option value="buyer">Buyer</option>
+                    <option value="seller">Seller</option>
+                    <option value="broker">Broker</option>
+                    <option value="mechanic">Mechanic</option>
+                    <option value="operator">Operator</option>
+                    <option value="charter_operator">Charter operator</option>
+                    <option value="admin">Admins</option>
+                </select>
+            </div>
             <div id="users-list"></div>
         </div>
         <div id="tab-alerts" style="display:none;">
@@ -301,17 +314,26 @@ async function loadAdminListings() {
     }
 }
 
-async function loadAdminUsers() {
+let adminUsers = [];
+
+function userMatches(user, query, role) {
+    if (role === 'admin' && !user.is_admin) return false;
+    if (role && role !== 'admin' && (user.profile_role || 'other') !== role) return false;
+    if (!query) return true;
+    const blob = [user.first_name, user.last_name, user.email, user.phone, user.company, user.profile_location, user.profile_role].join(' ').toLowerCase();
+    return blob.indexOf(query) >= 0;
+}
+
+function renderAdminUsers() {
     const target = document.getElementById('users-list');
-    target.innerHTML = '<div class="ap__empty">Loading...</div>';
-    try {
-        const r = await fetch('/api/admin/users', { credentials: 'include', cache: 'no-store' });
-        if (r.status === 401) { window.location.href = '/login'; return; }
-        if (r.status === 403) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
-        const data = await r.json();
-        const users = data.users || [];
-        if (!users.length) { target.innerHTML = '<div class="ap__empty">No users.</div>'; return; }
-        target.innerHTML = users.map(function (u) {
+    const query = (document.getElementById('user-search').value || '').trim().toLowerCase();
+    const role = document.getElementById('user-role').value;
+    const users = adminUsers.filter(function (user) { return userMatches(user, query, role); });
+    if (!users.length) {
+        target.innerHTML = '<div class="ap__empty">' + (adminUsers.length ? 'No users match.' : 'No users.') + '</div>';
+        return;
+    }
+    target.innerHTML = users.map(function (u) {
             const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email;
             return ''
                 + '<div class="ap__card" data-user="' + u.id + '">'
@@ -322,26 +344,41 @@ async function loadAdminUsers() {
                 + '      <span style="color:#8e8e93;font-size:0.85rem;">Role: ' + esc(u.profile_role || 'other') + ' · Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
                 + '    </div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-                + '      <button class="ap__btn ap__btn--secondary" data-user-view="' + u.id + '">View</button>'
+                + '      <a class="ap__btn ap__btn--secondary" href="/people/' + u.id + '">View</a>'
                 + '      <button class="ap__btn ap__btn--approve" data-user-message="' + u.id + '">Message</button>'
                 + (u.is_admin ? '' : '      <button class="ap__btn ap__btn--reject" data-user-delete="' + u.id + '">Delete</button>')
                 + '    </div>'
                 + '  </div>'
                 + '</div>';
         }).join('');
-        target.querySelectorAll('[data-user-view], [data-user-message]').forEach(function (button) {
+        target.querySelectorAll('[data-user-message]').forEach(function (button) {
             button.addEventListener('click', function () {
-                openAccount(button.getAttribute('data-user-view') || button.getAttribute('data-user-message'), !!button.getAttribute('data-user-message'));
+                openAccount(button.getAttribute('data-user-message'), true);
             });
         });
         target.querySelectorAll('[data-user-delete]').forEach(function (button) {
             button.addEventListener('click', function () { deleteAccount(button.getAttribute('data-user-delete')); });
         });
+}
+
+async function loadAdminUsers() {
+    const target = document.getElementById('users-list');
+    target.innerHTML = '<div class="ap__empty">Loading...</div>';
+    try {
+        const r = await fetch('/api/admin/users', { credentials: 'include', cache: 'no-store' });
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        if (r.status === 403) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
+        const data = await r.json();
+        adminUsers = data.users || [];
+        renderAdminUsers();
     } catch (e) {
         target.innerHTML = '<div class="ap__empty">Failed to load users.</div>';
         console.error(e);
     }
 }
+
+document.getElementById('user-search').addEventListener('input', renderAdminUsers);
+document.getElementById('user-role').addEventListener('change', renderAdminUsers);
 
 let accountId = null;
 
@@ -653,7 +690,7 @@ async function loadAdminBrokers() {
         return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;">'
             + '<strong>' + esc(broker.name) + '</strong> ' + (broker.is_main ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">MAIN</span>' : '<span class="ap__badge">TEAM</span>')
             + '<br>' + esc(broker.email) + (place ? '<br>' + esc(place) : '')
-            + '</div><a class="ap__btn ap__btn--secondary" href="/people/' + broker.id + '">View</a></div></div>';
+            + '</div><a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a></div></div>';
     }).join('');
 }
 

@@ -152,6 +152,16 @@
         font-size: 0.75rem;
         width: fit-content;
     }
+    .broker-status {
+        display: inline-block;
+        margin: 0.15rem 0 0.85rem;
+        padding: 0.4rem 0.85rem;
+        border-radius: 999px;
+        background: rgba(52, 168, 83, 0.16);
+        color: #b7ebc4;
+        font-weight: 700;
+        white-space: nowrap;
+    }
     @media (max-width: 640px) {
         .identity__body { grid-template-columns: 1fr; padding: 0 1.15rem 1.5rem; }
         .identity__name { margin-top: 0.85rem; font-size: 2.4rem; }
@@ -253,9 +263,10 @@
             </div>
         </form>
         {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
+        {% set broker_live = on_team or (subscription and subscription.subscription_status == 'active' and subscription.subscription_type in ['broker', 'broker_team']) %}
         <div style="margin-top:1rem;">
-                {% if on_team and membership.is_admin %}
-                <p class="identity__line">{{ membership.name }} is paid. People you add are on this subscription. They keep their own listings, and those listings also show here.</p>
+                {% if broker_live and membership and membership.is_admin %}
+                <p class="broker-status">Subscription is active.</p>
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                     <input class="form-control" id="team-member-email" type="email" placeholder="Email of the person to add" style="max-width:280px;">
                     <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add to the team</button>
@@ -278,24 +289,22 @@
                     {% endfor %}
                 </ul>
                 {% endif %}
-                {% elif on_team %}
-                <p class="identity__line">You are on {{ membership.name }}. Your listings stay on this account, and they also show on the brokerage.</p>
+                {% elif broker_live %}
+                <p class="broker-status">Subscription is active.</p>
                 {% elif membership and membership.is_admin %}
-                <p class="identity__line">You are the main account. The main brokerage is the only account that has to pay. Pay $19.99 a month, then you can add your team.</p>
-                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
+                <p class="identity__line">Pay $19.99 a month to activate this account. A team seat is free until you approve it.</p>
+                <a class="dash__btn dash__btn--primary" id="become-broker" href="#" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
                 {% elif membership and membership.membership_status == 'pending' %}
-                <p class="identity__line">{{ membership.name }} has not added you yet. Assigning to a team is free. You are not a broker until the main company account approves you.</p>
+                <p class="identity__line">Waiting for {{ membership.name }} to approve you.</p>
                 {% else %}
-                <p class="identity__line">Sign up as a broker. The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.</p>
+                <p class="identity__line">The main account pays $19.99 a month. A team seat is free until that account approves you.</p>
                 <label style="color:#fff; display:block; margin:0.4rem 0;"><input type="radio" name="broker-path" value="main" checked> I am the main brokerage</label>
-                <p class="identity__line">Only this account pays $19.99 a month.</p>
                 <label style="color:#fff; display:block; margin:0.4rem 0 0.7rem;"><input type="radio" name="broker-path" value="assign"> Assign me to a team</label>
-                <p class="identity__line">Free. The main company account has to approve you.</p>
                 <div id="broker-main-fields" style="display:grid; gap:0.45rem; max-width:360px;">
                     <input class="form-control" id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}">
                     <input class="form-control" id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}">
                     <input class="form-control" id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}">
-                    <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
+                    <a class="dash__btn dash__btn--primary" id="become-broker" href="#" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
                 </div>
                 <div id="broker-assign-fields" hidden>
                     {% if teams %}
@@ -316,45 +325,6 @@
         {% endif %}
     </div>
 </article>
-{% set note_viewer = get_current_user_info() %}
-{% if not is_owner and user.broker_application_status == 'approved' and note_viewer %}
-<form id="broker-note" class="identity" style="padding:1.25rem 1.5rem; display:grid; gap:0.6rem;">
-    <strong style="color:#fff;">Send {{ person_name }} a note</strong>
-    <select class="form-select" name="kind">
-        <option value="request">I am looking for an aircraft</option>
-        <option value="message">Message</option>
-    </select>
-    <input class="form-control" name="aircraft_name" maxlength="200" placeholder="Aircraft you are looking for">
-    <textarea class="form-control" name="notes" maxlength="2000" rows="3" placeholder="Notes"></textarea>
-    <label for="broker-note-email" style="color:#d0d0d0;">Email</label>
-    <input class="form-control" id="broker-note-email" name="contact_email" type="email" maxlength="254" required autocomplete="email" value="{{ note_viewer.email or '' }}">
-    <label for="broker-note-phone" style="color:#d0d0d0;">Phone</label>
-    <input class="form-control" id="broker-note-phone" name="contact_phone" type="tel" maxlength="40" required autocomplete="tel" value="{{ note_viewer.phone or '' }}">
-    <button type="submit" class="dash__btn dash__btn--primary" style="border:0; width:max-content; cursor:pointer;">Send</button>
-    <span id="broker-note-status" style="color:#c8c8c8;"></span>
-</form>
-<script>
-document.getElementById('broker-note').addEventListener('submit', async function (event) {
-    event.preventDefault();
-    const status = document.getElementById('broker-note-status');
-    const data = new FormData(this);
-    status.textContent = 'Sending...';
-    const response = await fetch('/api/brokers/{{ user.id }}/messages', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            kind: data.get('kind'),
-            aircraft_name: data.get('aircraft_name') || '',
-            notes: data.get('notes') || '',
-            contact_email: data.get('contact_email') || '',
-            contact_phone: data.get('contact_phone') || '',
-        }),
-    });
-    const body = await response.json().catch(function () { return {}; });
-    status.textContent = response.ok ? 'Sent.' : (body.message || 'Could not send that note.');
-});
-</script>
-{% endif %}
 {% if is_owner %}
 <script>
 (function () {
@@ -411,8 +381,6 @@ document.getElementById('broker-note').addEventListener('submit', async function
         const payData = await pay.json().catch(function () { return {}; });
         if (payData.url) { window.location = payData.url; return; }
         if (payData.already) { window.location.reload(); return; }
-        const link = document.getElementById('become-broker');
-        if (link && link.href) { window.location = link.href; return; }
         if (status) status.textContent = payData.message || 'Checkout is unavailable.';
     }
     if (edit) {
