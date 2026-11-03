@@ -7076,21 +7076,17 @@ def _stripe_configured() -> bool:
     return True
 
 
-_payment_links_pointed = False
+_payment_links_restored = False
 
 
-def _point_payment_links_at_account():
-    """Send a finished Payment Link back to the account page."""
-    global _payment_links_pointed
-    if _payment_links_pointed or not _stripe_configured():
+def _restore_payment_links():
+    """Undo the startup rewrite that turned these links off or sent them to the account page.
+
+    A link that was not changed is left as it is in Stripe.
+    """
+    global _payment_links_restored
+    if _payment_links_restored or not _stripe_configured():
         return
-    base = (os.environ.get('PUBLIC_BASE_URL') or '').strip().strip('"').strip("'").rstrip('/')
-    if not (base.startswith('https://') or base.startswith('http://')):
-        if (_stripe_secret() or '').startswith('sk_live_'):
-            base = 'https://jetschoolusa.com'
-        else:
-            return
-    target = base + '/dashboard'
     tokens = ('7sYbIUgyoesqejI9AVgbm00', 'eVqdR20zqbge6Rg6oJgbm01')
     try:
         page = stripe.PaymentLink.list(limit=100)
@@ -7100,17 +7096,20 @@ def _point_payment_links_at_account():
                 continue
             after = _stripe_field(link, 'after_completion') or {}
             redirect = _stripe_field(after, 'redirect') or {}
-            pointed = _stripe_field(after, 'type') == 'redirect' and _stripe_field(redirect, 'url') == target
-            if pointed and _stripe_field(link, 'active') is not False:
+            redirect_url = str(_stripe_field(redirect, 'url') or '').rstrip('/')
+            forced_redirect = _stripe_field(after, 'type') == 'redirect' and redirect_url.endswith('/dashboard')
+            inactive = _stripe_field(link, 'active') is False
+            if not forced_redirect and not inactive:
                 continue
-            stripe.PaymentLink.modify(
-                link.id,
-                active=True,
-                after_completion={'type': 'redirect', 'redirect': {'url': target}},
-            )
-        _payment_links_pointed = True
+            changes = {}
+            if inactive:
+                changes['active'] = True
+            if forced_redirect:
+                changes['after_completion'] = {'type': 'hosted_confirmation'}
+            stripe.PaymentLink.modify(link.id, **changes)
+        _payment_links_restored = True
     except Exception:
-        logger.exception('Could not point the payment links at the account page')
+        logger.exception('Could not restore the payment links')
 
 
 def _log_stripe_setup() -> None:
@@ -7119,7 +7118,7 @@ def _log_stripe_setup() -> None:
     if key:
         mode = 'live' if key.startswith('sk_live_') else 'test'
         logger.info('Stripe checkout is on (%s mode).', mode)
-        _point_payment_links_at_account()
+        _restore_payment_links()
         if not (os.environ.get('STRIPE_WEBHOOK_SECRET') or '').strip():
             logger.warning(
                 'STRIPE_WEBHOOK_SECRET is not set. A finished Checkout updates the listing when the buyer returns. '

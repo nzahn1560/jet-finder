@@ -1406,35 +1406,42 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn('password_hash', exported.get_json()['account'])
         self.assertEqual(exported.get_json()['account']['email'], 'seller@example.com')
 
-    def test_finished_payment_returns_to_the_account(self):
+    def test_rewritten_payment_links_go_back_to_their_confirmation_page(self):
         import app as app_module
         previous_key = os.environ.get('STRIPE_SECRET_KEY')
         previous_base = os.environ.get('PUBLIC_BASE_URL')
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_returnpage'
         os.environ['PUBLIC_BASE_URL'] = 'https://jetschoolusa.com'
-        app_module._payment_links_pointed = False
+        app_module._payment_links_restored = False
         calls = []
+
+        class Redirect:
+            url = 'https://jetschoolusa.com/dashboard'
+
+        class After:
+            type = 'redirect'
+            redirect = Redirect()
 
         class Link:
             def __init__(self, url):
                 self.id = 'plink_broker'
                 self.url = url
-                self.after_completion = None
+                self.active = False
+                self.after_completion = After()
 
         page = type('Page', (), {'data': [Link('https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00')]})()
         try:
             with patch.object(app_module.stripe.PaymentLink, 'list', return_value=page), \
                  patch.object(app_module.stripe.PaymentLink, 'modify', side_effect=lambda *args, **kwargs: calls.append(kwargs)):
-                app_module._point_payment_links_at_account()
-            self.assertEqual(
-                calls[0]['after_completion']['redirect']['url'],
-                'https://jetschoolusa.com/dashboard',
-            )
+                app_module._restore_payment_links()
+            self.assertEqual(calls[0]['active'], True)
+            self.assertEqual(calls[0]['after_completion']['type'], 'hosted_confirmation')
+            self.assertNotIn('redirect', calls[0]['after_completion'])
             home = self.client.get('/')
             self.assertIn(b'aspect-ratio: 16 / 9', home.data)
             self.assertIn(b'repeat(3, minmax(0, 1fr))', home.data)
         finally:
-            app_module._payment_links_pointed = False
+            app_module._payment_links_restored = False
             if previous_key is None:
                 os.environ.pop('STRIPE_SECRET_KEY', None)
             else:
