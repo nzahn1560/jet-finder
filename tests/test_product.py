@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -478,7 +479,12 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Add a photo', form.data)
         self.assertIn(b'id="photo-preview"', form.data)
         self.assertIn(b'Earlier', form.data)
-        self.assertIn(b'id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif"', form.data)
+        self.assertIn(b'id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif"', form.data)
+        self.assertIn(b'keeps the whole picture', form.data)
+        crop_js = (Path(__file__).resolve().parents[1] / 'static' / 'js' / 'photo-crop.js').read_bytes()
+        self.assertIn(b'data-zoom-out', crop_js)
+        self.assertIn(b'Fit whole photo', crop_js)
+        self.assertIn(b'min="0.5"', crop_js)
         self.assertIn(b'photo-crop.js', form.data)
         self.assertIn(b'data-crop-photo', form.data)
         home = self.client.get('/')

@@ -24,8 +24,8 @@
             '.photo-crop__use { background: #F05545; border-color: #F05545; }',
             '.photo-crop__frame { position: relative; width: min(100%, 640px); aspect-ratio: 16 / 9; margin: 0 auto 0.9rem; overflow: hidden; background: #0c0c0c; border-radius: 12px; touch-action: none; cursor: grab; }',
             '.photo-crop__frame img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; pointer-events: none; }',
-            '.photo-crop label { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }',
-            '.photo-crop input[type=range] { flex: 1; }',
+            '.photo-crop__zoom { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }',
+            '.photo-crop__zoom input[type=range] { flex: 1; min-width: 140px; }',
             '.photo-crop__previews { display: grid; grid-template-columns: 1.4fr 1fr; gap: 0.9rem; margin-bottom: 1rem; }',
             '.photo-crop__previews strong { display: block; margin-bottom: 0.35rem; color: #fff; }',
             '.photo-crop__card, .photo-crop__hero { background: #1a1a1a; border-radius: 12px; overflow: hidden; border: 1px solid #2e2e2e; }',
@@ -40,9 +40,14 @@
         root.innerHTML = ''
             + '<div class="photo-crop__sheet">'
             + '<h2>Fit this photo</h2>'
-            + '<p>Drag the photo and use the slider. Listings use a 16:9 photo, and the frames below are what people see.</p>'
+            + '<p>The whole photo fits in the 16:9 frame. Zoom out for more space around it, or zoom in and drag to crop. Nothing is cut off until you crop.</p>'
             + '<div class="photo-crop__frame"><img alt=""></div>'
-            + '<label>Zoom <input type="range" min="1" max="3" step="0.01" value="1"></label>'
+            + '<div class="photo-crop__zoom">'
+            + '<button type="button" data-zoom-out>Zoom out</button>'
+            + '<input type="range" min="0.5" max="4" step="0.01" value="1" aria-label="Zoom">'
+            + '<button type="button" data-zoom-in>Zoom in</button>'
+            + '<button type="button" data-crop-fit>Fit whole photo</button>'
+            + '</div>'
             + '<div class="photo-crop__previews">'
             + '<div><strong>On the marketplace</strong><div class="photo-crop__card"><canvas></canvas><p>Your aircraft</p></div></div>'
             + '<div><strong>On the listing page</strong><div class="photo-crop__hero"><canvas></canvas></div></div>'
@@ -57,10 +62,30 @@
         root.querySelector('[data-crop-use]').addEventListener('click', function () {
             exportPhoto().then(function (result) { finish(result); });
         });
+        root.querySelector('[data-crop-fit]').addEventListener('click', function () {
+            if (!session) return;
+            session.zoom = 1;
+            root.querySelector('input[type=range]').value = '1';
+            center();
+            apply();
+        });
+        root.querySelector('[data-zoom-out]').addEventListener('click', function () {
+            if (!session) return;
+            setZoom(session.zoom - 0.15);
+        });
+        root.querySelector('[data-zoom-in]').addEventListener('click', function () {
+            if (!session) return;
+            setZoom(session.zoom + 0.15);
+        });
         root.querySelector('input[type=range]').addEventListener('input', function (event) {
             if (!session) return;
             setZoom(Number(event.target.value));
         });
+        root.querySelector('.photo-crop__frame').addEventListener('wheel', function (event) {
+            if (!session) return;
+            event.preventDefault();
+            setZoom(session.zoom + (event.deltaY > 0 ? -0.08 : 0.08));
+        }, { passive: false });
         const frame = root.querySelector('.photo-crop__frame');
         frame.addEventListener('pointerdown', function (event) {
             if (!session) return;
@@ -85,8 +110,8 @@
         return root.querySelector('.photo-crop__frame').getBoundingClientRect();
     }
 
-    function coverBase(box) {
-        return Math.max(box.width / session.image.naturalWidth, box.height / session.image.naturalHeight);
+    function containBase(box) {
+        return Math.min(box.width / session.image.naturalWidth, box.height / session.image.naturalHeight);
     }
 
     function paintShape() {
@@ -95,21 +120,23 @@
 
     function center() {
         const box = frameBox();
-        const scale = coverBase(box) * session.zoom;
+        const scale = containBase(box) * session.zoom;
         session.offsetX = (box.width - session.image.naturalWidth * scale) / 2;
         session.offsetY = (box.height - session.image.naturalHeight * scale) / 2;
     }
 
     function setZoom(next) {
         const box = frameBox();
-        const base = coverBase(box);
+        const base = containBase(box);
         const oldScale = base * session.zoom;
         const cx = box.width / 2;
         const cy = box.height / 2;
         const ix = (cx - session.offsetX) / oldScale;
         const iy = (cy - session.offsetY) / oldScale;
-        session.zoom = next;
-        const scale = base * next;
+        session.zoom = Math.max(0.5, Math.min(4, next));
+        const slider = root.querySelector('input[type=range]');
+        if (slider) slider.value = String(session.zoom);
+        const scale = base * session.zoom;
         session.offsetX = cx - ix * scale;
         session.offsetY = cy - iy * scale;
         apply();
@@ -118,31 +145,37 @@
     function clamp(box, scale) {
         const dw = session.image.naturalWidth * scale;
         const dh = session.image.naturalHeight * scale;
-        session.offsetX = Math.min(0, Math.max(box.width - dw, session.offsetX));
-        session.offsetY = Math.min(0, Math.max(box.height - dh, session.offsetY));
+        if (dw <= box.width) session.offsetX = (box.width - dw) / 2;
+        else session.offsetX = Math.min(0, Math.max(box.width - dw, session.offsetX));
+        if (dh <= box.height) session.offsetY = (box.height - dh) / 2;
+        else session.offsetY = Math.min(0, Math.max(box.height - dh, session.offsetY));
     }
 
     function cropCanvas(width, height) {
         const box = frameBox();
-        const scale = coverBase(box) * session.zoom;
+        const scale = containBase(box) * session.zoom;
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#111';
         ctx.fillRect(0, 0, width, height);
-        const sx = -session.offsetX / scale;
-        const sy = -session.offsetY / scale;
-        const sw = box.width / scale;
-        const sh = box.height / scale;
-        ctx.drawImage(session.image, sx, sy, sw, sh, 0, 0, width, height);
+        const outX = width / box.width;
+        const outY = height / box.height;
+        ctx.drawImage(
+            session.image,
+            session.offsetX * outX,
+            session.offsetY * outY,
+            session.image.naturalWidth * scale * outX,
+            session.image.naturalHeight * scale * outY
+        );
         return canvas;
     }
 
     function apply() {
         const box = frameBox();
         if (!box.width || !box.height) return;
-        const scale = coverBase(box) * session.zoom;
+        const scale = containBase(box) * session.zoom;
         clamp(box, scale);
         const img = root.querySelector('.photo-crop__frame img');
         img.style.width = (session.image.naturalWidth * scale) + 'px';
@@ -207,10 +240,17 @@
                 root.querySelector('input[type=range]').value = '1';
                 root.querySelector('.photo-crop__frame img').src = url;
                 paintShape();
-                requestAnimationFrame(function () {
+                let tries = 0;
+                function place() {
+                    const box = frameBox();
+                    if ((!box.width || !box.height) && tries++ < 20) {
+                        requestAnimationFrame(place);
+                        return;
+                    }
                     center();
                     apply();
-                });
+                }
+                requestAnimationFrame(place);
             };
             image.onerror = function () {
                 URL.revokeObjectURL(url);
@@ -220,7 +260,17 @@
         });
     }
 
+    const IMAGE_EXT = /\.(jpe?g|png|webp|gif|bmp|tiff?|avif|heic|heif)$/i;
+
+    function isImageFile(file) {
+        if (!file) return false;
+        const type = String(file.type || '').toLowerCase();
+        if (type.indexOf('image/') === 0) return true;
+        return IMAGE_EXT.test(file.name || '');
+    }
+
     window.JetPhotoCrop = {
+        isImageFile: isImageFile,
         open: function (file) {
             const run = busy.then(function () { return openFile(file); });
             busy = run.then(function () { return null; }, function () { return null; });
