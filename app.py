@@ -312,6 +312,7 @@ def _no_cache_auth_endpoints(response):
     if (path.startswith('/api/') or path.startswith('/admin') or path in (
         '/login', '/logout', '/register', '/dashboard', '/profile', '/my-listings', '/create-listing',
         '/charter', '/charter-search', '/mechanics', '/service-providers', '/brokers', '/off-market',
+        '/settings',
     )):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
@@ -2779,10 +2780,12 @@ def register():
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
                 if wants_broker:
-                    flash('Account created. Broker access is on your profile.', 'success')
+                    db_module.set_broker_application(user_id_int, 'pending')
+                    flash('Account created. Finish broker access in checkout.', 'success')
+                    resp = redirect(_broker_payment_link({'id': user_id_int, 'email': email}))
                 else:
                     flash('Account created successfully!', 'success')
-                resp = redirect(url_for('dashboard', broker='start') if wants_broker else url_for('dashboard'))
+                    resp = redirect(url_for('dashboard'))
                 _set_jet_session_cookie(resp, token)
                 return resp
             else:
@@ -2980,6 +2983,70 @@ def terms():
 @app.route('/refunds')
 def refunds():
     return render_template('legal/refunds.html')
+
+
+def _account_export(user):
+    """A copy of this account for the person who owns it. No password hash."""
+    person = _user_public_dict(user)
+    hidden = {'password_hash', 'verification_documents', 'subscription'}
+    info = {key: value for key, value in person.items() if key not in hidden}
+    listings = db_module.get_listings_by_user_id(user['id']) or []
+    return {
+        'account': info,
+        'listings': [
+            {
+                'id': row.get('id'),
+                'title': row.get('title'),
+                'status': row.get('status'),
+                'market': row.get('market'),
+                'location': row.get('location'),
+            }
+            for row in listings
+        ],
+    }
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def account_settings():
+    """Password, email choices, and privacy controls for this account."""
+    user = get_current_user_info()
+    message = None
+    error = None
+    if request.method == 'POST':
+        if not _csrf_matches():
+            error = 'That form expired. Submit it again.'
+        elif request.form.get('action') == 'password':
+            current = request.form.get('current_password') or ''
+            new_password = request.form.get('new_password') or ''
+            confirm = request.form.get('confirm_password') or ''
+            stored = get_user_by_id(user['id']) or {}
+            if not check_password_hash(stored.get('password_hash') or '', current):
+                error = 'The current password is not right.'
+            elif len(new_password) < 8:
+                error = 'The new password needs at least 8 characters.'
+            elif new_password != confirm:
+                error = 'The new passwords do not match.'
+            elif not db_module.set_user_password(user['id'], generate_password_hash(new_password)):
+                error = 'The password could not be changed.'
+            else:
+                message = 'Password updated.'
+        elif request.form.get('action') == 'email':
+            opted_in = '1' in request.form.getlist('email_opt_in')
+            db_module.set_email_opt_in(user['id'], opted_in)
+            user = get_current_user_info()
+            message = 'Email preference saved.'
+    return render_template('settings.html', user=user, settings_message=message, settings_error=error)
+
+
+@app.route('/settings/download')
+@login_required
+def account_download():
+    """Give the account owner a copy of the information JetSchool stores about them."""
+    user = get_current_user_from_request()
+    response = jsonify(_account_export(user))
+    response.headers['Content-Disposition'] = 'attachment; filename="jetschool-account.json"'
+    return response
 
 
 @app.route('/contact')
@@ -3275,6 +3342,8 @@ def _stripe_field(obj, key, default=None):
 
 BROKER_FEE_CENTS = 1999
 BROKER_FEE_LABEL = '$19.99'
+BROKER_PAYMENT_LINK = 'https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00'
+LISTING_PAYMENT_LINK = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01'
 
 
 def _stripe_buyer(user):
@@ -3351,13 +3420,68 @@ def _broker_market_access(user) -> bool:
     )
 
 
-def _broker_paid_from_checkout(sess, expected_user_id=None):
+def _stripe_buy_link(base, **params):
+    """Payment Link with the account or listing attached so the webhook can tell who paid."""
+    from urllib.parse import urlencode
+    clean = {key: str(value) for key, value in params.items() if value not in (None, '')}
+    if not clean:
+        return base
+    return base + '?' + urlencode(clean)
+
+
+def _broker_payment_link(user):
+    return _stripe_buy_link(
+        BROKER_PAYMENT_LINK,
+        client_reference_id=f"broker-{user['id']}",
+        prefilled_email=(user.get('email') or ''),
+    )
+
+
+def _listing_payment_link(user, listing_id):
+    return _stripe_buy_link(
+        LISTING_PAYMENT_LINK,
+        client_reference_id=f"listing-{listing_id}-user-{user['id']}",
+        prefilled_email=(user.get('email') or ''),
+    )
+
+
+def _payment_link_identity(sess):
+    """Read broker-{id} or listing-{id}-user-{id} from a Payment Link."""
+    ref = str(_stripe_field(sess, 'client_reference_id') or '')
+    if ref.startswith('broker-'):
+        try:
+            return {'purpose': 'broker_account', 'user_id': str(int(ref.split('-', 1)[1]))}
+        except (TypeError, ValueError):
+            return {}
+    if ref.startswith('listing-') and '-user-' in ref:
+        listing_part, user_part = ref.split('-user-', 1)
+        try:
+            return {
+                'purpose': 'listing_fee',
+                'listing_id': str(int(listing_part.split('-', 1)[1])),
+                'user_id': str(int(user_part)),
+            }
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _checkout_identity(sess):
     meta = _stripe_field(sess, 'metadata') or {}
     if not isinstance(meta, dict):
         try:
             meta = dict(meta)
         except Exception:
             meta = {}
+    merged = _payment_link_identity(sess)
+    for key, value in meta.items():
+        if value not in (None, ''):
+            merged[key] = value
+    return merged
+
+
+def _broker_paid_from_checkout(sess, expected_user_id=None):
+    meta = _checkout_identity(sess)
     purpose = meta.get('purpose')
     if purpose not in ('broker_account', 'broker_team'):
         return False
@@ -3402,45 +3526,7 @@ def api_broker_checkout():
     if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
         return jsonify({'already': True}), 200
     db_module.set_broker_application(user['id'], 'pending')
-    if not _stripe_configured():
-        return jsonify({
-            'error': 'payment_not_ready',
-            'application': 'pending',
-            'message': 'Your broker application is waiting for approval. Broker access is $19.99 a month and includes the broker map and the off-market section.',
-        }), 503
-    base = _public_base()
-    try:
-        broker_meta = {'user_id': str(user['id']), 'purpose': 'broker_account'}
-        checkout = stripe.checkout.Session.create(
-            mode='subscription',
-            billing_address_collection='auto',
-            phone_number_collection={'enabled': True},
-            automatic_tax={'enabled': False},
-            allow_promotion_codes=True,
-            payment_method_collection='always',
-            line_items=[{
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': BROKER_FEE_CENTS,
-                    'recurring': {'interval': 'month'},
-                    'product_data': {
-                        'name': f'JetSchool broker account — {BROKER_FEE_LABEL} per month',
-                        'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
-                    },
-                },
-                'quantity': 1,
-            }],
-            metadata=broker_meta,
-            subscription_data={'metadata': broker_meta},
-            success_url=f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{base}/dashboard?broker=0',
-            idempotency_key=_checkout_idempotency(f"broker-account-{user['id']}"),
-            **_stripe_buyer(user),
-        )
-        return jsonify({'url': checkout.url}), 200
-    except Exception:
-        logger.exception('Broker checkout creation failed')
-        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+    return jsonify({'url': _broker_payment_link(user)}), 200
 
 
 @app.route('/api/account/broker-confirm', methods=['POST'])
@@ -6666,70 +6752,25 @@ def _payment_required() -> bool:
 
 
 def _listing_needs_checkout(market) -> bool:
-    """The monthly fee applies to public listings. Off-market sale and wanted listings are free."""
-    if not _payment_required():
+    """The monthly fee applies to public listings. Off-market sale and wanted listings are free.
+
+    Production always uses the public listing Payment Link. A local test can turn that off.
+    """
+    if sections_module.normalize_market(market) == 'broker_only':
         return False
-    return sections_module.normalize_market(market) != 'broker_only'
+    if db_module.is_production():
+        return True
+    return _payment_required()
 
 
 def _listing_checkout_url(user, listing_id):
-    """Open Stripe Checkout for the monthly listing fee. None when it cannot start."""
-    if not _payment_required():
-        return None
+    """Public listing Payment Link. None for off-market listings and listings that are already paid."""
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
         return None
-    if sections_module.normalize_market(row.get('market')) == 'broker_only':
+    if not _listing_needs_checkout(row.get('market')):
         return None
-    amount = _listing_fee_cents()
-    dollars = f'{amount / 100:.2f}'
-    title = row.get('title') or f'Listing #{listing_id}'
-    base = _public_base()
-    meta = {
-        'listing_id': str(listing_id),
-        'user_id': str(user['id']),
-        'purpose': 'listing_fee',
-    }
-    try:
-        checkout = stripe.checkout.Session.create(
-            mode='subscription',
-            billing_address_collection='auto',
-            phone_number_collection={'enabled': True},
-            automatic_tax={'enabled': False},
-            allow_promotion_codes=True,
-            payment_method_collection='always',
-            line_items=[{
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': amount,
-                    'recurring': {'interval': 'month'},
-                    'product_data': {
-                        'name': f'Listing fee — ${dollars} per month',
-                        'description': f'{title}. ${dollars} per month.',
-                    },
-                },
-                'quantity': 1,
-            }],
-            metadata=meta,
-            subscription_data={'metadata': meta},
-            success_url=f'{base}/dashboard?paid=1&submitted={listing_id}&session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{base}/dashboard?paid=0&submitted={listing_id}',
-            idempotency_key=_checkout_idempotency(f'listing-{listing_id}-{amount}-monthly'),
-            **_stripe_buyer(user),
-        )
-        db_module.set_listing_payment_session(listing_id, checkout.id)
-        return checkout.url
-    except stripe.error.AuthenticationError:
-        logger.error(
-            'Stripe rejected STRIPE_SECRET_KEY. Use the secret key that starts with sk_test_ or sk_live_, not the publishable key.'
-        )
-        return None
-    except stripe.error.InvalidRequestError as exc:
-        logger.error('Stripe refused to open Checkout: %s', getattr(exc, 'user_message', None) or exc)
-        return None
-    except Exception:
-        logger.exception('Stripe checkout creation failed')
-        return None
+    return _listing_payment_link(user, listing_id)
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
@@ -6742,12 +6783,12 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    if not _payment_required():
-        return jsonify({'skip': True, 'message': 'Payment not required'}), 200
-    if row.get('payment_status') == 'paid':
-        return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if sections_module.normalize_market(row.get('market')) == 'broker_only':
         return jsonify({'skip': True, 'message': 'Off-market listings do not have a listing fee.'}), 200
+    if row.get('payment_status') == 'paid':
+        return jsonify({'skip': True, 'message': 'Already paid'}), 200
+    if not _listing_needs_checkout(row.get('market')):
+        return jsonify({'skip': True, 'message': 'Payment not required'}), 200
     url = _listing_checkout_url(user, listing_id)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -6756,7 +6797,7 @@ def api_listing_checkout(listing_id: int):
 
 def _listing_checkout_settled(sess, listing_id, user_id) -> bool:
     """True when this Checkout Session is a finished payment for this listing and owner."""
-    meta = _stripe_metadata(sess)
+    meta = _checkout_identity(sess)
     if str(meta.get('purpose') or '') != 'listing_fee':
         return False
     if str(meta.get('listing_id') or '') != str(listing_id):
@@ -6933,7 +6974,7 @@ def _record_listing_checkout(sess):
     listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id, subscription_id, customer_id)
     if listing_id:
         return listing_id
-    meta = _stripe_metadata(sess)
+    meta = _checkout_identity(sess)
     if meta.get('purpose') != 'listing_fee':
         return None
     try:

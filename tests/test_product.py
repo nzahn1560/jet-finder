@@ -122,10 +122,11 @@ class ProductTests(unittest.TestCase):
         blocked = self.client.get('/off-market')
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
-        self.assertEqual(checkout.status_code, 503)
-        self.assertIn(b'$19.99 a month', checkout.data)
-        self.assertIn(b'broker map', checkout.data)
-        self.assertIn(b'off-market', checkout.data)
+        self.assertEqual(checkout.status_code, 200, checkout.get_json())
+        self.assertIn('buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', checkout.get_json().get('url') or '')
+        portal = self.client.get('/dashboard')
+        self.assertIn(b'buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', portal.data)
+        self.assertIn(b'href="/settings"', portal.data)
 
     def test_role_alone_does_not_open_off_market(self):
         labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
@@ -189,9 +190,15 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(public.status_code, 201, public.get_json())
             self.assertTrue(public.get_json()['payment_required'])
             self.assertEqual(public.get_json()['status'], 'unpaid')
+            pay = self.client.post(f"/api/listings/{public.get_json()['id']}/checkout")
+            self.assertEqual(pay.status_code, 200, pay.get_json())
+            self.assertIn('buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', pay.get_json().get('url') or '')
+            self.assertIn(f"listing-{public.get_json()['id']}-user-", pay.get_json().get('url') or '')
             page = self.client.get('/create-listing')
             self.assertIn(b'opens checkout', page.data)
-            self.assertIn(b'window.location.href = payData.url', page.data)
+            self.assertIn(b'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', page.data)
+            self.assertIn(b'window.location.href = payUrl.toString()', page.data)
+            self.assertIn(b'There is no listing fee', page.data)
             self._login('broker@example.com', 'broker-pass-1')
             sale = self.client.post('/api/listings', json=dict(
                 self._payload('Free Off Market', 'broker_only'), listing_intent='sale',
@@ -1107,6 +1114,78 @@ class ProductTests(unittest.TestCase):
             'kind': 'message', 'notes': 'Call me', 'contact_email': 'buyer@example.com', 'contact_phone': '',
         })
         self.assertEqual(missing_phone.status_code, 400)
+
+    def test_settings_cover_password_email_and_privacy(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        page = self.client.get('/settings')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'General', page.data)
+        self.assertIn(b'id="current-password"', page.data)
+        self.assertIn(b'id="email-opt-in"', page.data)
+        self.assertIn(b'We do not sell your personal information', page.data)
+        self.assertIn(b'Download my information', page.data)
+        self.assertIn(b'Delete account', page.data)
+        token = page.data.split(b'name="csrf_token" value="', 1)[1].split(b'"', 1)[0]
+        saved = self.client.post('/settings', data={
+            'csrf_token': token.decode(),
+            'action': 'email',
+            'email_opt_in': '0',
+        })
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn(b'Email preference saved', saved.data)
+        self.assertNotIn(b'id="email-opt-in" name="email_opt_in" type="checkbox" value="1" checked', saved.data)
+        sent = []
+        original = db_module._send_notice_email
+        db_module._send_notice_email = lambda email, title, body: sent.append(email) or True
+        try:
+            db_module.notify_user(self.seller['id'], 'watch', 'Watch', 'A plane', '/', 'seller@example.com')
+            self.assertEqual(sent, [])
+            db_module.notify_user(self.seller['id'], 'billing', 'Payment', 'Card declined', '/', 'seller@example.com')
+            self.assertEqual(sent, ['seller@example.com'])
+        finally:
+            db_module._send_notice_email = original
+            db_module.set_email_opt_in(self.seller['id'], True)
+        changed = self.client.post('/settings', data={
+            'csrf_token': token.decode(),
+            'action': 'password',
+            'current_password': 'seller-pass-1',
+            'new_password': 'seller-pass-2',
+            'confirm_password': 'seller-pass-2',
+        })
+        self.assertEqual(changed.status_code, 200)
+        self.assertIn(b'Password updated', changed.data)
+        self.client.post('/settings', data={
+            'csrf_token': token.decode(),
+            'action': 'password',
+            'current_password': 'seller-pass-2',
+            'new_password': 'seller-pass-1',
+            'confirm_password': 'seller-pass-1',
+        })
+        exported = self.client.get('/settings/download')
+        self.assertEqual(exported.status_code, 200)
+        self.assertNotIn('password_hash', exported.get_json()['account'])
+        self.assertEqual(exported.get_json()['account']['email'], 'seller@example.com')
+
+    def test_payment_link_reference_marks_the_public_listing_paid(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Pay Link Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.set_user_listing_status(listing_id, 'unpaid')
+        paid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_paylink_listing',
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_paylink_listing',
+                'status': 'complete',
+                'payment_status': 'paid',
+                'client_reference_id': f'listing-{listing_id}-user-{self.seller["id"]}',
+                'metadata': {},
+            }},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('payment_status'), 'paid')
+        self.assertEqual(row.get('status'), 'pending')
 
     def _payload(self, title, market):
         return {

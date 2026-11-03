@@ -516,9 +516,9 @@
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
-                        <button type="submit" class="btn btn-primary btn-lg">
+                        <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-primary btn-lg" id="listing-submit" role="button">
                             <i class="fas fa-check me-2"></i>Submit for approval
-                        </button>
+                        </a>
                     </div>
                 </form>
             </div>
@@ -528,6 +528,8 @@
 
 <script>
     const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
+    const LISTING_USER_ID = {{ (get_current_user_info().id if get_current_user_info() else 0)|int }};
+    const LISTING_PAYMENT_URL = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01';
     function syncOffMarketFields() {
         const picked = document.querySelector('[name="market"]:checked');
         const off = picked && picked.value === 'broker_only';
@@ -548,6 +550,11 @@
             next.textContent = off
                 ? 'Off-market listings go to an admin for approval. There is no listing fee.'
                 : 'Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.';
+        }
+        const submitLink = document.getElementById('listing-submit');
+        if (submitLink) {
+            if (off) submitLink.removeAttribute('href');
+            else submitLink.href = LISTING_PAYMENT_URL;
         }
     }
     document.querySelectorAll('[name="market"]').forEach(function (radio) {
@@ -744,10 +751,11 @@
             return;
         }
 
-        const submitBtn = this.querySelector('[type="submit"]');
+        const submitBtn = document.getElementById('listing-submit');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>' + (EDIT_LISTING_ID ? 'Saving...' : 'Creating Listing...');
-        submitBtn.disabled = true;
+        submitBtn.setAttribute('aria-disabled', 'true');
+        submitBtn.style.pointerEvents = 'none';
 
         const fail = (msg) => {
             const box = document.getElementById('listing-form-error');
@@ -757,13 +765,13 @@
                 box.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
             submitBtn.innerHTML = originalText;
-            submitBtn.disabled = false;
+            submitBtn.removeAttribute('aria-disabled');
+            submitBtn.style.pointerEvents = '';
         };
 
         try {
             const payload = buildListingPayload();
             let listingId = EDIT_LISTING_ID;
-            let paymentRequired = false;
             let amended = false;
 
             if (EDIT_LISTING_ID) {
@@ -791,7 +799,6 @@
                     return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, city, state, and email, then try again.');
                 }
                 listingId = data.id;
-                paymentRequired = !!data.payment_required;
             }
 
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading photos...';
@@ -808,19 +815,13 @@
                 return;
             }
 
-            if (paymentRequired) {
+            if (payload.market !== 'broker_only') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
-                try {
-                    const pay = await fetch(`/api/listings/${listingId}/checkout`, { method: 'POST', credentials: 'include' });
-                    const payData = await pay.json().catch(() => ({}));
-                    if (pay.ok && payData.url) {
-                        window.location.href = payData.url;
-                        return;
-                    }
-                    return fail(payData.message || 'Checkout could not be opened. The listing is saved. Use Pay listing fee on your profile.');
-                } catch (err) {
-                    return fail('Checkout could not be opened. The listing is saved. Use Pay listing fee on your profile.');
-                }
+                const payUrl = new URL(LISTING_PAYMENT_URL);
+                payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID);
+                if (payload.email) payUrl.searchParams.set('prefilled_email', payload.email);
+                window.location.href = payUrl.toString();
+                return;
             }
             window.location.href = LISTING_USER_IS_ADMIN
                 ? ('/admin?highlight=' + listingId)
@@ -829,6 +830,12 @@
             console.error('Listing submission failed:', err);
             fail('Something went wrong submitting your listing. Please try again.');
         }
+    });
+    document.getElementById('listing-submit').addEventListener('click', function (event) {
+        event.preventDefault();
+        const form = document.getElementById('listing-form');
+        if (form.requestSubmit) form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     });
 
     // =========================================================================

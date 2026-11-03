@@ -156,6 +156,7 @@ class User(Base):
     user_reports = Column(Integer, default=0)
     is_suspended = Column(Boolean, default=False)
     suspension_reason = Column(Text)
+    email_opt_in = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -858,6 +859,7 @@ def init_db():
                 'profile_photo_url TEXT',
                 'company_logo_url TEXT',
                 'broker_application_status VARCHAR(20)',
+                'email_opt_in BOOLEAN DEFAULT 1',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -885,6 +887,7 @@ def init_db():
                 ('profile_photo_url', 'TEXT'),
                 ('company_logo_url', 'TEXT'),
                 ('broker_application_status', 'VARCHAR(20)'),
+                ('email_opt_in', 'BOOLEAN DEFAULT TRUE NOT NULL'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -2412,6 +2415,30 @@ def delete_notifications(user_id):
         return True
 
 
+def user_wants_optional_email(user_id) -> bool:
+    """Optional emails are on unless this account turned them off."""
+    person = get_user_by_id(user_id)
+    if not person:
+        return False
+    return person.get('email_opt_in') not in (False, 0, '0')
+
+
+def set_email_opt_in(user_id, opted_in: bool) -> bool:
+    with get_session() as s:
+        n = s.query(User).filter(User.id == int(user_id)).update(
+            {'email_opt_in': bool(opted_in)}, synchronize_session=False,
+        )
+        return n > 0
+
+
+def set_user_password(user_id, password_hash) -> bool:
+    with get_session() as s:
+        n = s.query(User).filter(User.id == int(user_id)).update(
+            {'password_hash': password_hash}, synchronize_session=False,
+        )
+        return n > 0
+
+
 def _send_notice_email(email, title, body):
     if not email:
         return False
@@ -2569,7 +2596,13 @@ def restore_broker_message(user_id, message_id):
 
 def notify_user(user_id, kind, title, body=None, href=None, email=None):
     create_notification(user_id, kind, title, body, href)
-    _send_notice_email(email, title, body)
+    optional = kind in {'watch', 'listing', 'broker_message', 'team'}
+    if optional and not user_wants_optional_email(user_id):
+        return
+    text = body or ''
+    if optional:
+        text = (text + '\n\nTo stop these emails, open Settings on your JetSchool account.').strip()
+    _send_notice_email(email, title, text)
 
 
 def note_listing_watched(watcher_id, listing_id):
