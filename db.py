@@ -157,6 +157,7 @@ class User(Base):
     is_suspended = Column(Boolean, default=False)
     suspension_reason = Column(Text)
     email_opt_in = Column(Boolean, default=True, nullable=False)
+    stripe_customer_id = Column(String(255))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -860,6 +861,7 @@ def init_db():
                 'company_logo_url TEXT',
                 'broker_application_status VARCHAR(20)',
                 'email_opt_in BOOLEAN DEFAULT 1',
+                'stripe_customer_id VARCHAR(255)',
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_def}'))
@@ -888,6 +890,7 @@ def init_db():
                 ('company_logo_url', 'TEXT'),
                 ('broker_application_status', 'VARCHAR(20)'),
                 ('email_opt_in', 'BOOLEAN DEFAULT TRUE NOT NULL'),
+                ('stripe_customer_id', 'VARCHAR(255)'),
             ]:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}'))
@@ -1619,6 +1622,21 @@ def find_listing_by_subscription(subscription_id):
             UserListing.stripe_subscription_id == str(subscription_id)[:255]
         ).first()
         return row.to_dict() if row else None
+
+
+def set_user_stripe_customer(user_id, customer_id, replace=False):
+    """Keep one Stripe customer on the account. A later payment reuses it."""
+    if not user_id or not customer_id:
+        return None
+    customer_id = str(customer_id)[:255]
+    with get_session() as s:
+        row = s.query(User).filter(User.id == int(user_id)).first()
+        if not row:
+            return None
+        if row.stripe_customer_id and not replace:
+            return row.stripe_customer_id
+        row.stripe_customer_id = customer_id
+        return customer_id
 
 
 def listing_stripe_customer(user_id):
@@ -2424,6 +2442,7 @@ def _directory_broker(user, team, is_main):
         'lon': lon,
         'team_id': team.id if team is not None else None,
         'team_name': team.name if team is not None else (user.company or ''),
+        'admin_user_id': int(team.admin_user_id) if team is not None else int(user.id),
         'is_main': bool(is_main),
     }
 

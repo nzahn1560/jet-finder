@@ -29,7 +29,7 @@
         <a href="{{ url_for('dashboard') }}">Your profile</a>
         {% else %}
         <a href="{{ url_for('register', broker=1) }}">Sign up as a broker</a>.
-        The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.
+        The main account pays $19.99 a month. A team seat is free until that account approves you.
         {% endif %}
     </p>
 </div>
@@ -109,7 +109,7 @@
         }).join('');
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(team)
-            + (team.bio ? '<p>' + esc(team.bio) + '</p>' : '')
+            + '<p class="broker-status">Subscription is active.</p>'
             + (people || '<p>No brokers are on this team yet.</p>');
     }
 

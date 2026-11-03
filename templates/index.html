@@ -1745,7 +1745,7 @@
 
         .aircraft-image {
             height: auto;
-            aspect-ratio: 1 / 1;
+            aspect-ratio: 16 / 9;
         }
 
         .aircraft-content {
@@ -1756,7 +1756,7 @@
 
     @media (max-width: 992px) {
         .aircraft-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.75rem;
         }
     }
@@ -1782,7 +1782,7 @@
 
         .aircraft-image {
             height: auto;
-            aspect-ratio: 1 / 1;
+            aspect-ratio: 16 / 9;
         }
 
         .aircraft-content {
@@ -1811,7 +1811,7 @@
 
         .aircraft-image {
             height: auto;
-            aspect-ratio: 1 / 1;
+            aspect-ratio: 16 / 9;
         }
 
         .aircraft-content {
@@ -3064,7 +3064,7 @@
 
     .aircraft-image {
         width: 100%;
-        aspect-ratio: 1 / 1;
+        aspect-ratio: 16 / 9;
         height: auto;
         overflow: hidden;
         background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
@@ -3323,6 +3323,7 @@
         display: flex;
         flex: 1;
         min-height: 0;
+        max-height: 12.5rem;
         gap: 4px;
     }
 
@@ -3479,7 +3480,7 @@
     .listing-photos {
         position: relative;
         width: 100%;
-        aspect-ratio: 1 / 1;
+        aspect-ratio: 16 / 9;
         height: auto;
         overflow: hidden;
         background: #1a1a1a;
@@ -3488,10 +3489,10 @@
 
     .aircraft-grid.list-view .listing-photos,
     .aircraft-grid.list-view .aircraft-image {
-        width: 220px;
-        height: 220px;
-        aspect-ratio: 1 / 1;
-        flex-shrink: 0;
+        width: 280px;
+        height: auto;
+        aspect-ratio: 16 / 9;
+        flex: 0 0 280px;
     }
 
     .listing-photos img {
@@ -4633,7 +4634,7 @@
                                 <div style="color:#888; text-decoration: line-through;">$70</div>
                                 <strong>$49</strong> <span style="background:#F05545; color:#fff; font-size:0.75rem; padding:2px 6px;">30% off</span>
                             </div>
-                            <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-success" id="createListingBtn" role="button">
+                            <a href="#" class="btn btn-success" id="createListingBtn" role="button">
                                 <i class="fas fa-check me-2"></i>Submit listing — $49.99 per month
                             </a>
                         </div>
@@ -8086,7 +8087,7 @@
             const cover = document.createElement('img');
             cover.src = homepagePhotos[0].url;
             cover.alt = 'Cover photo as it appears on the marketplace';
-            cover.style.cssText = 'display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#111;border-radius:12px;margin-bottom:0.75rem;';
+            cover.style.cssText = 'display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#111;border-radius:12px;margin-bottom:0.75rem;';
             listingPhotoPreview.append(coverLabel, cover);
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.6rem;';
@@ -8096,7 +8097,7 @@
                 const img = document.createElement('img');
                 img.src = item.url;
                 img.alt = '';
-                img.style.cssText = 'width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;display:block;';
+                img.style.cssText = 'width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;display:block;';
                 const label = document.createElement('div');
                 label.textContent = index === 0 ? 'Cover' : String(index + 1);
                 label.style.margin = '0.3rem 0';
@@ -8308,10 +8309,13 @@
                     fd.append('files', item.file);
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
-                const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
-                payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}');
-                if (email) payUrl.searchParams.set('prefilled_email', email);
-                window.location.href = payUrl.toString();
+                const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
+                const payData = await pay.json().catch(function () { return {}; });
+                if (payData.url) {
+                    window.location.href = payData.url;
+                    return;
+                }
+                alert(payData.message || 'Checkout could not be started. The listing is saved on your account.');
             } catch (err) {
                 alert('Could not create the listing. Please try again.');
             } finally {

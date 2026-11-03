@@ -220,6 +220,29 @@
             gap: 0;
         }
     }
+
+    .broker-offer {
+        border: 1px solid rgba(240, 85, 69, 0.45);
+        border-radius: 14px;
+        padding: 18px 18px 8px;
+        margin: 8px 0 18px;
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .broker-offer h2 {
+        color: #fff;
+        font-size: 1.35rem;
+        margin: 0 0 6px;
+    }
+
+    .broker-offer p,
+    .broker-offer label {
+        color: #e6e6e6;
+    }
+
+    .broker-offer > p {
+        margin: 0 0 12px;
+    }
 </style>
 {% endblock %}
 
@@ -288,24 +311,22 @@
                 </select>
             </div>
 
-            <section id="broker-signup" style="border:1px solid rgba(240,85,69,0.55); border-radius:12px; padding:16px; margin:8px 0 18px;">
-                <h2 style="color:#fff; font-size:1.35rem; margin:0 0 8px;">Sign up as a broker</h2>
-                <p style="color:#ddd; margin:0 0 12px;">The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.</p>
-                <label style="color:#fff; display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+            <section id="broker-signup" class="broker-offer">
+                <h2>Sign up as a broker</h2>
+                <p>The main account pays $19.99 a month. A team seat is free until that account approves you.</p>
+                <label style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
                     <input type="checkbox" name="broker_signup" id="broker-signup-check" value="1" {% if broker_open %}checked{% endif %}>
                     I am signing up as a broker
                 </label>
                 <div id="broker-application" {% if not broker_open %}hidden{% endif %}>
-                    <label style="color:#fff; display:block; margin:0.35rem 0;">
+                    <label style="display:block; margin:0.35rem 0;">
                         <input type="radio" name="broker_path" value="main" {% if broker_path != 'assign' %}checked{% endif %}>
                         I am the main brokerage
                     </label>
-                    <p style="color:#bbb; margin:0 0 10px 1.4rem;">Only this account pays $19.99 a month.</p>
-                    <label style="color:#fff; display:block; margin:0.35rem 0;">
+                    <label style="display:block; margin:0.35rem 0 0.8rem;">
                         <input type="radio" name="broker_path" value="assign" {% if broker_path == 'assign' %}checked{% endif %}>
                         Assign me to a team
                     </label>
-                    <p style="color:#bbb; margin:0 0 10px 1.4rem;">Free. The main company account has to approve you.</p>
                     <div id="broker-assign-fields" {% if broker_path != 'assign' %}hidden{% endif %}>
                         {% if teams %}
                         <label for="team_id" class="form-label">Team</label>

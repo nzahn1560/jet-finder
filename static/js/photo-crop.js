@@ -1,7 +1,7 @@
 (function () {
     const SHAPES = {
-        card: { label: 'Listing photo', ratio: 1, outW: 1600, outH: 1600 },
-        page: { label: 'Listing photo', ratio: 1, outW: 1600, outH: 1600 }
+        card: { label: 'Listing photo', ratio: 16 / 9, outW: 1600, outH: 900 },
+        page: { label: 'Listing photo', ratio: 16 / 9, outW: 1600, outH: 900 }
     };
 
     let root = null;
@@ -22,7 +22,7 @@
             '.photo-crop button { border: 1px solid #444; background: #1c1c1c; color: #fff; border-radius: 8px; padding: 0.45rem 0.8rem; font-weight: 700; cursor: pointer; }',
             '.photo-crop button.is-on { background: #F05545; border-color: #F05545; }',
             '.photo-crop__use { background: #F05545; border-color: #F05545; }',
-            '.photo-crop__frame { position: relative; width: min(100%, 420px); aspect-ratio: 1; margin: 0 auto 0.9rem; overflow: hidden; background: #0c0c0c; border-radius: 12px; touch-action: none; cursor: grab; }',
+            '.photo-crop__frame { position: relative; width: min(100%, 640px); aspect-ratio: 16 / 9; margin: 0 auto 0.9rem; overflow: hidden; background: #0c0c0c; border-radius: 12px; touch-action: none; cursor: grab; }',
             '.photo-crop__frame img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; pointer-events: none; }',
             '.photo-crop label { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }',
             '.photo-crop input[type=range] { flex: 1; }',
@@ -40,7 +40,7 @@
         root.innerHTML = ''
             + '<div class="photo-crop__sheet">'
             + '<h2>Fit this photo</h2>'
-            + '<p>Drag the photo and use the slider. Listings use a square photo, and the frames below are what people see.</p>'
+            + '<p>Drag the photo and use the slider. Listings use a 16:9 photo, and the frames below are what people see.</p>'
             + '<div class="photo-crop__frame"><img alt=""></div>'
             + '<label>Zoom <input type="range" min="1" max="3" step="0.01" value="1"></label>'
             + '<div class="photo-crop__previews">'
@@ -90,7 +90,7 @@
     }
 
     function paintShape() {
-        root.querySelector('.photo-crop__frame').style.aspectRatio = '1';
+        root.querySelector('.photo-crop__frame').style.aspectRatio = '16 / 9';
     }
 
     function center() {
@@ -149,12 +149,12 @@
         img.style.height = (session.image.naturalHeight * scale) + 'px';
         img.style.left = session.offsetX + 'px';
         img.style.top = session.offsetY + 'px';
-        const exact = cropCanvas(480, 480);
+        const exact = cropCanvas(640, 360);
         const card = root.querySelector('.photo-crop__card canvas');
         const hero = root.querySelector('.photo-crop__hero canvas');
-        card.width = 360;
+        card.width = 640;
         card.height = 360;
-        hero.width = 360;
+        hero.width = 640;
         hero.height = 360;
         card.getContext('2d').drawImage(exact, 0, 0, card.width, card.height);
         hero.getContext('2d').drawImage(exact, 0, 0, hero.width, hero.height);

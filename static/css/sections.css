@@ -278,6 +278,17 @@
     padding: 0.9rem 1rem 1rem;
 }
 
+.broker-status {
+    display: inline-block;
+    margin: 0.85rem 0 0.35rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: rgba(52, 168, 83, 0.16);
+    color: #b7ebc4;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .broker-selected p {
     margin: 0.35rem 0 0;
     font-size: 0.85rem;

@@ -23,6 +23,7 @@ import stripe
 # Without this, Checkout and the billing portal never open.
 import stripe.billing_portal  # noqa: F401
 import stripe.checkout  # noqa: F401
+import stripe._payment_link  # noqa: F401
 import logging
 
 # Configure logging
@@ -1473,6 +1474,11 @@ def public_profile(user_id):
         return render_template('error.html', error_code=404, message='Profile not found'), 404
     viewer = get_current_user_from_request()
     is_owner = bool(viewer and viewer.get('id') == person.get('id'))
+    if not is_owner:
+        team = db_module.user_on_active_team(user_id)
+        main_id = team.get('admin_user_id') if team else None
+        if main_id and int(main_id) != int(user_id):
+            return redirect(url_for('public_profile', user_id=int(main_id)))
     person, membership, pending_members, teams, team_people = _profile_page_context(person)
     if not is_owner:
         pending_members = []
@@ -2884,7 +2890,9 @@ def register():
                             active=False,
                         )
                     flash('Account created. The main brokerage is the only account that pays.', 'success')
-                    resp = redirect(_broker_payment_link({'id': user_id_int, 'email': email}))
+                    person = get_user_by_id(user_id_int) or {'id': user_id_int, 'email': email}
+                    pay_url = _broker_checkout_url(person)
+                    resp = redirect(pay_url or url_for('dashboard'))
                 else:
                     flash('Account created successfully!', 'success')
                     resp = redirect(url_for('dashboard'))
@@ -3286,7 +3294,7 @@ def _user_public_dict(user) -> dict:
     """Strip sensitive fields before returning user JSON to the client."""
     if not user:
         return {}
-    out = {k: v for k, v in user.items() if k not in {'password_hash', 'verification_documents'}}
+    out = {k: v for k, v in user.items() if k not in {'password_hash', 'verification_documents', 'stripe_customer_id'}}
     if out.get('created_at') and not isinstance(out['created_at'], str):
         try:
             out['created_at'] = out['created_at'].isoformat()
@@ -3478,17 +3486,88 @@ BROKER_PAYMENT_LINK = 'https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00'
 LISTING_PAYMENT_LINK = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01'
 
 
-def _stripe_buyer(user):
-    """Reuse the Stripe customer when this person has already paid JetSchool."""
+def _saved_stripe_customer(user_id):
+    """The one Stripe customer already stored for this account."""
+    person = get_user_by_id(user_id) or {}
+    if person.get('stripe_customer_id'):
+        return person['stripe_customer_id']
     for kind in ('broker', 'broker_team'):
-        row = get_user_subscription(user['id'], kind) or {}
+        row = get_user_subscription(user_id, kind) or {}
         if row.get('stripe_customer_id'):
-            return {'customer': row['stripe_customer_id']}
-    customer = db_module.listing_stripe_customer(user['id'])
-    if customer:
-        return {'customer': customer}
+            return row['stripe_customer_id']
+    return db_module.listing_stripe_customer(user_id)
+
+
+def _customer_missing(exc) -> bool:
+    if getattr(exc, 'code', None) == 'resource_missing':
+        return True
+    return 'No such customer' in str(exc)
+
+
+def _stripe_customer_for(user):
+    """One Stripe customer per account. A new listing reuses it instead of opening another."""
+    if not user or not user.get('id'):
+        return None
     email = (user.get('email') or '').strip()
-    return {'customer_email': email} if email else {}
+    name = ' '.join(part for part in (user.get('first_name'), user.get('last_name')) if part).strip()
+    existing = _saved_stripe_customer(user['id'])
+    if existing and _stripe_configured():
+        try:
+            fields = {'metadata': {'user_id': str(user['id'])}}
+            if email:
+                fields['email'] = email
+            if name:
+                fields['name'] = name
+            stripe.Customer.modify(existing, **fields)
+            db_module.set_user_stripe_customer(user['id'], existing)
+            return existing
+        except Exception as exc:
+            if not _customer_missing(exc):
+                logger.exception('Could not refresh the Stripe customer')
+                db_module.set_user_stripe_customer(user['id'], existing)
+                return existing
+            existing = None
+    if not _stripe_configured():
+        if existing:
+            db_module.set_user_stripe_customer(user['id'], existing)
+        return existing
+    if email:
+        try:
+            found = stripe.Customer.list(email=email, limit=10)
+            matches = list(getattr(found, 'data', None) or [])
+            chosen = None
+            for remote in matches:
+                meta = _stripe_metadata(remote)
+                if str(meta.get('user_id') or '') == str(user['id']):
+                    chosen = remote
+                    break
+            if chosen is None and matches:
+                chosen = max(matches, key=lambda remote: int(_stripe_field(remote, 'created') or 0))
+            customer_id = _stripe_ref(chosen)
+            if customer_id:
+                fields = {'metadata': {'user_id': str(user['id'])}}
+                if email:
+                    fields['email'] = email
+                stripe.Customer.modify(customer_id, **fields)
+                return db_module.set_user_stripe_customer(user['id'], customer_id, replace=True)
+        except Exception:
+            logger.exception('Stripe customer lookup failed')
+    params = {'metadata': {'user_id': str(user['id'])}}
+    if email:
+        params['email'] = email
+    if name:
+        params['name'] = name
+    created = stripe.Customer.create(idempotency_key=f"jetschool-customer-{user['id']}", **params)
+    customer_id = _stripe_ref(created)
+    return db_module.set_user_stripe_customer(user['id'], customer_id, replace=True)
+
+
+def _stripe_buyer(user):
+    """Checkout must charge the account's existing Stripe customer."""
+    customer_id = _stripe_customer_for(user)
+    if not customer_id:
+        raise RuntimeError('stripe customer missing')
+    return {'customer': customer_id}
 
 
 def _public_base() -> str:
@@ -3552,29 +3631,81 @@ def _broker_market_access(user) -> bool:
     )
 
 
-def _stripe_buy_link(base, **params):
-    """Payment Link with the account or listing attached so the webhook can tell who paid."""
-    from urllib.parse import urlencode
-    clean = {key: str(value) for key, value in params.items() if value not in (None, '')}
-    if not clean:
-        return base
-    return base + '?' + urlencode(clean)
+def _checkout_reference(meta):
+    """Same broker-{id} and listing-{id}-user-{id} values the webhook already understands."""
+    purpose = (meta or {}).get('purpose')
+    if purpose == 'listing_fee':
+        return f"listing-{meta.get('listing_id')}-user-{meta.get('user_id')}"
+    if purpose in ('broker_account', 'broker_team'):
+        return f"broker-{meta.get('user_id')}"
+    return ''
 
 
-def _broker_payment_link(user):
-    return _stripe_buy_link(
-        BROKER_PAYMENT_LINK,
-        client_reference_id=f"broker-{user['id']}",
-        prefilled_email=(user.get('email') or ''),
+def _open_paid_checkout(user, meta, amount_cents, product_name, product_description, success_url, cancel_url, idem_prefix):
+    """Subscription Checkout on the account's one Stripe customer.
+
+    The session and the subscription both carry the account and listing, so a paid
+    invoice is the transaction for that account. Stripe emails its own receipt when
+    the customer has an email. JetSchool also emails the receipt on each paid invoice.
+    """
+    if not _stripe_configured():
+        return None
+    customer_id = _stripe_customer_for(user)
+    if not customer_id:
+        return None
+    checkout = stripe.checkout.Session.create(
+        mode='subscription',
+        customer=customer_id,
+        client_reference_id=_checkout_reference(meta),
+        billing_address_collection='auto',
+        automatic_tax={'enabled': False},
+        allow_promotion_codes=True,
+        payment_method_collection='always',
+        line_items=[{
+            'price_data': {
+                'currency': 'usd',
+                'unit_amount': int(amount_cents),
+                'recurring': {'interval': 'month'},
+                'product_data': {
+                    'name': product_name,
+                    'description': product_description,
+                },
+            },
+            'quantity': 1,
+        }],
+        metadata=meta,
+        subscription_data={'metadata': meta, 'description': product_name},
+        success_url=success_url,
+        cancel_url=cancel_url,
+        idempotency_key=_checkout_idempotency(idem_prefix),
     )
+    customer_id = _stripe_ref(_stripe_field(checkout, 'customer'))
+    if customer_id:
+        db_module.set_user_stripe_customer(user['id'], customer_id)
+    return checkout
 
 
-def _listing_payment_link(user, listing_id):
-    return _stripe_buy_link(
-        LISTING_PAYMENT_LINK,
-        client_reference_id=f"listing-{listing_id}-user-{user['id']}",
-        prefilled_email=(user.get('email') or ''),
-    )
+def _broker_checkout_url(user):
+    """Stripe Checkout for the $19.99 broker subscription, on this account's customer."""
+    if not user or not _stripe_configured():
+        return None
+    base = _public_base()
+    meta = {'purpose': 'broker_account', 'user_id': str(user['id'])}
+    try:
+        checkout = _open_paid_checkout(
+            user,
+            meta,
+            BROKER_FEE_CENTS,
+            'JetSchool broker',
+            'Broker account. $19.99 per month.',
+            f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
+            f'{base}/dashboard?broker=0',
+            f"broker-account-{user['id']}",
+        )
+    except Exception:
+        logger.exception('Broker checkout creation failed')
+        return None
+    return _stripe_field(checkout, 'url') if checkout else None
 
 
 def _payment_link_identity(sess):
@@ -3632,16 +3763,20 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
             return False
         if not db_module.set_team_subscription(team_id, 'active'):
             return False
+        customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
+        db_module.set_user_stripe_customer(user_id, customer_id)
         _grant_broker_account(
             user_id,
-            customer_id=_stripe_field(sess, 'customer'),
+            customer_id=customer_id,
             subscription_id=_stripe_field(sess, 'subscription'),
             subscription_type='broker_team',
         )
         return True
+    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
+    db_module.set_user_stripe_customer(user_id, customer_id)
     _grant_broker_account(
         user_id,
-        customer_id=_stripe_field(sess, 'customer'),
+        customer_id=customer_id,
         subscription_id=_stripe_field(sess, 'subscription'),
     )
     db_module.ensure_main_brokerage(user_id)
@@ -3659,7 +3794,15 @@ def api_broker_checkout():
     if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
         return jsonify({'already': True}), 200
     db_module.set_broker_application(user['id'], 'pending')
-    return jsonify({'url': _broker_payment_link(user)}), 200
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'payment_not_ready',
+            'message': 'Billing is not available until Stripe is configured.',
+        }), 503
+    url = _broker_checkout_url(user)
+    if not url:
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+    return jsonify({'url': url}), 200
 
 
 @app.route('/api/account/broker-application', methods=['POST'])
@@ -3718,7 +3861,7 @@ def api_broker_application():
     if fields:
         db_module.update_user_profile(user['id'], fields)
     db_module.set_broker_application(user['id'], 'pending')
-    return jsonify({'url': _broker_payment_link(user), 'broker': False}), 200
+    return jsonify({'url': _broker_checkout_url(user), 'broker': False}), 200
 
 
 @app.route('/api/account/broker-confirm', methods=['POST'])
@@ -6934,12 +7077,49 @@ def _stripe_configured() -> bool:
     return True
 
 
+_payment_links_pointed = False
+
+
+def _point_payment_links_at_account():
+    """Send a finished Payment Link back to the account page."""
+    global _payment_links_pointed
+    if _payment_links_pointed or not _stripe_configured():
+        return
+    base = (os.environ.get('PUBLIC_BASE_URL') or '').strip().strip('"').strip("'").rstrip('/')
+    if not (base.startswith('https://') or base.startswith('http://')):
+        if (_stripe_secret() or '').startswith('sk_live_'):
+            base = 'https://jetschoolusa.com'
+        else:
+            return
+    target = base + '/dashboard'
+    tokens = ('7sYbIUgyoesqejI9AVgbm00', 'eVqdR20zqbge6Rg6oJgbm01')
+    try:
+        page = stripe.PaymentLink.list(limit=100)
+        for link in page.data or []:
+            url = _stripe_field(link, 'url') or ''
+            if not any(token in url for token in tokens):
+                continue
+            after = _stripe_field(link, 'after_completion') or {}
+            redirect = _stripe_field(after, 'redirect') or {}
+            if _stripe_field(after, 'type') == 'redirect' and _stripe_field(redirect, 'url') == target:
+                continue
+            stripe.PaymentLink.modify(
+                link.id,
+                active=False,
+                after_completion={'type': 'redirect', 'redirect': {'url': target}},
+            )
+        _payment_links_pointed = True
+    except Exception:
+        logger.exception('Could not point the payment links at the account page')
+
+
 def _log_stripe_setup() -> None:
     raw = (os.environ.get('STRIPE_SECRET_KEY') or '').strip().strip('"').strip("'")
     key = _stripe_secret()
     if key:
         mode = 'live' if key.startswith('sk_live_') else 'test'
         logger.info('Stripe checkout is on (%s mode).', mode)
+        _point_payment_links_at_account()
         if not (os.environ.get('STRIPE_WEBHOOK_SECRET') or '').strip():
             logger.warning(
                 'STRIPE_WEBHOOK_SECRET is not set. A finished Checkout updates the listing when the buyer returns. '
@@ -6986,13 +7166,43 @@ def _listing_needs_checkout(market) -> bool:
 
 
 def _listing_checkout_url(user, listing_id):
-    """Public listing Payment Link. None for off-market listings and listings that are already paid."""
+    """Checkout for the monthly listing fee on this account's Stripe customer.
+
+    None for off-market listings and listings that are already paid.
+    """
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
         return None
     if not _listing_needs_checkout(row.get('market')):
         return None
-    return _listing_payment_link(user, listing_id)
+    if not _stripe_configured():
+        return None
+    base = _public_base()
+    meta = {
+        'purpose': 'listing_fee',
+        'listing_id': str(listing_id),
+        'user_id': str(row.get('user_id') or user['id']),
+    }
+    try:
+        checkout = _open_paid_checkout(
+            user,
+            meta,
+            _listing_fee_cents(),
+            'JetSchool listing',
+            'Public listing fee. $49.99 per month.',
+            f'{base}/dashboard?submitted={listing_id}&paid=1&session_id={{CHECKOUT_SESSION_ID}}',
+            f'{base}/dashboard?submitted={listing_id}&paid=0',
+            f"listing-fee-{user['id']}-{listing_id}",
+        )
+    except Exception:
+        logger.exception('Listing checkout creation failed')
+        return None
+    if not checkout:
+        return None
+    session_id = _stripe_field(checkout, 'id')
+    if session_id:
+        db_module.set_listing_payment_session(listing_id, session_id)
+    return _stripe_field(checkout, 'url')
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
@@ -7011,6 +7221,11 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if not _listing_needs_checkout(row.get('market')):
         return jsonify({'skip': True, 'message': 'Payment not required'}), 200
+    if not _stripe_configured():
+        return jsonify({
+            'error': 'payment_not_ready',
+            'message': 'Billing is not available until Stripe is configured.',
+        }), 503
     url = _listing_checkout_url(user, listing_id)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -7065,6 +7280,7 @@ def api_listing_confirm_payment(listing_id: int):
     was_waiting = row.get('status') in ('unpaid', 'draft')
     if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id):
         return jsonify({'error': 'server_error'}), 500
+    db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
     if was_waiting:
         fresh = db_module.get_listing_with_owner(listing_id) or row
         _notify_admins_new_listing(
@@ -7114,8 +7330,10 @@ def api_stripe_webhook():
             return jsonify({'received': True, 'pending': True}), 200
         if _broker_paid_from_checkout(sess):
             logger.info('Stripe webhook: broker account activated from session %s', session_id)
+            _email_checkout_receipt(sess)
             return jsonify({'received': True}), 200
         listing_id = _record_listing_checkout(sess)
+        _email_checkout_receipt(sess)
         if listing_id:
             logger.info('Stripe webhook: listing %s marked paid (session %s)', listing_id, session_id)
             row = db_module.get_listing_with_owner(listing_id)
@@ -7141,6 +7359,7 @@ def api_stripe_webhook():
         _sync_listing_subscription_event(event_type, obj)
         if event_type == 'invoice.paid':
             _activate_listing_from_invoice(obj)
+            _email_invoice_receipt(obj)
     elif event_type in ('charge.dispute.created', 'charge.dispute.closed'):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
         _sync_broker_dispute(event_type, obj)
@@ -7166,6 +7385,105 @@ def _stripe_metadata(obj):
         return dict(meta)
     except Exception:
         return {}
+
+
+def _invoice_receipt_url(obj):
+    """Stripe's receipt page for this paid invoice, when the charge is already available."""
+    url = _stripe_field(obj, 'hosted_invoice_url') or ''
+    charge_id = _stripe_ref(_stripe_field(obj, 'charge'))
+    if not charge_id:
+        return url or None
+    if not _stripe_configured():
+        return url or None
+    try:
+        charge = stripe.Charge.retrieve(charge_id)
+    except Exception:
+        logger.exception('Stripe receipt lookup failed')
+        return url or None
+    return _stripe_field(charge, 'receipt_url') or url or None
+
+
+def _send_payment_receipt(user_id, amount_cents, receipt_url, dedupe_key):
+    """Email the payer once per Stripe invoice, including each renewal."""
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return
+    if not dedupe_key or not db_module.claim_stripe_event('receipt-' + str(dedupe_key)[:180]):
+        return
+    person = get_user_by_id(user_id) or {}
+    paid = ''
+    try:
+        if amount_cents is not None:
+            paid = f'${int(amount_cents) / 100:.2f} '
+    except (TypeError, ValueError):
+        paid = ''
+    body = f'Stripe received {paid}for your JetSchool account. This payment stays on that account.'
+    if receipt_url:
+        body += ' Receipt: ' + str(receipt_url)
+    db_module.notify_user(user_id, 'billing', 'Payment receipt', body, '/dashboard', person.get('email'))
+
+
+def _email_checkout_receipt(sess):
+    """Receipt for the first payment. The renewal receipt is the paid invoice."""
+    try:
+        amount = int(_stripe_field(sess, 'amount_total'))
+    except (TypeError, ValueError):
+        return
+    if amount <= 0:
+        return
+    meta = _checkout_identity(sess)
+    invoice_id = _stripe_ref(_stripe_field(sess, 'invoice'))
+    if not invoice_id:
+        return
+    receipt = None
+    if _stripe_configured():
+        try:
+            invoice = stripe.Invoice.retrieve(invoice_id)
+            receipt = _invoice_receipt_url(invoice)
+            paid = _stripe_field(invoice, 'amount_paid')
+            if paid is not None:
+                amount = int(paid)
+        except Exception:
+            logger.exception('Stripe invoice receipt lookup failed')
+    _send_payment_receipt(meta.get('user_id'), amount, receipt, invoice_id)
+
+
+def _email_invoice_receipt(obj):
+    """Receipt for a paid invoice, including every monthly renewal."""
+    try:
+        amount = _stripe_field(obj, 'amount_paid')
+        if amount is None:
+            amount = _stripe_field(obj, 'amount_due')
+        amount = int(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        amount = None
+    if amount is not None and amount <= 0:
+        return
+    meta = _stripe_metadata(obj)
+    user_id = meta.get('user_id')
+    if not user_id:
+        parent = _stripe_field(obj, 'parent') or {}
+        details = parent.get('subscription_details') if isinstance(parent, dict) else _stripe_field(parent, 'subscription_details')
+        if isinstance(details, dict):
+            user_id = (details.get('metadata') or {}).get('user_id')
+    subscription_id = _object_subscription_id(obj)
+    if not user_id and subscription_id:
+        listing = db_module.find_listing_by_subscription(subscription_id)
+        if listing:
+            user_id = listing.get('user_id')
+        else:
+            row = db_module.find_subscription_by_stripe_id(subscription_id)
+            if row:
+                user_id = row.get('user_id')
+            elif _stripe_configured():
+                try:
+                    user_id = _stripe_metadata(stripe.Subscription.retrieve(subscription_id)).get('user_id')
+                except Exception:
+                    logger.exception('Stripe subscription lookup failed')
+    if not user_id:
+        return
+    _send_payment_receipt(user_id, amount, _invoice_receipt_url(obj), _stripe_field(obj, 'id') or subscription_id)
 
 
 def _checkout_collected(sess) -> bool:
@@ -7195,6 +7513,8 @@ def _record_listing_checkout(sess):
     customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
     listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id, subscription_id, customer_id)
     if listing_id:
+        owner = db_module.get_listing_with_owner(listing_id) or {}
+        db_module.set_user_stripe_customer(owner.get('user_id'), customer_id)
         return listing_id
     meta = _checkout_identity(sess)
     if meta.get('purpose') != 'listing_fee':
@@ -7206,7 +7526,10 @@ def _record_listing_checkout(sess):
     row = db_module.get_listing_with_owner(listing_id)
     if not row or str(meta.get('user_id') or '') != str(row.get('user_id') or ''):
         return None
-    return db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id)
+    paid = db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id)
+    if paid:
+        db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
+    return paid
 
 
 def _sync_listing_subscription_event(event_type, obj):
@@ -8067,9 +8390,21 @@ def api_admin_listings():
 @app.route('/api/admin/users')
 @require_admin
 def api_admin_users():
-    """Admin: list all users with basic info."""
+    """Admin: list users. q matches name, email, or phone. role limits the list."""
     try:
         users = db_module.list_all_users_basic()
+        query = (request.args.get('q') or '').strip().lower()
+        role = (request.args.get('role') or '').strip().lower()
+        if role == 'admin':
+            users = [user for user in users if user.get('is_admin')]
+        elif role:
+            users = [user for user in users if (user.get('profile_role') or 'other') == role]
+        if query:
+            def blob(user):
+                return ' '.join(str(user.get(key) or '') for key in (
+                    'first_name', 'last_name', 'email', 'phone', 'company', 'profile_location', 'profile_role',
+                )).lower()
+            users = [user for user in users if query in blob(user)]
         return jsonify({'users': users, 'total': len(users)}), 200
     except Exception:
         logger.exception('api_admin_users failed')
