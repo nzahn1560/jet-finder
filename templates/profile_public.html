@@ -22,6 +22,21 @@
 <div class="profile-page">
     <div class="profile-page__inner">
         {% include '_profile_card.html' %}
+        {% if team_people %}
+        <section class="fold">
+            <h2 class="fold__toggle" style="cursor:default;">Meet our team</h2>
+            <div class="fold__body">
+                {% for person in team_people %}
+                <a class="sale-card" href="/people/{{ person.user_id }}">
+                    <h3>{{ person.name }}{% if person.is_admin %} · Main{% endif %}</h3>
+                    {% if person.specialties %}<p>{{ person.specialties }}</p>{% endif %}
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% elif membership and membership.subscription_status == 'active' and membership.admin_user_id %}
+        <p style="color:#d0d0d0; margin-top:1rem;">Part of <a href="/people/{{ membership.admin_user_id }}" style="color:#F05545;">{{ membership.name }}</a></p>
+        {% endif %}
         <section class="fold" id="selling-fold">
             <button type="button" class="fold__toggle" id="selling-toggle" aria-expanded="true">Aircraft for sale</button>
             <div class="fold__body" id="selling-body">
@@ -64,7 +79,7 @@
         });
         if (!shown.length) { list.innerHTML = '<p style="color:#d0d0d0;font-size:1.1rem;">No aircraft match.</p>'; return; }
         list.innerHTML = shown.map(function (row) {
-            const bits = [row.year, row.engine_type, row.place, row.serial_number ? 'S/N ' + row.serial_number : ''].filter(Boolean).join(' · ');
+            const bits = [row.broker_name, row.year, row.engine_type, row.place, row.serial_number ? 'S/N ' + row.serial_number : ''].filter(Boolean).join(' · ');
             const price = Number(row.price) > 0 ? '$' + Number(row.price).toLocaleString() : '';
             const href = row.market === 'off_market' || row.market === 'broker_only' ? '/off-market' : ('/listing/' + row.id);
             return '<a class="sale-card" href="' + href + '"><h3>' + esc(row.title || 'Aircraft') + '</h3><p>' + esc(price) + (price && bits ? ' · ' : '') + esc(bits) + '</p></a>';

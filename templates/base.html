@@ -206,6 +206,53 @@
             margin: 8px 0;
         }
 
+        #messagesDropdown em {
+            font-style: normal;
+            color: #F05545;
+        }
+
+        .nav-message {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            padding: 0.55rem 0.85rem;
+            border-bottom: 1px solid rgba(240, 85, 69, 0.2);
+            color: #f4f4f4;
+        }
+
+        .nav-message a {
+            flex: 1;
+            color: #fff;
+            text-decoration: none;
+            min-width: 0;
+        }
+
+        .nav-message a:hover { color: #F05545; }
+
+        .nav-message strong { display: block; }
+
+        .nav-message-mail {
+            display: block;
+            color: #c8c8c8;
+            font-size: 0.9rem;
+            overflow-wrap: anywhere;
+        }
+
+        .nav-message button {
+            border: 0;
+            background: transparent;
+            color: #F05545;
+            cursor: pointer;
+            padding: 0;
+            font-weight: 600;
+        }
+
+        .nav-message-empty {
+            margin: 0;
+            padding: 0.7rem 0.9rem;
+            color: #d0d0d0;
+        }
+
         /* Mobile Responsive */
         @media (max-width: 768px) {
             .header-container {
@@ -346,6 +393,13 @@
                                 <i class="fas fa-map-marked-alt me-2"></i>Broker Map
                             </a>
                         </li>
+                        {% if not current_user %}
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('register', broker=1) }}">
+                                <i class="fas fa-user-tie me-2"></i>Sign up as a broker
+                            </a>
+                        </li>
+                        {% endif %}
                         <li>
                             <a class="dropdown-item" href="{{ url_for('off_market_page') }}">
                                 <i class="fas fa-lock me-2"></i>Off Market
@@ -374,6 +428,17 @@
             <!-- User Menu / Login (Right) -->
             <div class="login-container">
                 {% if current_user %}
+                <div class="d-flex align-items-center gap-2">
+                <div class="dropdown">
+                    <button type="button" class="login-btn dropdown-toggle" id="messagesDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                        <i class="fas fa-envelope"></i>
+                        <span>Messages</span>
+                        <em id="nav-message-count"></em>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end" id="nav-message-menu" aria-labelledby="messagesDropdown">
+                        <p class="nav-message-empty">Loading messages...</p>
+                    </div>
+                </div>
                 <div class="dropdown user-menu">
                     <a href="#" class="login-btn dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown"
                         aria-expanded="false">
@@ -427,8 +492,13 @@
                         </li>
                     </ul>
                 </div>
+                </div>
                 {% else %}
                 <div class="d-flex gap-2">
+                    <a href="{{ url_for('register', broker=1) }}" class="login-btn">
+                        <i class="fas fa-user-tie"></i>
+                        <span>Become a broker</span>
+                    </a>
                     <a href="{{ url_for('register') }}" class="login-btn">
                         <i class="fas fa-user-plus"></i>
                         <span>Register</span>
@@ -479,6 +549,54 @@
             if (!slot || !data || !data.unread) return;
             slot.textContent = '(' + data.unread + ')';
         }).catch(function () {});
+        (function () {
+            const menu = document.getElementById('nav-message-menu');
+            const count = document.getElementById('nav-message-count');
+            if (!menu) return;
+            function esc(value) {
+                return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+                    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+                });
+            }
+            async function loadNavMessages() {
+                const response = await fetch('/api/broker/messages', { credentials: 'include' });
+                if (!response.ok) {
+                    menu.innerHTML = '<p class="nav-message-empty">Messages are unavailable.</p>';
+                    return;
+                }
+                const data = await response.json();
+                const rows = (data.inbox || []).concat(data.sent || []);
+                if (count) count.textContent = rows.length ? '(' + rows.length + ')' : '';
+                if (!rows.length) {
+                    menu.innerHTML = '<p class="nav-message-empty">No messages.</p><a class="dropdown-item" href="/dashboard#messages">Open messages</a>';
+                    return;
+                }
+                menu.innerHTML = rows.map(function (row) {
+                    const who = (row.mine ? 'To ' : 'From ') + (row.person_name || 'Member');
+                    const about = row.aircraft_name || row.kind || 'Message';
+                    const mail = [row.contact_email, row.contact_phone].filter(Boolean).join(' · ');
+                    return '<div class="nav-message"><a href="/dashboard#messages"><strong>' + esc(who) + '</strong><span>' + esc(about) + '</span>'
+                        + (mail ? '<span class="nav-message-mail">' + esc(mail) + '</span>' : '')
+                        + '</a><button type="button" data-nav-delete="' + row.id + '">Delete</button></div>';
+                }).join('') + '<a class="dropdown-item" href="/dashboard#messages">Open messages</a>';
+                menu.querySelectorAll('[data-nav-delete]').forEach(function (button) {
+                    button.addEventListener('click', async function (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        button.disabled = true;
+                        const removed = await fetch('/api/broker/messages/' + button.getAttribute('data-nav-delete'), {
+                            method: 'DELETE', credentials: 'include',
+                        });
+                        if (removed.ok) {
+                            loadNavMessages();
+                            document.dispatchEvent(new Event('jet-messages-changed'));
+                        } else button.disabled = false;
+                    });
+                });
+            }
+            document.addEventListener('jet-messages-changed', loadNavMessages);
+            loadNavMessages();
+        })();
         {% endif %}
 
         // Universal share helper

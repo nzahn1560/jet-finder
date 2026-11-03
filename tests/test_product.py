@@ -142,8 +142,15 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(user['broker_specialties'], 'Citation, King Air')
         self.assertEqual(user['broker_years'], 14)
         form = self.client.get('/register')
+        self.assertIn(b'Sign up as a broker', form.data)
+        self.assertIn(b'The main brokerage is the only account that has to pay', form.data)
+        self.assertIn(b'Assign yourself to a team for free', form.data)
+        self.assertIn(b'The main company account has to approve you', form.data)
         self.assertIn(b'Aircraft specialty', form.data)
         self.assertIn(b'Years in business', form.data)
+        opened = self.client.get('/register?broker=1')
+        self.assertIn(b'id="broker-signup-check"', opened.data)
+        self.assertIn(b'checked', opened.data)
         profile = self.client.get('/dashboard')
         self.assertIn(b'Citation, King Air', profile.data)
         self.assertIn(b'Years in business', profile.data)
@@ -158,6 +165,50 @@ class ProductTests(unittest.TestCase):
         shown = self.client.get('/settings')
         self.assertIn(b'Gulfstream', shown.data)
         self.assertIn(b'21', shown.data)
+
+    def test_broker_signup_collects_the_paid_main_account_or_a_free_team(self):
+        page = self.client.get('/register?broker=1')
+        self.assertIn(b'Northstar', page.data)
+        self.assertIn(b'Become a broker', page.data)
+        main = self.client.post('/register', data={
+            'email': 'main-signup@example.com',
+            'password': 'broker-pass-1',
+            'first_name': 'Main',
+            'last_name': 'Signup',
+            'company': 'North Hangar',
+            'profile_city': 'Dallas',
+            'profile_state': 'TX',
+            'broker_signup': '1',
+            'broker_path': 'main',
+            'broker_specialties': 'Citation',
+            'broker_years': '9',
+        })
+        self.assertEqual(main.status_code, 302)
+        self.assertIn('buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', main.headers['Location'])
+        person = db_module.get_user_by_email('main-signup@example.com')
+        self.assertNotEqual(person['profile_role'], 'broker')
+        self.assertEqual(person['broker_application_status'], 'pending')
+        seat = db_module.team_membership(person['id'])
+        self.assertTrue(seat['is_admin'])
+        self.assertNotEqual(seat['subscription_status'], 'active')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        assigned = self.client.post('/register', data={
+            'email': 'join-signup@example.com',
+            'password': 'broker-pass-1',
+            'first_name': 'Join',
+            'last_name': 'Signup',
+            'broker_signup': '1',
+            'broker_path': 'assign',
+            'team_id': str(self.team_id),
+        })
+        self.assertEqual(assigned.status_code, 302)
+        self.assertNotIn('buy.stripe.com', assigned.headers['Location'])
+        joiner = db_module.get_user_by_email('join-signup@example.com')
+        self.assertNotEqual(joiner['profile_role'], 'broker')
+        waiting = db_module.team_membership(joiner['id'])
+        self.assertEqual(waiting['membership_status'], 'pending')
+        self.assertFalse(waiting['is_admin'])
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
 
     def test_role_alone_does_not_open_off_market(self):
         labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
@@ -184,6 +235,51 @@ class ProductTests(unittest.TestCase):
         checkout = self.client.post('/api/account/broker-checkout')
         self.assertEqual(checkout.status_code, 200)
         self.assertTrue(checkout.get_json().get('already'))
+
+    def test_a_broker_is_added_by_a_paid_account_and_listings_follow(self):
+        applicant = self._signup('assign-me@example.com', 'broker-pass-1', 'seller')
+        self._login(applicant['email'], 'broker-pass-1')
+        asked = self.client.post('/api/account/broker-application', json={
+            'kind': 'assign', 'team_id': self.team_id,
+        })
+        self.assertEqual(asked.status_code, 200, asked.get_json())
+        self.assertFalse(asked.get_json().get('broker'))
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        labeled = self.client.patch('/api/profile', json={'profile_role': 'broker'})
+        self.assertNotEqual(labeled.get_json()['user']['profile_role'], 'broker')
+        self._login('admin@example.com', 'admin-pass-1')
+        self.assertEqual(self.client.post(f'/api/admin/brokers/{applicant["id"]}/approve').status_code, 402)
+        self._login('broker@example.com', 'broker-pass-1')
+        added = self.client.post(
+            f'/api/broker-teams/{self.team_id}/members',
+            json={'email': applicant['email']},
+        )
+        self.assertEqual(added.status_code, 200, added.get_json())
+        self._login(applicant['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        created = self.client.post('/api/listings', json=self._payload('Team Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        own = self.client.get(f'/api/people/{applicant["id"]}/listings')
+        self.assertEqual(own.get_json()['listings'][0]['title'], 'Team Jet')
+        office = self.client.get(f'/api/people/{self.broker["id"]}/listings')
+        office_rows = office.get_json()['listings']
+        team_jet = next(row for row in office_rows if row['title'] == 'Team Jet')
+        self.assertEqual(team_jet['broker_name'], 'Seller')
+        page = self.client.get(f'/people/{self.broker["id"]}')
+        self.assertIn(b'Meet our team', page.data)
+        self.assertIn(applicant['first_name'].encode(), page.data)
+        brokers_page = self.client.get('/brokers')
+        self.assertIn(b'broker-count', brokers_page.data)
+        self.assertIn(b'in this view', brokers_page.data)
+        self._login('admin@example.com', 'admin-pass-1')
+        listed = self.client.get('/api/admin/brokers')
+        names = [row['name'] for row in listed.get_json()['brokers']]
+        self.assertIn('Seller', names)
+        self.assertIn('Broker', names)
+        admin_page = self.client.get('/admin')
+        self.assertIn(b'>Brokers<', admin_page.data)
+        self.assertNotIn(b'Approve brokerage', admin_page.data)
 
     def test_charter_and_mechanics_are_coming_soon(self):
         for path in ('/charter', '/charter-search', '/mechanics', '/charter/fleet'):
@@ -362,6 +458,10 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(row['status'], 'archived')
         hidden = self.client.get(f'/listing/{listing_id}')
         self.assertEqual(hidden.status_code, 404)
+        mine = self.client.get('/api/listings/me')
+        self.assertNotIn(listing_id, [item['id'] for item in mine.get_json()['listings']])
+        legacy = self.client.get('/api/my-listings')
+        self.assertNotIn(listing_id, [item['id'] for item in legacy.get_json()])
 
     def test_listing_photos_can_be_added_and_reordered_up_to_fifteen(self):
         import io
@@ -373,6 +473,10 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'id="photo-preview"', form.data)
         self.assertIn(b'Earlier', form.data)
         self.assertIn(b'id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif"', form.data)
+        self.assertIn(b'photo-crop.js', form.data)
+        self.assertIn(b'data-crop-photo', form.data)
+        home = self.client.get('/')
+        self.assertIn(b'photo-crop.js', home.data)
         first = db_module.add_listing_media(listing_id, 'photo', 'k1', 'https://example.test/1.jpg', sort_order=0)
         second = db_module.add_listing_media(listing_id, 'photo', 'k2', 'https://example.test/2.jpg', sort_order=1)
         ordered = self.client.post(f'/api/listings/{listing_id}/media/order', json={'ids': [second, first]})
@@ -440,7 +544,7 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/admin')
         self.assertIn(b'Stripe: ', page.data)
         self.assertIn(b'Not paid', page.data)
-        self.assertIn(b'>Paid<', page.data)
+        self.assertIn(b"label: 'Paid'", page.data)
         notes = self.client.get('/api/notifications')
         self.assertEqual(notes.status_code, 200)
         note_titles = [row.get('title') for row in notes.get_json()['notifications']]
@@ -470,10 +574,10 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(self.client.post(f'/api/admin/brokers/{applicant_id}/approve').status_code, 403)
         self._login('admin@example.com', 'admin-pass-1')
         approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
-        self.assertEqual(approved.status_code, 200, approved.get_json())
+        self.assertEqual(approved.status_code, 402, approved.get_json())
         person = db_module.get_user_by_id(applicant_id)
-        self.assertEqual(person['profile_role'], 'broker')
-        self.assertEqual(person['broker_application_status'], 'approved')
+        self.assertNotEqual(person['profile_role'], 'broker')
+        self.assertEqual(person['broker_application_status'], 'pending')
         queue = self.client.get('/api/admin/approvals')
         self.assertEqual(queue.status_code, 200)
         self._login('seller@example.com', 'seller-pass-1')
@@ -500,10 +604,15 @@ class ProductTests(unittest.TestCase):
         listing_id = created.get_json()['id']
         self._login('buyer@example.com', 'buyer-pass-1')
         self.assertEqual(self.client.get(f'/api/admin/listings/{listing_id}/review').status_code, 403)
+        db_module.add_listing_media(
+            listing_id, 'photo', 'review-photo', 'https://example.test/plane.jpg',
+            sort_order=0, published=False,
+        )
         self._login('admin@example.com', 'admin-pass-1')
         review = self.client.get(f'/api/admin/listings/{listing_id}/review')
         self.assertEqual(review.status_code, 200, review.get_json())
         body = review.get_json()
+        self.assertEqual(body['listing']['photos'], [{'url': 'https://example.test/plane.jpg', 'label': 'New'}])
         self.assertEqual(body['listing']['price'], 2500000)
         self.assertIn('payment_status', body['listing'])
         self.assertIn('price', body['aircraft_data'])
@@ -541,6 +650,7 @@ class ProductTests(unittest.TestCase):
         queue = self.client.get('/api/admin/listings?status=pending')
         queued = [item for item in queue.get_json()['listings'] if item['id'] == listing_id]
         self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]['photos'][0]['url'], 'https://example.test/plane.jpg')
 
     def test_reject_then_resubmit_does_not_require_a_second_payment(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -1084,7 +1194,13 @@ class ProductTests(unittest.TestCase):
         db_module.update_user_profile(person['id'], {'first_name': 'Mapbroker', 'profile_location': 'KTEB'})
         self._login('admin@example.com', 'admin-pass-1')
         approved = self.client.post(f"/api/admin/brokers/{person['id']}/approve")
-        self.assertEqual(approved.status_code, 200, approved.get_json())
+        self.assertEqual(approved.status_code, 402, approved.get_json())
+        self.assertNotIn(b'Mapbroker', self.client.get('/brokers').data)
+        db_module.update_user_subscription(
+            person['id'], 'broker', subscription_status='active', stripe_subscription_id='sub_map_broker',
+        )
+        from app import _grant_broker_account
+        _grant_broker_account(person['id'])
         directory = self.client.get('/brokers')
         self.assertEqual(directory.status_code, 200)
         self.assertIn(b'Mapbroker', directory.data)
@@ -1205,6 +1321,9 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(self.client.delete('/api/notifications').status_code, 200)
         self.assertEqual(self.client.get('/api/notifications').get_json()['notifications'], [])
         portal = self.client.get('/dashboard')
+        self.assertIn(b'id="messagesDropdown"', portal.data)
+        self.assertIn(b'id="nav-message-menu"', portal.data)
+        self.assertIn(b'id="messages-body" hidden', portal.data)
         self.assertIn(b'id="clear-messages"', portal.data)
         self.assertIn(b'id="clear-alerts"', portal.data)
         self.assertIn(b'Deleted messages', portal.data)
@@ -1297,6 +1416,40 @@ class ProductTests(unittest.TestCase):
         row = db_module.get_listing_with_owner(listing_id)
         self.assertEqual(row.get('payment_status'), 'paid')
         self.assertEqual(row.get('status'), 'pending')
+
+    def test_admin_can_view_message_and_delete_a_user_account(self):
+        created = self.client.post('/api/auth/signup', json={
+            'email': 'account-view@example.com',
+            'password': 'account-pass-1',
+            'first_name': 'Casey',
+            'profile_role': 'buyer',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        user_id = created.get_json()['user']['id']
+        self._login('buyer@example.com', 'buyer-pass-1')
+        self.assertEqual(self.client.get(f'/api/admin/users/{user_id}').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        page = self.client.get('/admin')
+        self.assertIn(b'data-user-view', page.data)
+        self.assertIn(b'Send message', page.data)
+        viewed = self.client.get(f'/api/admin/users/{user_id}')
+        self.assertEqual(viewed.status_code, 200)
+        self.assertEqual(viewed.get_json()['user']['email'], 'account-view@example.com')
+        self.assertNotIn('password_hash', viewed.get_json()['user'])
+        sent = self.client.post(
+            f'/api/admin/users/{user_id}/message',
+            json={'message': 'Please confirm the phone number on your account.'},
+        )
+        self.assertEqual(sent.status_code, 200, sent.get_json())
+        self._login('account-view@example.com', 'account-pass-1')
+        notes = self.client.get('/api/notifications').get_json()['notifications']
+        self.assertTrue(any('phone number' in (note.get('body') or '') for note in notes))
+        self._login('admin@example.com', 'admin-pass-1')
+        blocked = self.client.delete(f'/api/admin/users/{self.admin["id"]}')
+        self.assertEqual(blocked.status_code, 403)
+        removed = self.client.delete(f'/api/admin/users/{user_id}')
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        self.assertIsNone(db_module.get_user_by_id(user_id))
 
     def _payload(self, title, market):
         return {

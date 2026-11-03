@@ -2333,7 +2333,7 @@ def admin_allow_team_member(team_id, member_user_id):
 def allow_team_member(team_id, admin_user_id, member_user_id):
     with get_session() as s:
         team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.admin_user_id == admin_user_id).first()
-        if not team:
+        if not team or team.subscription_status != 'active':
             return False
         member = s.query(BrokerTeamMember).filter(
             BrokerTeamMember.team_id == team_id,
@@ -2343,6 +2343,127 @@ def allow_team_member(team_id, admin_user_id, member_user_id):
             return False
         member.status = 'active'
         return True
+
+
+def add_team_member_by_email(team_id, admin_user_id, email):
+    """The paid main account adds someone. That person does not pay and does not assign themselves."""
+    email = (email or '').strip().lower()
+    if not email:
+        return None
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.admin_user_id == admin_user_id).first()
+        if not team:
+            return None
+        if team.subscription_status != 'active':
+            return 'unpaid'
+        person = s.query(User).filter(User.email == email).first()
+        if not person:
+            return 'missing'
+        if person.id == admin_user_id:
+            return int(person.id)
+        other = (
+            s.query(BrokerTeamMember)
+            .filter(BrokerTeamMember.user_id == person.id, BrokerTeamMember.team_id != team_id)
+            .first()
+        )
+        if other:
+            return 'already_on_team'
+        member = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == person.id,
+        ).first()
+        if member:
+            member.status = 'active'
+        else:
+            s.add(BrokerTeamMember(team_id=team_id, user_id=person.id, status='active'))
+        return int(person.id)
+
+
+def ensure_main_brokerage(user_id):
+    """A paid broker is the main account and can add people to that subscription."""
+    membership = team_membership(user_id)
+    if membership and membership.get('is_admin'):
+        set_team_subscription(membership['id'], 'active')
+        return membership['id']
+    if membership:
+        return None
+    person = get_user_by_id(user_id) or {}
+    place = (person.get('profile_location') or '').strip()
+    city, state = '', ''
+    if ',' in place:
+        city, state = [part.strip() for part in place.split(',', 1)]
+    else:
+        city = place
+    name = (person.get('company') or '').strip() or ' '.join(
+        part for part in [person.get('first_name'), person.get('last_name')] if part
+    ) or 'Brokerage'
+    return create_broker_team(
+        user_id, name, city, state,
+        latitude=person.get('broker_lat'),
+        longitude=person.get('broker_lon'),
+        logo_url=person.get('company_logo_url'),
+        active=True,
+    )
+
+
+def _directory_broker(user, team, is_main):
+    name = ' '.join(part for part in [user.first_name, user.last_name] if part) or 'Broker'
+    lat = user.broker_lat if user.broker_lat is not None else (team.latitude if team is not None else None)
+    lon = user.broker_lon if user.broker_lon is not None else (team.longitude if team is not None else None)
+    return {
+        'id': int(user.id),
+        'name': name,
+        'email': user.email,
+        'company': user.company or '',
+        'place': user.profile_location or (team.location if team is not None else '') or '',
+        'photo': user.profile_photo_url or '',
+        'bio': (user.broker_bio or '')[:1000],
+        'specialties': user.broker_specialties or '',
+        'years': user.broker_years,
+        'lat': lat,
+        'lon': lon,
+        'team_id': team.id if team is not None else None,
+        'team_name': team.name if team is not None else (user.company or ''),
+        'is_main': bool(is_main),
+    }
+
+
+def list_directory_brokers():
+    """Brokers who are on a paid brokerage, or who pay as the main account."""
+    seen = set()
+    out = []
+    with get_session() as s:
+        rows = (
+            s.query(User, BrokerTeam)
+            .join(BrokerTeamMember, BrokerTeamMember.user_id == User.id)
+            .join(BrokerTeam, BrokerTeam.id == BrokerTeamMember.team_id)
+            .filter(
+                BrokerTeamMember.status == 'active',
+                BrokerTeam.subscription_status == 'active',
+            )
+            .all()
+        )
+        for user, team in rows:
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            out.append(_directory_broker(user, team, team.admin_user_id == user.id))
+        paid = (
+            s.query(User)
+            .join(UserSubscription, UserSubscription.user_id == User.id)
+            .filter(
+                UserSubscription.subscription_type.in_(('broker', 'broker_team')),
+                UserSubscription.subscription_status.in_(('active', 'past_due')),
+            )
+            .all()
+        )
+        for user in paid:
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            out.append(_directory_broker(user, None, True))
+    out.sort(key=lambda row: (row.get('name') or '').lower())
+    return out
 
 
 def list_team_members(team_id, status=None):
@@ -2698,6 +2819,19 @@ def notify_watchers_of_listing(listing):
             '/',
             person.get('email'),
         )
+
+
+def listings_for_team(team_id, include_off_market=False):
+    """Listings from every broker on a paid brokerage, still owned by the person who made them."""
+    people = list_team_members(team_id, status='active')
+    out = []
+    for person in people:
+        name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part) or 'Broker'
+        for listing in listings_for_user(person.get('user_id'), include_off_market=include_off_market):
+            listing['broker_name'] = name
+            listing['broker_id'] = person.get('user_id')
+            out.append(listing)
+    return out
 
 
 def listings_for_user(user_id, include_off_market=False):

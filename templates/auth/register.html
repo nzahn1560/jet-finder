@@ -281,30 +281,69 @@
                 <label for="profile_role" class="form-label">I am a</label>
                 <select class="form-control" id="profile_role" name="profile_role">
                     <option value="buyer">Buyer</option>
-                    <option value="broker">Broker</option>
+                    <option value="seller">Seller</option>
                     <option value="mechanic">Mechanic</option>
                     <option value="operator">Operator</option>
                     <option value="other">Other</option>
                 </select>
             </div>
 
-            <div id="broker-application" hidden>
-                <div class="form-group">
-                    <label for="broker_specialties" class="form-label">Aircraft specialty</label>
-                    <input type="text" class="form-control" id="broker_specialties" name="broker_specialties" maxlength="500" placeholder="Citations, King Air, Gulfstream">
+            <section id="broker-signup" style="border:1px solid rgba(240,85,69,0.55); border-radius:12px; padding:16px; margin:8px 0 18px;">
+                <h2 style="color:#fff; font-size:1.35rem; margin:0 0 8px;">Sign up as a broker</h2>
+                <p style="color:#ddd; margin:0 0 12px;">The main brokerage is the only account that has to pay. Assign yourself to a team for free. The main company account has to approve you.</p>
+                <label style="color:#fff; display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+                    <input type="checkbox" name="broker_signup" id="broker-signup-check" value="1" {% if broker_open %}checked{% endif %}>
+                    I am signing up as a broker
+                </label>
+                <div id="broker-application" {% if not broker_open %}hidden{% endif %}>
+                    <label style="color:#fff; display:block; margin:0.35rem 0;">
+                        <input type="radio" name="broker_path" value="main" {% if broker_path != 'assign' %}checked{% endif %}>
+                        I am the main brokerage
+                    </label>
+                    <p style="color:#bbb; margin:0 0 10px 1.4rem;">Only this account pays $19.99 a month.</p>
+                    <label style="color:#fff; display:block; margin:0.35rem 0;">
+                        <input type="radio" name="broker_path" value="assign" {% if broker_path == 'assign' %}checked{% endif %}>
+                        Assign me to a team
+                    </label>
+                    <p style="color:#bbb; margin:0 0 10px 1.4rem;">Free. The main company account has to approve you.</p>
+                    <div id="broker-assign-fields" {% if broker_path != 'assign' %}hidden{% endif %}>
+                        {% if teams %}
+                        <label for="team_id" class="form-label">Team</label>
+                        <select class="form-control" id="team_id" name="team_id">
+                            {% for team in teams %}
+                            <option value="{{ team.id }}" {% if team_id|string == team.id|string %}selected{% endif %}>{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <p style="color:#bbb;">No paid brokerage is on the map yet. You can sign up as the main brokerage.</p>
+                        {% endif %}
+                    </div>
+                    <div class="form-group" style="margin-top:12px;">
+                        <label for="broker_specialties" class="form-label">Aircraft specialty</label>
+                        <input type="text" class="form-control" id="broker_specialties" name="broker_specialties" maxlength="500" placeholder="Citations, King Air, Gulfstream" value="{{ broker_specialties or '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="broker_years" class="form-label">Years in business</label>
+                        <input type="number" class="form-control" id="broker_years" name="broker_years" min="0" max="80" placeholder="12" value="{{ broker_years or '' }}">
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="broker_years" class="form-label">Years in business</label>
-                    <input type="number" class="form-control" id="broker_years" name="broker_years" min="0" max="80" placeholder="12">
-                </div>
-            </div>
+            </section>
             <script>
             (function () {
-                const role = document.getElementById('profile_role');
+                const box = document.getElementById('broker-signup-check');
                 const extra = document.getElementById('broker-application');
-                function sync() { extra.hidden = role.value !== 'broker'; }
-                role.addEventListener('change', sync);
-                sync();
+                const assign = document.getElementById('broker-assign-fields');
+                function syncBox() { extra.hidden = !box.checked; }
+                function syncPath() {
+                    const chosen = document.querySelector('input[name="broker_path"]:checked');
+                    if (assign) assign.hidden = !chosen || chosen.value !== 'assign';
+                }
+                box.addEventListener('change', syncBox);
+                document.querySelectorAll('input[name="broker_path"]').forEach(function (input) {
+                    input.addEventListener('change', syncPath);
+                });
+                syncBox();
+                syncPath();
             })();
             </script>
 

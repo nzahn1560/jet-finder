@@ -765,6 +765,15 @@
         align-items: stretch;
     }
 
+    .aircraft-card-wrapper.is-marketplace-target {
+        scroll-margin-top: 6.5rem;
+    }
+
+    .aircraft-card-wrapper.is-marketplace-target .aircraft-card {
+        outline: 2px solid #F05545;
+        outline-offset: 3px;
+    }
+
     /* Clean Container Layout */
     .aircraft-listings-container {
         max-width: 100%;
@@ -782,7 +791,7 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
-        height: 500px;
+        height: auto;
         aspect-ratio: auto;
         width: 100%;
         max-width: none;
@@ -1735,12 +1744,13 @@
         }
 
         .aircraft-image {
-            height: 100px;
+            height: auto;
+            aspect-ratio: 1 / 1;
         }
 
         .aircraft-content {
-            min-height: 320px;
-            padding: 0.6rem;
+            min-height: 0;
+            padding: 0.45rem;
         }
     }
 
@@ -1767,11 +1777,12 @@
         .aircraft-card {
             max-width: 100%;
             min-height: 0;
-            height: 500px;
+            height: auto;
         }
 
         .aircraft-image {
-            height: 150px;
+            height: auto;
+            aspect-ratio: 1 / 1;
         }
 
         .aircraft-content {
@@ -1799,12 +1810,13 @@
         }
 
         .aircraft-image {
-            height: 150px;
+            height: auto;
+            aspect-ratio: 1 / 1;
         }
 
         .aircraft-content {
             min-height: 0;
-            padding: 0.5rem;
+            padding: 0.45rem;
         }
     }
 
@@ -3051,7 +3063,9 @@
     }
 
     .aircraft-image {
-        height: 150px;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        height: auto;
         overflow: hidden;
         background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
         position: relative;
@@ -3289,11 +3303,11 @@
     }
 
     .aircraft-content {
-        padding: 0.75rem 0.85rem 0.75rem 0.75rem;
+        padding: 0.45rem 0.5rem 0.5rem;
         flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 0.4rem;
+        gap: 0.2rem;
         background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
         overflow-y: scroll;
         min-height: 0;
@@ -3309,7 +3323,7 @@
         display: flex;
         flex: 1;
         min-height: 0;
-        gap: 6px;
+        gap: 4px;
     }
 
     .listing-scroll__bar {
@@ -3465,9 +3479,18 @@
     .listing-photos {
         position: relative;
         width: 100%;
-        height: 150px;
+        aspect-ratio: 1 / 1;
+        height: auto;
         overflow: hidden;
         background: #1a1a1a;
+        flex-shrink: 0;
+    }
+
+    .aircraft-grid.list-view .listing-photos,
+    .aircraft-grid.list-view .aircraft-image {
+        width: 220px;
+        height: 220px;
+        aspect-ratio: 1 / 1;
         flex-shrink: 0;
     }
 
@@ -4146,7 +4169,8 @@
                                     Ownership</label>
                                 <input type="number"
                                     class="form-control form-control-sm bg-dark text-white border-secondary"
-                                    id="yearsOfOwnership" placeholder="e.g. 5" min="1" max="20">
+                                    id="yearsOfOwnership" placeholder="5" min="1" max="20">
+                                <small class="text-muted">Leave this blank and the figures use 5 years of ownership.</small>
                             </div>
                             <div class="col-md-3">
                                 <label for="speed" class="form-label text-white small">Speed (KTS)</label>
@@ -4594,7 +4618,7 @@
 
                             <div class="form-group mb-3" id="listing-photos">
                                 <label class="form-label">Photos</label>
-                                <p class="text-muted mb-2">Add one photo at a time, up to 15. The first photo is the cover. Use Earlier and Later to set the order.</p>
+                                <p class="text-muted mb-2">Add one photo at a time, up to 15. Crop it to the listing, then use Earlier and Later to set the order. The first photo is the cover.</p>
                                 <div id="listing-photo-preview" class="mb-2"></div>
                                 <button type="button" class="btn btn-outline-light" id="listing-photo-add">Add a photo</button>
                                 <input type="file" id="listingImages" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
@@ -4851,6 +4875,7 @@
 <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
 <!-- Custom JavaScript -->
 <script src="{{ url_for('static', filename='js/script.js') }}?v=8"></script>
+<script src="{{ url_for('static', filename='js/photo-crop.js') }}"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -5018,7 +5043,7 @@
     const COMPARE_METRICS = [
         { key: 'wingspan', label: 'Wingspan', want: 'low', unit: ' ft' },
         { key: 'speed', label: 'Speed', want: 'high', unit: ' kts' },
-        { key: 'multi_year', label: 'Multi-year total cost', want: 'low', money: true },
+        { key: 'multi_year', label: '5 years of ownership', want: 'low', money: true },
         { key: 'range', label: 'Range', want: 'high', unit: ' nm' },
         { key: 'cabin', label: 'Cabin size', want: 'high', unit: ' cu ft' },
         { key: 'price', label: 'Purchase price', want: 'low', money: true },
@@ -5206,6 +5231,9 @@
             const el = document.getElementById(id);
             if (!el) return;
             el.addEventListener('change', function () {
+                const ownershipLabel = document.querySelector('[data-compare-key="multi_year"]');
+                const ownershipText = ownershipLabel && ownershipLabel.parentElement && ownershipLabel.parentElement.querySelector('span');
+                if (ownershipText) ownershipText.textContent = ownershipYearsLabel();
                 if (window.__goalActive) updateAircraftDisplay();
             });
         });
@@ -5867,13 +5895,22 @@
         if (typeof paintWatchButtons === 'function') paintWatchButtons();
     }
 
+    function ownershipYearsUsed() {
+        const raw = parseFloat(document.getElementById('yearsOfOwnership')?.value);
+        return Number.isFinite(raw) && raw > 0 ? raw : 5;
+    }
+
+    function ownershipYearsLabel() {
+        return ownershipYearsUsed() + ' years of ownership';
+    }
+
     // Get current user inputs for calculations
     function getUserInputs() {
         const inputs = {
             // TEST SCENARIO VALUES - Use these as defaults for debugging
             averageTripLength: parseFloat(document.getElementById('avg-trip-length')?.value) || 971,
             numberOfTrips: parseFloat(document.getElementById('number-of-trips')?.value) || 120,
-            yearsOfOwnership: parseFloat(document.getElementById('yearsOfOwnership')?.value) || 10,
+            yearsOfOwnership: ownershipYearsUsed(),
             jetAPrice: parseFloat(document.getElementById('jetAPrice')?.value) || 6.50,
             avgasPrice: parseFloat(document.getElementById('avgasPrice')?.value) || 9,
             depreciationRate: parseFloat(document.getElementById('depreciationRate')?.value) || 4.00,
@@ -6363,7 +6400,7 @@
                         <strong>${formatCurrency(metrics.annualBudget || 0)}</strong>
                     </div>
                     <div class="compare-pill">
-                        <span>Multi-Year Cost</span>
+                        <span>${ownershipYearsLabel()}</span>
                         <strong>${formatCurrency(metrics.multiYearTotalCost || 0)}</strong>
                     </div>
                 </div>
@@ -6554,6 +6591,9 @@
 
         card.className = 'aircraft-card-wrapper';
         card.style.cssText = 'margin: 0; padding: 0;';
+        if (aircraft.is_user_listing && aircraft.id != null && String(aircraft.id).match(/^\d+$/)) {
+            card.id = 'listing-' + aircraft.id;
+        }
 
         const listingTitle = escCard((aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim());
         const listingDescription = escCard(aircraft.listing_description || aircraft.description || '');
@@ -6586,7 +6626,7 @@
             { label: 'Hours / year', value: `${Number(displayMetrics.totalTripTime || 0).toFixed(1)} hrs`, pct: fleetStatPercent('hours', displayMetrics.totalTripTime, false) },
             { label: 'Average leg', value: `${Number(displayMetrics.averageTripTime || 0).toFixed(1)} hrs`, pct: fleetStatPercent('leg', displayMetrics.averageTripTime, false) },
             { label: 'Annual budget', value: `$${displayMetrics.annualBudget.toLocaleString()}`, pct: fleetStatPercent('annual', displayMetrics.annualBudget, false) },
-            { label: 'Multi-year cost', value: `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, pct: fleetStatPercent('multiyear', displayMetrics.multiYearTotalCost, false) },
+            { label: ownershipYearsLabel(), value: `$${displayMetrics.multiYearTotalCost.toLocaleString()}`, pct: fleetStatPercent('multiyear', displayMetrics.multiYearTotalCost, false) },
         ];
 
         card.innerHTML = `
@@ -6633,7 +6673,7 @@
                     </div>
                 
                 <div class="listing-scroll">
-                <div class="aircraft-content" style="padding: 10px;">
+                <div class="aircraft-content" style="padding: 6px 8px 8px;">
                     <h5 class="aircraft-name">${listingHref ? `<a href="${listingHref}">${listingTitle}</a>` : listingTitle}</h5>
                     ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
@@ -7162,7 +7202,7 @@
         const params = {
             F2: toNumber(inputs.averageTripLength) || 0,
             G2: toNumber(inputs.numberOfTrips) || 0,
-            H2: toNumber(inputs.yearsOfOwnership) || 0,
+            H2: toNumber(inputs.yearsOfOwnership) || 5,
             I2: toNumber(inputs.jetAPrice) || 0,
             J2: toNumber(inputs.avgasPrice) || 9,
             K2: (toNumber(inputs.depreciationRate) || 0) / 100,
@@ -7989,9 +8029,29 @@
         initGoalFinder();
         initAircraftWatchlist();
         initCreateListingModal();
+        focusRequestedListing();
 
         console.log('🔥 REAL-TIME FILTERING AND PAGINATION INITIALIZED');
     });
+
+    function focusRequestedListing() {
+        const wanted = new URLSearchParams(window.location.search).get('listing');
+        if (!wanted || !/^\d+$/.test(wanted)) return;
+        const index = filteredAircraftData.findIndex(function (aircraft) {
+            return String(aircraft.id) === wanted;
+        });
+        if (index < 0) return;
+        const page = Math.floor(index / itemsPerPage) + 1;
+        if (page !== currentPage) {
+            currentPage = page;
+            updatePagination();
+            updateAircraftDisplay();
+        }
+        const card = document.getElementById('listing-' + wanted);
+        if (!card) return;
+        card.classList.add('is-marketplace-target');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 
     let homepageProfiles = [];
     let homepageSelectedProfile = null;
@@ -8020,11 +8080,14 @@
                 listingPhotoPreview.appendChild(empty);
                 return;
             }
+            const coverLabel = document.createElement('p');
+            coverLabel.className = 'text-muted mb-1';
+            coverLabel.textContent = 'Cover on the marketplace';
             const cover = document.createElement('img');
             cover.src = homepagePhotos[0].url;
-            cover.alt = 'Cover photo preview';
-            cover.style.cssText = 'display:block;width:100%;max-height:240px;object-fit:contain;background:#111;border-radius:12px;margin-bottom:0.75rem;';
-            listingPhotoPreview.appendChild(cover);
+            cover.alt = 'Cover photo as it appears on the marketplace';
+            cover.style.cssText = 'display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:#111;border-radius:12px;margin-bottom:0.75rem;';
+            listingPhotoPreview.append(coverLabel, cover);
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.6rem;';
             homepagePhotos.forEach(function (item, index) {
@@ -8033,10 +8096,25 @@
                 const img = document.createElement('img');
                 img.src = item.url;
                 img.alt = '';
-                img.style.cssText = 'width:100%;height:90px;object-fit:cover;border-radius:8px;display:block;';
+                img.style.cssText = 'width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;display:block;';
                 const label = document.createElement('div');
                 label.textContent = index === 0 ? 'Cover' : String(index + 1);
                 label.style.margin = '0.3rem 0';
+                const crop = document.createElement('button');
+                crop.type = 'button';
+                crop.textContent = 'Crop';
+                crop.style.cssText = 'border:0;background:transparent;color:#fff;padding:0 0.4rem 0 0;';
+                crop.addEventListener('click', async function () {
+                    if (!window.JetPhotoCrop) return;
+                    const source = item.originalFile || item.file;
+                    const cropped = await window.JetPhotoCrop.open(source);
+                    if (!cropped) return;
+                    if (item.url && item.url.indexOf('blob:') === 0) URL.revokeObjectURL(item.url);
+                    item.file = cropped.file;
+                    item.url = cropped.url;
+                    if (cropped.sourceFile) item.originalFile = cropped.sourceFile;
+                    renderHomepagePhotos();
+                });
                 const earlier = document.createElement('button');
                 earlier.type = 'button';
                 earlier.textContent = 'Earlier';
@@ -8068,7 +8146,7 @@
                     homepagePhotos.splice(index, 1);
                     renderHomepagePhotos();
                 });
-                card.append(img, label, earlier, later, remove);
+                card.append(img, label, crop, earlier, later, remove);
                 row.appendChild(card);
             });
             listingPhotoPreview.appendChild(row);
@@ -8076,14 +8154,22 @@
         }
         if (listingPhotoAdd && listingImages) {
             listingPhotoAdd.addEventListener('click', function () { listingImages.click(); });
-            listingImages.addEventListener('change', function () {
-                Array.from(listingImages.files || []).forEach(function (file) {
-                    if (!file.type || file.type.indexOf('image/') !== 0) return;
-                    if (homepagePhotos.length >= 15) return;
-                    homepagePhotos.push({ file: file, url: URL.createObjectURL(file) });
-                });
+            listingImages.addEventListener('change', async function () {
+                for (const file of Array.from(listingImages.files || [])) {
+                    if (!file.type || file.type.indexOf('image/') !== 0) continue;
+                    if (homepagePhotos.length >= 15) break;
+                    const cropped = window.JetPhotoCrop
+                        ? await window.JetPhotoCrop.open(file)
+                        : { file: file, url: URL.createObjectURL(file), sourceFile: file };
+                    if (!cropped) continue;
+                    homepagePhotos.push({
+                        file: cropped.file,
+                        url: cropped.url,
+                        originalFile: cropped.sourceFile || file,
+                    });
+                    renderHomepagePhotos();
+                }
                 listingImages.value = '';
-                renderHomepagePhotos();
             });
             renderHomepagePhotos();
         }
