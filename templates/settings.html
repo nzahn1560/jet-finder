@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Jet Finder{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block additional_css %}
+<style>
+    .settings {
+        position: relative;
+        z-index: 1;
+        min-height: 100vh;
+        padding: 2.5rem 0 4rem;
+        font-family: 'Rajdhani', sans-serif;
+    }
+    .settings__inner { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+    .settings h1 { color: #fff; font-size: 2.4rem; margin-bottom: 0.4rem; }
+    .settings__lead { color: #c8c8c8; margin-bottom: 1.5rem; }
+    .settings__card {
+        background: #161616;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 18px;
+        padding: 1.4rem 1.5rem 1.5rem;
+        margin-bottom: 1rem;
+        color: #f4f4f4;
+    }
+    .settings__card h2 { color: #fff; font-size: 1.45rem; margin: 0 0 0.7rem; }
+    .settings__card p, .settings__card li { color: #d0d0d0; }
+    .settings__card a { color: #F05545; }
+    .settings__note { color: #8e8e93; margin: 0.6rem 0 0; }
+    .settings__status { color: #f4d19b; margin-bottom: 1rem; }
+    .settings__error { color: #ffb4b4; margin-bottom: 1rem; }
+    .settings label { display: block; margin: 0.7rem 0 0.25rem; color: #fff; }
+    .settings .form-control { background: #111; color: #fff; border-color: rgba(255,255,255,0.15); }
+    .settings__check { display: flex; gap: 0.6rem; align-items: flex-start; margin: 0.8rem 0; }
+    .settings__check input { margin-top: 0.35rem; }
+    .settings__actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-top: 0.9rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="settings">
+    <div class="settings__inner">
+        <h1>Settings</h1>
+        <p class="settings__lead">Account details, password, email, and privacy.</p>
+        {% if settings_error %}<p class="settings__error">{{ settings_error }}</p>{% endif %}
+        {% if settings_message %}<p class="settings__status">{{ settings_message }}</p>{% endif %}
+
+        <section class="settings__card" id="general">
+            <h2>General</h2>
+            <p>{{ user.first_name or '' }} {{ user.last_name or '' }}</p>
+            <p>{{ user.email }}</p>
+            <p>{{ (user.profile_role or 'member')|replace('_', ' ')|title }}{% if user.company %} · {{ user.company }}{% endif %}</p>
+            {% if user.created_at %}<p class="settings__note">Account opened {{ user.created_at }}</p>{% endif %}
+            <p>Jet Finder is an aircraft information service and marketplace. It is not your broker, and it does not buy or sell the aircraft.</p>
+            <p>
+                <a href="{{ url_for('terms') }}">Terms</a>
+                · <a href="{{ url_for('privacy') }}">Privacy</a>
+                · <a href="{{ url_for('refunds') }}">Refunds</a>
+                · <a href="{{ url_for('contact') }}">Contact</a>
+                · <a href="{{ url_for('dashboard') }}">Edit profile</a>
+            </p>
+        </section>
+
+        <section class="settings__card" id="password">
+            <h2>Password</h2>
+            <form method="post" action="{{ url_for('account_settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="password">
+                <label for="current-password">Current password</label>
+                <input class="form-control" id="current-password" name="current_password" type="password" autocomplete="current-password" required>
+                <label for="new-password">New password</label>
+                <input class="form-control" id="new-password" name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+                <label for="confirm-password">Confirm new password</label>
+                <input class="form-control" id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+                <div class="settings__actions">
+                    <button class="btn btn-primary" type="submit">Update password</button>
+                    <a href="{{ url_for('forgot_password') }}">Forgot password</a>
+                </div>
+            </form>
+        </section>
+
+        <section class="settings__card" id="email">
+            <h2>Email</h2>
+            <form method="post" action="{{ url_for('account_settings') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="email">
+                <input type="hidden" name="email_opt_in" value="0">
+                <label class="settings__check" for="email-opt-in">
+                    <input id="email-opt-in" name="email_opt_in" type="checkbox" value="1" {% if user.email_opt_in not in [false, 0, '0'] %}checked{% endif %}>
+                    <span>Send me optional emails, such as watch alerts and messages. Uncheck this to opt out.</span>
+                </label>
+                <p class="settings__note">Password resets, payment problems, and a decision on your own account or listing still come by email. Those are about the account itself.</p>
+                <div class="settings__actions">
+                    <button class="btn btn-primary" type="submit">Save email preference</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="settings__card" id="privacy">
+            <h2>Privacy</h2>
+            <ul>
+                <li>We do not sell your personal information.</li>
+                <li>A session cookie keeps you signed in. It is not used for advertising.</li>
+                <li>Card numbers stay with Stripe. JetSchool does not store the full card number.</li>
+            </ul>
+            <p>The privacy policy is at <a href="{{ url_for('privacy') }}">Privacy</a>. Questions: <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
+            <div class="settings__actions">
+                <a class="btn btn-outline-light" href="{{ url_for('account_download') }}">Download my information</a>
+                <button class="btn btn-outline-danger" type="button" id="delete-account">Delete account</button>
+            </div>
+        </section>
+    </div>
+</div>
+<script>
+document.getElementById('delete-account').addEventListener('click', async function () {
+    if (!window.confirm('Delete this account? Your profile, messages, and listings will be removed.')) return;
+    this.disabled = true;
+    const response = await fetch('/api/account', { method: 'DELETE', credentials: 'include' });
+    if (!response.ok) {
+        this.disabled = false;
+        return;
+    }
+    window.location.href = '/';
+});
+</script>
+{% endblock %}

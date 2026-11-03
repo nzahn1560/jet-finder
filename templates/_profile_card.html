@@ -256,12 +256,12 @@
                 {% endif %}
                 {% elif membership and membership.is_admin %}
                 <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $19.99/month</button>
+                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Broker · $19.99/month</a>
                 {% elif membership and membership.membership_status == 'pending' %}
                 <p class="identity__line">Request pending with {{ membership.name }}.</p>
                 {% else %}
                 <p class="identity__line">Broker · $19.99/month. Includes the broker map and the off-market section.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Broker · $19.99/month</button>
+                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Broker · $19.99/month</a>
                 {% if teams %}
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
                     <select class="form-select" id="join-team" style="max-width:280px;">
@@ -373,6 +373,8 @@ document.getElementById('broker-note').addEventListener('submit', async function
         const payData = await pay.json().catch(function () { return {}; });
         if (payData.url) { window.location = payData.url; return; }
         if (payData.already) { window.location.reload(); return; }
+        const link = document.getElementById('become-broker');
+        if (link && link.href) { window.location = link.href; return; }
         if (status) status.textContent = payData.message || 'Checkout is unavailable.';
     }
     if (edit) {
@@ -421,7 +423,10 @@ document.getElementById('broker-note').addEventListener('submit', async function
         });
     }
     const becomeBroker = document.getElementById('become-broker');
-    if (becomeBroker) becomeBroker.addEventListener('click', function () { startBrokerCheckout(document.getElementById('profile-save-status')); });
+    if (becomeBroker) becomeBroker.addEventListener('click', function (event) {
+        event.preventDefault();
+        startBrokerCheckout(document.getElementById('profile-save-status'));
+    });
     const requestJoin = document.getElementById('request-join');
     if (requestJoin) {
         requestJoin.addEventListener('click', async function () {
