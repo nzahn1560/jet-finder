@@ -167,7 +167,7 @@
         display: block;
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
         background: #0c0c0c;
     }
 
@@ -199,7 +199,7 @@
         width: 100%;
         height: auto;
         aspect-ratio: 16 / 9;
-        object-fit: cover;
+        object-fit: contain;
         border-radius: 8px;
         background: #0c0c0c;
     }
@@ -567,13 +567,13 @@
                         <div class="section-title">
                             <i class="fas fa-camera"></i>Photos
                         </div>
-                        <p class="text-muted">Add one photo at a time, up to 15. Crop it to the listing, then use Earlier and Later to change the order. The first photo is the cover.</p>
+                        <p class="text-muted">Add one photo at a time, up to 15. JPEG, PNG, WEBP, GIF, BMP, TIFF, AVIF, and HEIC are accepted. The listing stays 16:9 and keeps the whole picture unless you crop it. Use Earlier and Later to change the order. The first photo is the cover.</p>
                         <div id="photo-preview"></div>
                         <div class="file-upload-area" id="photo-add" onclick="document.getElementById('photos').click()">
                             <i class="fas fa-plus fa-2x mb-3" style="color: #F05545;"></i>
                             <h5 class="text-white">Add a photo</h5>
                             <p class="text-muted mb-0">Choose one photo, then come back and add another. You can also drop a photo here.</p>
-                            <input type="file" id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif"
+                            <input type="file" id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif"
                                 style="display: none;">
                         </div>
                         <div id="photosStatus" class="mt-2"></div>
@@ -597,7 +597,7 @@
                         <button type="button" class="btn btn-secondary me-3" id="delete-listing" hidden>
                             <i class="fas fa-trash me-2"></i>Delete listing
                         </button>
-                        <a href="#" class="btn btn-primary btn-lg" id="listing-submit" role="button">
+                        <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-primary btn-lg" id="listing-submit" role="button">
                             <i class="fas fa-check me-2"></i>Submit for approval
                         </a>
                     </div>
@@ -611,6 +611,7 @@
 <script>
     const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
     const LISTING_USER_ID = {{ (get_current_user_info().id if get_current_user_info() else 0)|int }};
+    const LISTING_PAYMENT_URL = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01';
     function syncOffMarketFields() {
         const picked = document.querySelector('[name="market"]:checked');
         const off = picked && picked.value === 'broker_only';
@@ -641,7 +642,10 @@
             }
         }
         const submitLink = document.getElementById('listing-submit');
-        if (submitLink && off) submitLink.removeAttribute('href');
+        if (submitLink) {
+            if (off) submitLink.removeAttribute('href');
+            else submitLink.href = LISTING_PAYMENT_URL;
+        }
     }
     document.querySelectorAll('[name="market"]').forEach(function (radio) {
         radio.addEventListener('change', syncOffMarketFields);
@@ -798,8 +802,14 @@
     async function addPhotoFiles(fileList) {
         const status = document.getElementById('photosStatus');
         let stopped = false;
+        let added = false;
+        let rejected = false;
         for (const file of Array.from(fileList || [])) {
-            if (!file || !file.type || file.type.indexOf('image/') !== 0) continue;
+            if (!file || !window.JetPhotoCrop || !window.JetPhotoCrop.isImageFile(file)) {
+                rejected = true;
+                if (status) status.textContent = 'Use a JPEG, PNG, WEBP, GIF, BMP, TIFF, AVIF, or HEIC photo.';
+                continue;
+            }
             if (activeListingPhotos().length >= PHOTO_LIMIT) {
                 stopped = true;
                 break;
@@ -807,7 +817,12 @@
             const cropped = window.JetPhotoCrop
                 ? await window.JetPhotoCrop.open(file)
                 : { file: file, url: URL.createObjectURL(file), sourceFile: file };
-            if (!cropped) continue;
+            if (!cropped) {
+                rejected = true;
+                if (status) status.textContent = 'That picture could not be opened. Try JPEG, PNG, WEBP, GIF, BMP, TIFF, AVIF, or HEIC.';
+                continue;
+            }
+            added = true;
             listingPhotos.push({
                 key: 'p' + (++photoKey),
                 file: cropped.file,
@@ -820,7 +835,7 @@
             });
             renderPhotoPreview();
         }
-        if (status) {
+        if (status && (stopped || added || !rejected)) {
             status.textContent = stopped ? '15 photos is the maximum. Remove one to add another.' : '';
         }
     }
@@ -1040,27 +1055,6 @@
         return { uploaded: uploaded, errors: errors, pending_review: pendingReview };
     }
 
-    async function startCheckoutOrFinish(listingId) {
-        try {
-            const resp = await fetch(`/api/listings/${listingId}/checkout`, {
-                method: 'POST',
-                credentials: 'include',
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (resp.ok && data.url) {
-                window.location.href = data.url;
-                return true;
-            }
-            if (resp.ok && data.skip) {
-                window.location.href = LISTING_USER_IS_ADMIN
-                    ? ('/admin?highlight=' + listingId)
-                    : ('/dashboard?submitted=' + listingId);
-                return true;
-            }
-        } catch (err) { /* the caller shows the error */ }
-        return false;
-    }
-
     document.getElementById('listing-form').addEventListener('submit', async function (e) {
         e.preventDefault();
 
@@ -1149,8 +1143,10 @@
 
             if (payload.market !== 'broker_only') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
-                const opened = await startCheckoutOrFinish(listingId);
-                if (!opened) return fail('Checkout could not be started. The listing is saved on your account. Pay it from there.');
+                const payUrl = new URL(LISTING_PAYMENT_URL);
+                payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID);
+                if (payload.email) payUrl.searchParams.set('prefilled_email', payload.email);
+                window.location.href = payUrl.toString();
                 return;
             }
             window.location.href = LISTING_USER_IS_ADMIN

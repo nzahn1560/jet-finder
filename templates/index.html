@@ -3319,11 +3319,24 @@
         height: 0;
     }
 
+    .listing-face {
+        padding: 0.55rem 0.7rem 0.2rem;
+        background: linear-gradient(135deg, #1a1a1a, #2d2d2d);
+    }
+
+    .listing-metrics-title {
+        margin: 0.35rem 0 0.15rem;
+        color: #f4f4f4;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
     .listing-scroll {
         display: flex;
         flex: 1;
         min-height: 0;
-        max-height: 12.5rem;
+        max-height: 16rem;
         gap: 4px;
     }
 
@@ -3498,8 +3511,9 @@
     .listing-photos img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
         object-position: center;
+        background: #111;
     }
 
     .listing-photo-nav {
@@ -4619,10 +4633,10 @@
 
                             <div class="form-group mb-3" id="listing-photos">
                                 <label class="form-label">Photos</label>
-                                <p class="text-muted mb-2">Add one photo at a time, up to 15. Crop it to the listing, then use Earlier and Later to set the order. The first photo is the cover.</p>
+                                <p class="text-muted mb-2">Add one photo at a time, up to 15. JPEG, PNG, WEBP, GIF, BMP, TIFF, AVIF, and HEIC are accepted. The listing stays 16:9 and keeps the whole picture unless you crop it.</p>
                                 <div id="listing-photo-preview" class="mb-2"></div>
                                 <button type="button" class="btn btn-outline-light" id="listing-photo-add">Add a photo</button>
-                                <input type="file" id="listingImages" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+                                <input type="file" id="listingImages" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.avif,.heic,.heif" hidden>
                             </div>
                         </form>
 
@@ -4634,7 +4648,7 @@
                                 <div style="color:#888; text-decoration: line-through;">$70</div>
                                 <strong>$49</strong> <span style="background:#F05545; color:#fff; font-size:0.75rem; padding:2px 6px;">30% off</span>
                             </div>
-                            <a href="#" class="btn btn-success" id="createListingBtn" role="button">
+                            <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-success" id="createListingBtn" role="button">
                                 <i class="fas fa-check me-2"></i>Submit listing — $49.99 per month
                             </a>
                         </div>
@@ -6673,26 +6687,23 @@
                     </button>
                     </div>
                 
-                <div class="listing-scroll">
-                <div class="aircraft-content" style="padding: 6px 8px 8px;">
+                <div class="listing-face">
                     <h5 class="aircraft-name">${listingHref ? `<a href="${listingHref}">${listingTitle}</a>` : listingTitle}</h5>
                     ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
                     <div class="text-muted mb-2" style="font-size: 1.05rem;">
                         <i class="fas fa-map-marker-alt me-1"></i>${listingLocation}
                     </div>
-                    
                     <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
                         <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px; color:#F05545;">
                             $${(priceValue || 0).toLocaleString()}
-                                </div>
-                                </div>
-                    
-                    <!-- Performance Scores - Relative Comparison (Stacked Vertically) -->
-                    <div class="performance-scores mb-1" id="performance-scores-${index}">
-                        <!-- Performance scores will be populated after all cards are created -->
-                            </div>
-                    
+                        </div>
+                    </div>
+                    <div class="listing-metrics-title">Per dollar</div>
+                    <div class="performance-scores mb-1" id="performance-scores-${index}"></div>
+                </div>
+                <div class="listing-scroll">
+                <div class="aircraft-content" style="padding: 6px 8px 8px;">
                     <div class="spec-bars">
                         ${specRows.map(function (bar) {
                             return scoredBar('stat-box', bar.label, bar.value, bar.pct);
@@ -8087,7 +8098,7 @@
             const cover = document.createElement('img');
             cover.src = homepagePhotos[0].url;
             cover.alt = 'Cover photo as it appears on the marketplace';
-            cover.style.cssText = 'display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#111;border-radius:12px;margin-bottom:0.75rem;';
+            cover.style.cssText = 'display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;border-radius:12px;margin-bottom:0.75rem;';
             listingPhotoPreview.append(coverLabel, cover);
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.6rem;';
@@ -8097,7 +8108,7 @@
                 const img = document.createElement('img');
                 img.src = item.url;
                 img.alt = '';
-                img.style.cssText = 'width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;display:block;';
+                img.style.cssText = 'width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;border-radius:8px;display:block;';
                 const label = document.createElement('div');
                 label.textContent = index === 0 ? 'Cover' : String(index + 1);
                 label.style.margin = '0.3rem 0';
@@ -8157,7 +8168,7 @@
             listingPhotoAdd.addEventListener('click', function () { listingImages.click(); });
             listingImages.addEventListener('change', async function () {
                 for (const file of Array.from(listingImages.files || [])) {
-                    if (!file.type || file.type.indexOf('image/') !== 0) continue;
+                    if (!window.JetPhotoCrop || !window.JetPhotoCrop.isImageFile(file)) continue;
                     if (homepagePhotos.length >= 15) break;
                     const cropped = window.JetPhotoCrop
                         ? await window.JetPhotoCrop.open(file)
@@ -8309,13 +8320,10 @@
                     fd.append('files', item.file);
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
-                const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
-                const payData = await pay.json().catch(function () { return {}; });
-                if (payData.url) {
-                    window.location.href = payData.url;
-                    return;
-                }
-                alert(payData.message || 'Checkout could not be started. The listing is saved on your account.');
+                const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
+                payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}');
+                if (email) payUrl.searchParams.set('prefilled_email', email);
+                window.location.href = payUrl.toString();
             } catch (err) {
                 alert('Could not create the listing. Please try again.');
             } finally {
