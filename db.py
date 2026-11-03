@@ -2662,7 +2662,7 @@ def create_broker_message(from_user_id, to_user_id, kind, notes='', aircraft_nam
     kind = (kind or '').strip().lower()
     if kind not in ('request', 'listing', 'message'):
         raise ValueError('invalid_kind')
-    notes = (notes or '').strip()[:2000]
+    notes = (notes or '').strip()[:4000 if kind == 'message' else 2000]
     aircraft_name = (aircraft_name or '').strip()[:200]
     if kind == 'request' and not aircraft_name:
         raise ValueError('aircraft_required')

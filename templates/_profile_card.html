@@ -293,7 +293,7 @@
                 <p class="broker-status">Subscription is active.</p>
                 {% elif membership and membership.is_admin %}
                 <p class="identity__line">Pay $19.99 a month to activate this account. A team seat is free until you approve it.</p>
-                <a class="dash__btn dash__btn--primary" id="become-broker" href="#" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
+                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
                 {% elif membership and membership.membership_status == 'pending' %}
                 <p class="identity__line">Waiting for {{ membership.name }} to approve you.</p>
                 {% else %}
@@ -304,7 +304,7 @@
                     <input class="form-control" id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}">
                     <input class="form-control" id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}">
                     <input class="form-control" id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}">
-                    <a class="dash__btn dash__btn--primary" id="become-broker" href="#" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
+                    <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
                 </div>
                 <div id="broker-assign-fields" hidden>
                     {% if teams %}
@@ -381,6 +381,8 @@
         const payData = await pay.json().catch(function () { return {}; });
         if (payData.url) { window.location = payData.url; return; }
         if (payData.already) { window.location.reload(); return; }
+        const link = document.getElementById('become-broker');
+        if (link && link.href) { window.location = link.href; return; }
         if (status) status.textContent = payData.message || 'Checkout is unavailable.';
     }
     if (edit) {

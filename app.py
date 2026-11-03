@@ -2890,9 +2890,7 @@ def register():
                             active=False,
                         )
                     flash('Account created. The main brokerage is the only account that pays.', 'success')
-                    person = get_user_by_id(user_id_int) or {'id': user_id_int, 'email': email}
-                    pay_url = _broker_checkout_url(person)
-                    resp = redirect(pay_url or url_for('dashboard'))
+                    resp = redirect(_broker_payment_link({'id': user_id_int, 'email': email}))
                 else:
                     flash('Account created successfully!', 'success')
                     resp = redirect(url_for('dashboard'))
@@ -3685,27 +3683,36 @@ def _open_paid_checkout(user, meta, amount_cents, product_name, product_descript
     return checkout
 
 
+def _stripe_buy_link(base, **params):
+    """Payment Link with the account or listing attached so the webhook can tell who paid."""
+    from urllib.parse import urlencode
+    clean = {key: str(value) for key, value in params.items() if value not in (None, '')}
+    if not clean:
+        return base
+    return base + '?' + urlencode(clean)
+
+
+def _broker_payment_link(user):
+    return _stripe_buy_link(
+        BROKER_PAYMENT_LINK,
+        client_reference_id=f"broker-{user['id']}",
+        prefilled_email=(user.get('email') or ''),
+    )
+
+
+def _listing_payment_link(user, listing_id):
+    return _stripe_buy_link(
+        LISTING_PAYMENT_LINK,
+        client_reference_id=f"listing-{listing_id}-user-{user['id']}",
+        prefilled_email=(user.get('email') or ''),
+    )
+
+
 def _broker_checkout_url(user):
-    """Stripe Checkout for the $19.99 broker subscription, on this account's customer."""
-    if not user or not _stripe_configured():
+    """Hosted broker Payment Link. It does not need a Checkout session on this server."""
+    if not user:
         return None
-    base = _public_base()
-    meta = {'purpose': 'broker_account', 'user_id': str(user['id'])}
-    try:
-        checkout = _open_paid_checkout(
-            user,
-            meta,
-            BROKER_FEE_CENTS,
-            'JetSchool broker',
-            'Broker account. $19.99 per month.',
-            f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
-            f'{base}/dashboard?broker=0',
-            f"broker-account-{user['id']}",
-        )
-    except Exception:
-        logger.exception('Broker checkout creation failed')
-        return None
-    return _stripe_field(checkout, 'url') if checkout else None
+    return _broker_payment_link(user)
 
 
 def _payment_link_identity(sess):
@@ -3794,15 +3801,7 @@ def api_broker_checkout():
     if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
         return jsonify({'already': True}), 200
     db_module.set_broker_application(user['id'], 'pending')
-    if not _stripe_configured():
-        return jsonify({
-            'error': 'payment_not_ready',
-            'message': 'Billing is not available until Stripe is configured.',
-        }), 503
-    url = _broker_checkout_url(user)
-    if not url:
-        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
-    return jsonify({'url': url}), 200
+    return jsonify({'url': _broker_payment_link(user)}), 200
 
 
 @app.route('/api/account/broker-application', methods=['POST'])
@@ -7101,11 +7100,12 @@ def _point_payment_links_at_account():
                 continue
             after = _stripe_field(link, 'after_completion') or {}
             redirect = _stripe_field(after, 'redirect') or {}
-            if _stripe_field(after, 'type') == 'redirect' and _stripe_field(redirect, 'url') == target:
+            pointed = _stripe_field(after, 'type') == 'redirect' and _stripe_field(redirect, 'url') == target
+            if pointed and _stripe_field(link, 'active') is not False:
                 continue
             stripe.PaymentLink.modify(
                 link.id,
-                active=False,
+                active=True,
                 after_completion={'type': 'redirect', 'redirect': {'url': target}},
             )
         _payment_links_pointed = True
@@ -7166,43 +7166,13 @@ def _listing_needs_checkout(market) -> bool:
 
 
 def _listing_checkout_url(user, listing_id):
-    """Checkout for the monthly listing fee on this account's Stripe customer.
-
-    None for off-market listings and listings that are already paid.
-    """
+    """Public listing Payment Link. None for off-market listings and listings that are already paid."""
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
         return None
     if not _listing_needs_checkout(row.get('market')):
         return None
-    if not _stripe_configured():
-        return None
-    base = _public_base()
-    meta = {
-        'purpose': 'listing_fee',
-        'listing_id': str(listing_id),
-        'user_id': str(row.get('user_id') or user['id']),
-    }
-    try:
-        checkout = _open_paid_checkout(
-            user,
-            meta,
-            _listing_fee_cents(),
-            'JetSchool listing',
-            'Public listing fee. $49.99 per month.',
-            f'{base}/dashboard?submitted={listing_id}&paid=1&session_id={{CHECKOUT_SESSION_ID}}',
-            f'{base}/dashboard?submitted={listing_id}&paid=0',
-            f"listing-fee-{user['id']}-{listing_id}",
-        )
-    except Exception:
-        logger.exception('Listing checkout creation failed')
-        return None
-    if not checkout:
-        return None
-    session_id = _stripe_field(checkout, 'id')
-    if session_id:
-        db_module.set_listing_payment_session(listing_id, session_id)
-    return _stripe_field(checkout, 'url')
+    return _listing_payment_link(user, listing_id)
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
@@ -7221,11 +7191,6 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if not _listing_needs_checkout(row.get('market')):
         return jsonify({'skip': True, 'message': 'Payment not required'}), 200
-    if not _stripe_configured():
-        return jsonify({
-            'error': 'payment_not_ready',
-            'message': 'Billing is not available until Stripe is configured.',
-        }), 503
     url = _listing_checkout_url(user, listing_id)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -8453,21 +8418,33 @@ def api_admin_user_account(user_id):
 @app.route('/api/admin/users/<int:user_id>/message', methods=['POST'])
 @require_admin
 def api_admin_user_message(user_id):
-    """Send a note the person sees in Alerts."""
+    """Send a note into this person's Messages, and an alert so they see it."""
+    admin = request.current_user  # type: ignore[attr-defined]
     person = get_user_by_id(user_id)
     if not person:
         return jsonify({'error': 'not_found'}), 404
+    if int(admin.get('id') or 0) == int(user_id):
+        return jsonify({'error': 'forbidden', 'message': 'Choose someone else.'}), 400
     data = request.get_json(silent=True) or {}
     message = str(data.get('message') or '').strip()
     if not message:
         return jsonify({'error': 'message_required', 'message': 'Write a message first.'}), 400
     message = message[:4000]
+    try:
+        db_module.create_broker_message(
+            admin['id'], user_id, 'message',
+            notes=message,
+            aircraft_name='JetSchool',
+            contact_email=admin.get('email') or '',
+        )
+    except ValueError:
+        return jsonify({'error': 'message_required', 'message': 'Write a message first.'}), 400
     db_module.notify_user(
         user_id,
         'account',
         'Message from JetSchool',
         message,
-        '/dashboard#alerts',
+        '/dashboard#messages',
         person.get('email'),
     )
     return jsonify({'ok': True})

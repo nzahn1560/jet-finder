@@ -125,7 +125,7 @@
             <button type="button" class="ap__btn ap__btn--secondary" id="account-close">Close</button>
         </div>
         <section class="review__panel" id="account-body"></section>
-        <label for="account-message">Message this person. It shows in their alerts.</label>
+        <label for="account-message">Message this person. It shows in their Messages.</label>
         <textarea id="account-message" maxlength="4000" placeholder="Write the message"></textarea>
         <div class="review__actions">
             <button type="button" class="ap__btn ap__btn--approve" id="account-send">Send message</button>
@@ -242,6 +242,7 @@ async function loadAdminListings() {
                 + '    </div>'
                 + '    <div class="ap__col">' + paymentBadge(pay) + ' <span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+                + (l.owner && l.owner.id ? '      <button class="ap__btn ap__btn--approve" data-user-message="' + l.owner.id + '">Message</button>' : '')
                 + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '" data-pay="' + pay.paid + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>' + (updateWaiting ? 'Reject update' : 'Reject') + '</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
@@ -255,6 +256,7 @@ async function loadAdminListings() {
                 + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
                 + '</div>';
         }).join('');
+        bindAccountMessages(target);
         target.querySelectorAll('.ap__card').forEach(function (card) {
             card.addEventListener('click', function () { openReview(card.getAttribute('data-id')); });
         });
@@ -351,11 +353,7 @@ function renderAdminUsers() {
                 + '  </div>'
                 + '</div>';
         }).join('');
-        target.querySelectorAll('[data-user-message]').forEach(function (button) {
-            button.addEventListener('click', function () {
-                openAccount(button.getAttribute('data-user-message'), true);
-            });
-        });
+        bindAccountMessages(target);
         target.querySelectorAll('[data-user-delete]').forEach(function (button) {
             button.addEventListener('click', function () { deleteAccount(button.getAttribute('data-user-delete')); });
         });
@@ -379,6 +377,15 @@ async function loadAdminUsers() {
 
 document.getElementById('user-search').addEventListener('input', renderAdminUsers);
 document.getElementById('user-role').addEventListener('change', renderAdminUsers);
+
+function bindAccountMessages(root) {
+    root.querySelectorAll('[data-user-message]').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.stopPropagation();
+            openAccount(button.getAttribute('data-user-message'), true);
+        });
+    });
+}
 
 let accountId = null;
 
@@ -467,7 +474,7 @@ document.getElementById('account-send').addEventListener('click', async function
         return;
     }
     document.getElementById('account-message').value = '';
-    status.textContent = 'Sent. They will see it in Alerts.';
+    status.textContent = 'Sent. It is in their Messages.';
 });
 document.getElementById('account-delete').addEventListener('click', function () {
     if (accountId) deleteAccount(accountId);
@@ -666,12 +673,16 @@ async function loadApprovals() {
         const paid = person.stripe_paid ? 'Paid' : 'Not a broker until a main account pays';
         const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
         return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + esc(paid) + '</div>'
-            + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div>';
+            + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+            + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
+            + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');
     const members = (data.members || []).map(function (member) {
-        return '<div class="ap__card"><div class="ap__col"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' asked to join ' + esc(member.team_name) + '. The main account adds them.</div></div>';
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' asked to join ' + esc(member.team_name) + '. The main account adds them.</div>'
+            + '<button class="ap__btn ap__btn--approve" data-user-message="' + member.user_id + '">Message</button></div></div>';
     }).join('');
     target.innerHTML = (brokers || members) ? (brokers + members) : '<div class="ap__empty">Nothing is waiting.</div>';
+    bindAccountMessages(target);
     target.querySelectorAll('[data-deny-broker]').forEach(function (btn) {
         btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals(); });
     });
@@ -690,8 +701,12 @@ async function loadAdminBrokers() {
         return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;">'
             + '<strong>' + esc(broker.name) + '</strong> ' + (broker.is_main ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">MAIN</span>' : '<span class="ap__badge">TEAM</span>')
             + '<br>' + esc(broker.email) + (place ? '<br>' + esc(place) : '')
-            + '</div><a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a></div></div>';
+            + '</div><div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+            + '<button class="ap__btn ap__btn--approve" data-user-message="' + broker.id + '">Message</button>'
+            + '<a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a>'
+            + '</div></div></div>';
     }).join('');
+    bindAccountMessages(target);
 }
 
 document.getElementById('status-filter').addEventListener('change', loadAdminListings);
