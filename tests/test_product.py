@@ -1070,6 +1070,47 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(unmatched.status_code, 200)
         self.assertEqual(unmatched.get_json(), {'received': True})
 
+    def test_refund_shows_on_the_listing_it_paid_for(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Refunded Fee Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'payment_status': 'pending', 'stripe_subscription_id': 'sub_listing_refund'},
+                synchronize_session=False,
+            )
+        refunded = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_listing_fee_refund',
+            'type': 'charge.refunded',
+            'data': {'object': {
+                'object': 'charge', 'amount': 4999, 'amount_refunded': 4999,
+                'refunded': True, 'payment_intent': 'pi_listing_fee_refund',
+                'invoice': {'subscription': 'sub_listing_refund'},
+            }},
+        })
+        self.assertEqual(refunded.status_code, 200, refunded.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['payment_status'], 'refunded')
+        self.assertEqual(row['stripe_payment_intent_id'], 'pi_listing_fee_refund')
+        self.assertEqual(row['status'], 'active')
+        kept = db_module.mark_listing_fee_paid(listing_id, subscription_id='sub_listing_refund')
+        self.assertEqual(kept, listing_id)
+        self.assertEqual(db_module.get_listing_with_owner(listing_id)['payment_status'], 'refunded')
+        page = self.client.get(f'/listing/{listing_id}')
+        self.assertIn(b'Listing fee refunded', page.data)
+        self._login('buyer@example.com', 'buyer-pass-1')
+        hidden = self.client.get(f'/listing/{listing_id}')
+        self.assertNotIn(b'Listing fee refunded', hidden.data)
+        self._login('seller@example.com', 'seller-pass-1')
+        mine = self.client.get('/api/listings/me')
+        match = next(item for item in mine.get_json()['listings'] if item['id'] == listing_id)
+        self.assertEqual(match['payment_status'], 'refunded')
+        self._login('admin@example.com', 'admin-pass-1')
+        listed = self.client.get('/api/admin/listings')
+        admin_row = next(item for item in listed.get_json()['listings'] if item['id'] == listing_id)
+        self.assertEqual(admin_row['payment_status'], 'refunded')
+
     def test_duplicate_stripe_event_is_ignored(self):
         self.assertTrue(db_module.claim_stripe_event('evt_test_once'))
         self.assertFalse(db_module.claim_stripe_event('evt_test_once'))
@@ -1487,6 +1528,92 @@ class ProductTests(unittest.TestCase):
         row = db_module.get_listing_with_owner(listing_id)
         self.assertEqual(row.get('payment_status'), 'paid')
         self.assertEqual(row.get('status'), 'pending')
+
+    def test_paid_charge_matches_the_account_email_when_stripe_has_no_reference(self):
+        person = self._signup('paid-match@example.com', 'seller-pass-1', 'seller')
+        self._login(person['email'], 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Matched Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.set_user_listing_status(listing_id, 'unpaid')
+        paid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_email_match_listing',
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_email_match',
+                'status': 'complete',
+                'payment_status': 'paid',
+                'amount_total': 4999,
+                'customer_email': person['email'],
+                'customer': 'cus_email_match',
+                'metadata': {},
+            }},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('payment_status'), 'paid')
+        self._login('admin@example.com', 'admin-pass-1')
+        page = self.client.get('/admin')
+        self.assertIn(b'Search Stripe for ', page.data)
+        listed = self.client.get('/api/admin/listings')
+        match = next(item for item in listed.get_json()['listings'] if item['id'] == listing_id)
+        self.assertEqual(match['stripe_reference'], f'listing-{listing_id}-user-{person["id"]}')
+        self.assertEqual(match['payment_status'], 'paid')
+
+    def test_two_open_listings_are_not_assigned_from_the_email_alone(self):
+        person = self._signup('paid-two@example.com', 'seller-pass-1', 'seller')
+        self._login(person['email'], 'seller-pass-1')
+        first = self.client.post('/api/listings', json=self._payload('First Open Jet', 'public')).get_json()['id']
+        second = self.client.post('/api/listings', json=self._payload('Second Open Jet', 'public')).get_json()['id']
+        paid = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_email_two_listings',
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_email_two',
+                'status': 'complete',
+                'payment_status': 'paid',
+                'amount_total': 4999,
+                'customer_email': person['email'],
+                'metadata': {},
+            }},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        self.assertNotEqual(db_module.get_listing_with_owner(first).get('payment_status'), 'paid')
+        self.assertNotEqual(db_module.get_listing_with_owner(second).get('payment_status'), 'paid')
+
+    def test_reconcile_names_the_listing_on_the_stripe_customer(self):
+        import app as app_module
+        person = self._signup('paid-reconcile@example.com', 'seller-pass-1', 'seller')
+        self._login(person['email'], 'seller-pass-1')
+        listing_id = self.client.post('/api/listings', json=self._payload('Reconcile Jet', 'public')).get_json()['id']
+        db_module.set_user_listing_status(listing_id, 'unpaid')
+        app_module._checkouts_reconciled = False
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_reconcile'
+        calls = []
+        page = type('Page', (), {'data': [{
+            'id': 'cs_reconcile',
+            'status': 'complete',
+            'payment_status': 'paid',
+            'client_reference_id': f'listing-{listing_id}-user-{person["id"]}',
+            'customer': 'cus_reconcile',
+            'subscription': 'sub_reconcile',
+            'metadata': {},
+        }]})()
+        try:
+            with patch.object(app_module.stripe.checkout.Session, 'list', return_value=page), \
+                 patch.object(app_module.stripe.Customer, 'modify', side_effect=lambda *args, **kwargs: calls.append(kwargs)), \
+                 patch.object(app_module.stripe.Subscription, 'modify', side_effect=lambda *args, **kwargs: calls.append(kwargs)):
+                app_module._reconcile_paid_checkouts()
+        finally:
+            app_module._checkouts_reconciled = False
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row.get('payment_status'), 'paid')
+        self.assertTrue(any('JetSchool listing' in (call.get('description') or '') for call in calls))
+        self.assertTrue(any(call.get('metadata', {}).get('listing_id') == str(listing_id) for call in calls))
 
     def test_one_stripe_customer_is_reused_and_each_payment_sends_a_receipt(self):
         person = self._signup('one-customer@example.com', 'seller-pass-1', 'seller')

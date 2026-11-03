@@ -71,6 +71,14 @@
     <div class="showroom__sheet">
         <div class="showroom__panel">
             <h1>{{ listing.title }}</h1>
+            {% set viewer = get_current_user_info() %}
+            {% if viewer and (viewer.is_admin or viewer.id == listing.user_id) %}
+                {% if listing.payment_status == 'partially_refunded' %}
+                <p style="color:#fbbf24;font-weight:700;margin:0.4rem 0 0;">Listing fee partly refunded</p>
+                {% elif listing.payment_status in ('refunded', 'refund_recorded') %}
+                <p style="color:#fbbf24;font-weight:700;margin:0.4rem 0 0;">Listing fee refunded</p>
+                {% endif %}
+            {% endif %}
             {% if listing.user_id %}
             <a class="showroom__seller" href="/people/{{ listing.user_id }}">{{ seller_name }}</a>
             {% endif %}
