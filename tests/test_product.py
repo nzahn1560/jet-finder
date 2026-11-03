@@ -128,6 +128,37 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', portal.data)
         self.assertIn(b'href="/settings"', portal.data)
 
+    def test_broker_application_keeps_specialty_and_years(self):
+        created = self.client.post('/api/auth/signup', json={
+            'email': 'specialty-broker@example.com',
+            'password': 'broker-pass-1',
+            'first_name': 'Sky',
+            'profile_role': 'broker',
+            'broker_specialties': 'Citation, King Air',
+            'broker_years': 14,
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        user = created.get_json()['user']
+        self.assertEqual(user['broker_specialties'], 'Citation, King Air')
+        self.assertEqual(user['broker_years'], 14)
+        form = self.client.get('/register')
+        self.assertIn(b'Aircraft specialty', form.data)
+        self.assertIn(b'Years in business', form.data)
+        profile = self.client.get('/dashboard')
+        self.assertIn(b'Citation, King Air', profile.data)
+        self.assertIn(b'Years in business', profile.data)
+        self.assertIn(b'>14<', profile.data)
+        edited = self.client.patch('/api/profile', json={
+            'broker_specialties': 'Gulfstream',
+            'broker_years': 21,
+        })
+        self.assertEqual(edited.status_code, 200, edited.get_json())
+        self.assertEqual(edited.get_json()['user']['broker_specialties'], 'Gulfstream')
+        self.assertEqual(edited.get_json()['user']['broker_years'], 21)
+        shown = self.client.get('/settings')
+        self.assertIn(b'Gulfstream', shown.data)
+        self.assertIn(b'21', shown.data)
+
     def test_role_alone_does_not_open_off_market(self):
         labeled = self._signup('solo-label@example.com', 'broker-pass-1', 'seller')
         db_module.update_user_profile(labeled['id'], {'profile_role': 'broker'})
@@ -318,6 +349,57 @@ class ProductTests(unittest.TestCase):
         page = self.client.get(f'/listing/{listing_id}')
         self.assertIn(b'$1,800,000', page.data)
 
+    def test_owner_can_delete_a_live_listing(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Delete Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        page = self.client.get('/dashboard')
+        self.assertIn(b"l.status !== 'archived'", page.data)
+        removed = self.client.delete(f'/api/listings/{listing_id}')
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['status'], 'archived')
+        hidden = self.client.get(f'/listing/{listing_id}')
+        self.assertEqual(hidden.status_code, 404)
+
+    def test_listing_photos_can_be_added_and_reordered_up_to_fifteen(self):
+        import io
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Photo Jet', 'public'))
+        listing_id = created.get_json()['id']
+        form = self.client.get('/create-listing')
+        self.assertIn(b'Add a photo', form.data)
+        self.assertIn(b'id="photo-preview"', form.data)
+        self.assertIn(b'Earlier', form.data)
+        self.assertIn(b'id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif"', form.data)
+        first = db_module.add_listing_media(listing_id, 'photo', 'k1', 'https://example.test/1.jpg', sort_order=0)
+        second = db_module.add_listing_media(listing_id, 'photo', 'k2', 'https://example.test/2.jpg', sort_order=1)
+        ordered = self.client.post(f'/api/listings/{listing_id}/media/order', json={'ids': [second, first]})
+        self.assertEqual(ordered.status_code, 200, ordered.get_json())
+        photos = [item for item in db_module.list_listing_media(listing_id) if item['media_type'] == 'photo']
+        self.assertEqual([item['id'] for item in photos], [second, first])
+        for index in range(13):
+            db_module.add_listing_media(listing_id, 'photo', f'k{index+3}', f'https://example.test/{index}.jpg', sort_order=index + 2)
+        extra = self.client.post(
+            f'/api/listings/{listing_id}/media',
+            data={'files': (io.BytesIO(b'\xff\xd8\xff\xd9'), 'extra.jpg', 'image/jpeg')},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(extra.status_code, 400, extra.get_json())
+        self.assertEqual(extra.get_json()['rejected'][0]['reason'], 'photo_limit_reached')
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        staged = self.client.post(f'/api/listings/{listing_id}/media/order', json={'ids': [first, second]})
+        self.assertEqual(staged.status_code, 200, staged.get_json())
+        self.assertTrue(staged.get_json().get('pending_review'))
+        still = [item['id'] for item in db_module.list_listing_media(listing_id) if item['media_type'] == 'photo']
+        self.assertEqual(still[:2], [second, first])
+        self._login('admin@example.com', 'admin-pass-1')
+        approved = self.client.post(f'/api/admin/listings/{listing_id}/approve')
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        shown = [item['id'] for item in db_module.list_listing_media(listing_id) if item['media_type'] == 'photo']
+        self.assertEqual(shown[:2], [first, second])
+
     def test_public_profile_hides_edit_from_visitors(self):
         visitor = self.client.get(f"/people/{self.buyer['id']}")
         self.assertEqual(visitor.status_code, 200)
@@ -347,9 +429,18 @@ class ProductTests(unittest.TestCase):
         self._login('admin@example.com', 'admin-pass-1')
         queue = self.client.get('/api/admin/listings?status=pending')
         self.assertEqual(queue.status_code, 200)
-        titles = [row.get('title') for row in queue.get_json()['listings']]
-        self.assertIn('Queue Public', titles)
-        self.assertIn('Queue Off Market', titles)
+        rows = {row.get('title'): row for row in queue.get_json()['listings']}
+        self.assertIn('Queue Public', rows)
+        self.assertIn('Queue Off Market', rows)
+        self.assertNotEqual(rows['Queue Public'].get('payment_status'), 'paid')
+        db_module.mark_listing_fee_paid(public.get_json()['id'])
+        paid_queue = self.client.get('/api/admin/listings?status=pending')
+        paid_row = next(row for row in paid_queue.get_json()['listings'] if row.get('title') == 'Queue Public')
+        self.assertEqual(paid_row.get('payment_status'), 'paid')
+        page = self.client.get('/admin')
+        self.assertIn(b'Stripe: ', page.data)
+        self.assertIn(b'Not paid', page.data)
+        self.assertIn(b'>Paid<', page.data)
         notes = self.client.get('/api/notifications')
         self.assertEqual(notes.status_code, 200)
         note_titles = [row.get('title') for row in notes.get_json()['notifications']]
@@ -414,6 +505,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(review.status_code, 200, review.get_json())
         body = review.get_json()
         self.assertEqual(body['listing']['price'], 2500000)
+        self.assertIn('payment_status', body['listing'])
         self.assertIn('price', body['aircraft_data'])
         self.assertTrue(body['checks'])
         sent = self.client.post(
@@ -421,15 +513,34 @@ class ProductTests(unittest.TestCase):
             json={'message': 'Add the serial number.'},
         )
         self.assertEqual(sent.status_code, 200, sent.get_json())
-        self.assertEqual(sent.get_json()['status'], 'pending')
+        self.assertEqual(sent.get_json()['status'], 'changes_requested')
         row = db_module.get_listing_with_owner(listing_id)
-        self.assertEqual(row['status'], 'pending')
+        self.assertEqual(row['status'], 'changes_requested')
         self.assertIn('serial', row.get('review_message') or '')
+        hidden = self.client.get('/api/admin/listings?status=pending')
+        self.assertNotIn(listing_id, [item['id'] for item in hidden.get_json()['listings']])
         self._login('seller@example.com', 'seller-pass-1')
         mine = self.client.get('/api/listings/me')
         self.assertEqual(mine.status_code, 200)
         found = next(item for item in mine.get_json()['listings'] if item['id'] == listing_id)
         self.assertIn('serial', found.get('review_message') or '')
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'payment_status': 'paid'}, synchronize_session=False
+            )
+        dashboard = self.client.get('/dashboard')
+        self.assertIn(b'Resubmit for review', dashboard.data)
+        again = self.client.post(f'/api/listings/{listing_id}/resubmit')
+        self.assertEqual(again.status_code, 200, again.get_json())
+        self.assertFalse(again.get_json()['charged_again'])
+        self.assertEqual(again.get_json()['status'], 'pending')
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertEqual(row['payment_status'], 'paid')
+        self.assertFalse(row.get('review_message'))
+        self._login('admin@example.com', 'admin-pass-1')
+        queue = self.client.get('/api/admin/listings?status=pending')
+        queued = [item for item in queue.get_json()['listings'] if item['id'] == listing_id]
+        self.assertEqual(len(queued), 1)
 
     def test_reject_then_resubmit_does_not_require_a_second_payment(self):
         self._login('seller@example.com', 'seller-pass-1')

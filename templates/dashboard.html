@@ -461,21 +461,22 @@
             active: 'Live on the marketplace.',
             pending: 'Waiting for approval. Not on the marketplace yet.',
             unpaid: 'Saved. Pay the $49.99 per month fee. An admin can already see it.',
-            rejected: 'Not approved.',
+            changes_requested: 'Changes were requested. Update the listing if you need to, then resubmit. You are not charged again.',
+            rejected: 'Not approved. You can resubmit a paid listing without paying again.',
             deleted: 'Removed from the marketplace.',
-            archived: 'Archived.',
+            archived: 'Removed from the marketplace.',
             draft: 'Draft only.',
         };
         const html = listings.map(function (l) {
             const statusColor = ({
                 active: '#22c55e', pending: '#fbbf24', unpaid: '#fbbf24',
-                rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
+                rejected: '#ef4444', changes_requested: '#fbbf24', archived: '#6b7280', draft: '#6b7280',
             })[l.status] || '#8e8e93';
             const rej = l.rejection_reason ? '<p style="margin:0.4rem 0 0;color:#ef4444;font-size:0.85rem;">Reason: ' + escapeHtml(l.rejection_reason) + '</p>' : '';
             const amendment = l.amendment_note ? '<p style="margin:0.4rem 0 0;color:#f4f4f4;font-size:0.85rem;">' + escapeHtml(l.amendment_note) + '</p>' : '';
             const review = l.review_message ? '<p style="margin:0.4rem 0 0;color:#fbbf24;font-size:0.95rem;">' + escapeHtml(l.review_message) + '</p>' : '';
             const canEdit = l.status !== 'archived' && l.status !== 'deleted';
-            const canDelete = l.status !== 'deleted' && (isAdmin || l.status !== 'active');
+            const canDelete = l.status !== 'deleted' && l.status !== 'archived';
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
             const copy = (l.status === 'active' && l.pending_review)
                 ? 'Live. An update is waiting for approval. The current price, photos, and details stay until it is approved.'
@@ -497,7 +498,8 @@
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/') + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
                 + (!offMarket && l.status === 'unpaid' ? '<a class="dash__card-link" href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01?client_reference_id=' + encodeURIComponent('listing-' + l.id + '-user-{{ user.id }}') + '&prefilled_email=' + encodeURIComponent({{ (user.email or '')|tojson }}) + '" style="color:#fbbf24;">Pay $49.99 per month</a>' : '')
-                + (l.status === 'rejected' ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Send back for review</button>' : '')
+                + ((l.payment_status === 'paid' || offMarket) && (l.status === 'changes_requested' || l.status === 'rejected' || l.status === 'draft' || l.status === 'suspended' || (l.status === 'pending' && l.review_message)) ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Resubmit for review</button>' : '')
+                + (l.payment_status !== 'paid' && !offMarket && l.status === 'rejected' ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Send back for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
                 + (canDelete ? '<button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
@@ -533,7 +535,7 @@
         applySelling();
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Delete this listing? It will leave the marketplace.')) return;
+                if (!confirm('Delete this listing? It leaves the site. A monthly fee for this aircraft stops.')) return;
                 const id = btn.getAttribute('data-delete');
                 const resp = await fetch('/api/listings/' + id, { method: 'DELETE', credentials: 'include' });
                 if (resp.ok) { window.location.href = '/dashboard'; } else {

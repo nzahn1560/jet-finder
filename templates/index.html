@@ -3430,16 +3430,36 @@
         top: 8px;
         left: 8px;
         z-index: 2;
-        padding: 2px 7px;
-        border-radius: 999px;
+        width: 52px;
+        height: 52px;
+        padding: 0;
+        border-radius: 50%;
         background: rgba(18, 18, 18, 0.78);
-        line-height: 1.2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
     }
 
     .listing-score__value {
         display: block;
-        font-size: 0.95rem;
+        font-size: 0.82rem;
         font-weight: 800;
+        line-height: 1;
+    }
+
+    .aircraft-card .listing-save {
+        box-sizing: border-box;
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
     }
 
     .listing-photos {
@@ -4572,10 +4592,12 @@
                                     placeholder="Describe your aircraft, maintenance history, upgrades, etc."></textarea>
                             </div>
 
-                            <div class="form-group mb-3">
-                                <label class="form-label">Images (Optional)</label>
-                                <input type="file" class="form-control" id="listingImages" multiple accept="image/*">
-                                <small class="form-text text-muted">Upload up to 10 images of your aircraft</small>
+                            <div class="form-group mb-3" id="listing-photos">
+                                <label class="form-label">Photos</label>
+                                <p class="text-muted mb-2">Add one photo at a time, up to 15. The first photo is the cover. Use Earlier and Later to set the order.</p>
+                                <div id="listing-photo-preview" class="mb-2"></div>
+                                <button type="button" class="btn btn-outline-light" id="listing-photo-add">Add a photo</button>
+                                <input type="file" id="listingImages" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
                             </div>
                         </form>
 
@@ -6605,7 +6627,7 @@
                             data-price="${priceValue || 0}"
                             data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
                             aria-label="Save"
-                            style="position:absolute; top:8px; right:8px; width:40px; height:40px; border-radius:999px; border:0; background:rgba(12,12,12,0.82); color:#fff; font-size:1.1rem; z-index:2;">
+                            style="position:absolute; top:8px; right:8px; background:rgba(12,12,12,0.82); color:#fff; font-size:1.1rem; z-index:2;">
                         <i class="far fa-bookmark"></i>
                     </button>
                     </div>
@@ -7982,7 +8004,89 @@
         const continueBtn = document.getElementById('continueToListingDetails');
         const backBtn = document.getElementById('backToProfileSelection');
         const createBtn = document.getElementById('createListingBtn');
+        const listingImages = document.getElementById('listingImages');
+        const listingPhotoAdd = document.getElementById('listing-photo-add');
+        const listingPhotoPreview = document.getElementById('listing-photo-preview');
+        const homepagePhotos = [];
         if (!grid || !createBtn) return;
+
+        function renderHomepagePhotos() {
+            if (!listingPhotoPreview) return;
+            listingPhotoPreview.replaceChildren();
+            if (!homepagePhotos.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-muted mb-0';
+                empty.textContent = 'Photos you add show up here.';
+                listingPhotoPreview.appendChild(empty);
+                return;
+            }
+            const cover = document.createElement('img');
+            cover.src = homepagePhotos[0].url;
+            cover.alt = 'Cover photo preview';
+            cover.style.cssText = 'display:block;width:100%;max-height:240px;object-fit:contain;background:#111;border-radius:12px;margin-bottom:0.75rem;';
+            listingPhotoPreview.appendChild(cover);
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.6rem;';
+            homepagePhotos.forEach(function (item, index) {
+                const card = document.createElement('div');
+                card.style.cssText = 'width:140px;background:#161616;border-radius:10px;padding:0.4rem;color:#fff;';
+                const img = document.createElement('img');
+                img.src = item.url;
+                img.alt = '';
+                img.style.cssText = 'width:100%;height:90px;object-fit:cover;border-radius:8px;display:block;';
+                const label = document.createElement('div');
+                label.textContent = index === 0 ? 'Cover' : String(index + 1);
+                label.style.margin = '0.3rem 0';
+                const earlier = document.createElement('button');
+                earlier.type = 'button';
+                earlier.textContent = 'Earlier';
+                earlier.disabled = index === 0;
+                earlier.style.cssText = 'border:0;background:transparent;color:#fff;padding:0 0.4rem 0 0;';
+                earlier.addEventListener('click', function () {
+                    const swap = homepagePhotos[index - 1];
+                    homepagePhotos[index - 1] = homepagePhotos[index];
+                    homepagePhotos[index] = swap;
+                    renderHomepagePhotos();
+                });
+                const later = document.createElement('button');
+                later.type = 'button';
+                later.textContent = 'Later';
+                later.disabled = index === homepagePhotos.length - 1;
+                later.style.cssText = 'border:0;background:transparent;color:#fff;padding:0 0.4rem 0 0;';
+                later.addEventListener('click', function () {
+                    const swap = homepagePhotos[index + 1];
+                    homepagePhotos[index + 1] = homepagePhotos[index];
+                    homepagePhotos[index] = swap;
+                    renderHomepagePhotos();
+                });
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.textContent = 'Remove';
+                remove.style.cssText = 'border:0;background:transparent;color:#ef4444;padding:0;';
+                remove.addEventListener('click', function () {
+                    URL.revokeObjectURL(item.url);
+                    homepagePhotos.splice(index, 1);
+                    renderHomepagePhotos();
+                });
+                card.append(img, label, earlier, later, remove);
+                row.appendChild(card);
+            });
+            listingPhotoPreview.appendChild(row);
+            if (listingPhotoAdd) listingPhotoAdd.hidden = homepagePhotos.length >= 15;
+        }
+        if (listingPhotoAdd && listingImages) {
+            listingPhotoAdd.addEventListener('click', function () { listingImages.click(); });
+            listingImages.addEventListener('change', function () {
+                Array.from(listingImages.files || []).forEach(function (file) {
+                    if (!file.type || file.type.indexOf('image/') !== 0) return;
+                    if (homepagePhotos.length >= 15) return;
+                    homepagePhotos.push({ file: file, url: URL.createObjectURL(file) });
+                });
+                listingImages.value = '';
+                renderHomepagePhotos();
+            });
+            renderHomepagePhotos();
+        }
 
         function renderProfiles(list) {
             if (!list.length) {
@@ -8113,10 +8217,9 @@
                     alert(data.message || data.error || 'Could not create the listing.');
                     return;
                 }
-                const files = document.getElementById('listingImages').files;
-                if (files && files.length) {
+                for (const item of homepagePhotos) {
                     const fd = new FormData();
-                    Array.from(files).slice(0, 10).forEach(function (file) { fd.append('files', file); });
+                    fd.append('files', item.file);
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
                 const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');

@@ -149,6 +149,76 @@
         background: rgba(240, 85, 69, 0.1);
     }
 
+    .photo-preview__empty {
+        color: #8e8e93;
+        margin: 0 0 1rem;
+    }
+
+    .photo-preview__cover {
+        margin-bottom: 0.9rem;
+        background: #111;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        overflow: hidden;
+        max-height: 360px;
+    }
+
+    .photo-preview__cover img {
+        display: block;
+        width: 100%;
+        max-height: 360px;
+        object-fit: contain;
+        background: #0c0c0c;
+    }
+
+    .photo-preview__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .photo-preview__card {
+        background: #161616;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        padding: 0.45rem;
+        color: #fff;
+    }
+
+    .photo-preview__card img {
+        display: block;
+        width: 100%;
+        height: 110px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #0c0c0c;
+    }
+
+    .photo-preview__card span {
+        display: block;
+        margin: 0.35rem 0;
+        font-size: 0.85rem;
+    }
+
+    .photo-preview__card div {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+    }
+
+    .photo-preview__card button {
+        border: 0;
+        background: transparent;
+        color: #fff;
+        cursor: pointer;
+        padding: 0;
+        font-size: 0.82rem;
+    }
+
+    .photo-preview__card button[data-remove-photo] { color: #ef4444; }
+    .photo-preview__card button:disabled { color: #666; cursor: default; }
+
     .pricing-calculator {
         background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
         border: 1px solid rgba(16, 185, 129, 0.2);
@@ -488,17 +558,16 @@
                         <div class="section-title">
                             <i class="fas fa-camera"></i>Photos
                         </div>
-                        <div class="file-upload-area" onclick="document.getElementById('photos').click()">
-                            <i class="fas fa-cloud-upload-alt fa-3x mb-3" style="color: #F05545;"></i>
-                            <h5 class="text-white">Upload Photos</h5>
-                            <p class="text-muted">Click to select photos or drag and drop<br>Maximum 10 photos, 5MB each
-                            </p>
-                            <input type="file" id="photos" name="photos" multiple accept="image/*"
+                        <p class="text-muted">Add one photo at a time, up to 15. The first photo is the cover. Use Earlier and Later to change the order.</p>
+                        <div id="photo-preview"></div>
+                        <div class="file-upload-area" id="photo-add" onclick="document.getElementById('photos').click()">
+                            <i class="fas fa-plus fa-2x mb-3" style="color: #F05545;"></i>
+                            <h5 class="text-white">Add a photo</h5>
+                            <p class="text-muted mb-0">Choose one photo, then come back and add another. You can also drop a photo here.</p>
+                            <input type="file" id="photos" name="photos" accept="image/jpeg,image/png,image/webp,image/gif"
                                 style="display: none;">
                         </div>
-
                         <div id="photosStatus" class="mt-2"></div>
-                        <div id="photosList" class="mt-2"></div>
                     </div>
 
                     <input type="hidden" name="pricing_plan" value="monthly">
@@ -515,6 +584,9 @@
                         <p id="listing-next-step" class="text-white mb-3">Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
+                        </button>
+                        <button type="button" class="btn btn-secondary me-3" id="delete-listing" hidden>
+                            <i class="fas fa-trash me-2"></i>Delete listing
                         </button>
                         <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-primary btn-lg" id="listing-submit" role="button">
                             <i class="fas fa-check me-2"></i>Submit for approval
@@ -701,27 +773,211 @@
         };
     }
 
-    async function uploadListingPhotos(listingId) {
-        const input = document.getElementById('photos');
-        const files = input && input.files ? Array.from(input.files) : [];
-        if (!files.length) return { uploaded: 0, errors: [] };
-        const fd = new FormData();
-        files.forEach(f => fd.append('files', f));
-        try {
-            const resp = await fetch(`/api/listings/${listingId}/media`, {
-                method: 'POST',
-                credentials: 'include',
-                body: fd,
+    const PHOTO_LIMIT = 15;
+    const listingPhotos = [];
+    let photoKey = 0;
+
+    function activeListingPhotos() {
+        return listingPhotos.filter(function (item) { return !item.remove; });
+    }
+
+    function addPhotoFiles(fileList) {
+        const status = document.getElementById('photosStatus');
+        let stopped = false;
+        Array.from(fileList || []).forEach(function (file) {
+            if (!file || !file.type || file.type.indexOf('image/') !== 0) return;
+            if (activeListingPhotos().length >= PHOTO_LIMIT) {
+                stopped = true;
+                return;
+            }
+            listingPhotos.push({
+                key: 'p' + (++photoKey),
+                file: file,
+                url: URL.createObjectURL(file),
+                mediaId: null,
+                published: true,
+                remove: false,
             });
-            const data = await resp.json().catch(() => ({}));
-            return {
-                uploaded: (data.created || []).length,
-                errors: (data.rejected || []).map(r => `${r.filename}: ${r.reason}`),
-                pending_review: !!data.pending_review,
-            };
-        } catch (err) {
-            return { uploaded: 0, errors: [String(err)] };
+        });
+        if (status) {
+            status.textContent = stopped ? '15 photos is the maximum. Remove one to add another.' : '';
         }
+        renderPhotoPreview();
+    }
+
+    function moveListingPhoto(key, direction) {
+        const visible = activeListingPhotos();
+        const index = visible.findIndex(function (item) { return item.key === key; });
+        const next = index + direction;
+        if (index < 0 || next < 0 || next >= visible.length) return;
+        const current = listingPhotos.indexOf(visible[index]);
+        const target = listingPhotos.indexOf(visible[next]);
+        const swap = listingPhotos[current];
+        listingPhotos[current] = listingPhotos[target];
+        listingPhotos[target] = swap;
+        renderPhotoPreview();
+    }
+
+    function removeListingPhoto(key) {
+        const index = listingPhotos.findIndex(function (item) { return item.key === key; });
+        if (index < 0) return;
+        const item = listingPhotos[index];
+        if (item.mediaId) {
+            item.remove = true;
+        } else {
+            if (item.url) URL.revokeObjectURL(item.url);
+            listingPhotos.splice(index, 1);
+        }
+        const status = document.getElementById('photosStatus');
+        if (status && activeListingPhotos().length < PHOTO_LIMIT) status.textContent = '';
+        renderPhotoPreview();
+    }
+
+    function renderPhotoPreview() {
+        const box = document.getElementById('photo-preview');
+        const add = document.getElementById('photo-add');
+        const photos = activeListingPhotos();
+        if (add) add.hidden = photos.length >= PHOTO_LIMIT;
+        if (!box) return;
+        box.replaceChildren();
+        if (!photos.length) {
+            const empty = document.createElement('p');
+            empty.className = 'photo-preview__empty';
+            empty.textContent = 'Photos you add show up here. The first one is the cover.';
+            box.appendChild(empty);
+            return;
+        }
+        const coverWrap = document.createElement('div');
+        coverWrap.className = 'photo-preview__cover';
+        const cover = document.createElement('img');
+        cover.src = photos[0].url;
+        cover.alt = 'Cover photo preview';
+        coverWrap.appendChild(cover);
+        box.appendChild(coverWrap);
+        const grid = document.createElement('div');
+        grid.className = 'photo-preview__grid';
+        photos.forEach(function (item, index) {
+            const card = document.createElement('article');
+            card.className = 'photo-preview__card';
+            const img = document.createElement('img');
+            img.src = item.url;
+            img.alt = '';
+            const label = document.createElement('span');
+            label.textContent = (index === 0 ? 'Cover' : String(index + 1)) + (item.published === false ? ' · waiting for approval' : '');
+            const actions = document.createElement('div');
+            [['Earlier', -1, 'data-earlier'], ['Later', 1, 'data-later'], ['Remove', 0, 'data-remove-photo']].forEach(function (spec) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = spec[0];
+                if (spec[0] === 'Remove') button.setAttribute('data-remove-photo', item.key);
+                else button.setAttribute(spec[2], item.key);
+                if (spec[0] === 'Earlier') button.disabled = index === 0;
+                if (spec[0] === 'Later') button.disabled = index === photos.length - 1;
+                actions.appendChild(button);
+            });
+            card.append(img, label, actions);
+            grid.appendChild(card);
+        });
+        box.appendChild(grid);
+    }
+
+    document.getElementById('photo-preview').addEventListener('click', function (event) {
+        const earlier = event.target.closest('[data-earlier]');
+        const later = event.target.closest('[data-later]');
+        const remove = event.target.closest('[data-remove-photo]');
+        if (earlier) moveListingPhoto(earlier.getAttribute('data-earlier'), -1);
+        if (later) moveListingPhoto(later.getAttribute('data-later'), 1);
+        if (remove) removeListingPhoto(remove.getAttribute('data-remove-photo'));
+    });
+    renderPhotoPreview();
+
+    function seedListingPhotos(listing) {
+        const removed = new Set(listing.media_remove || []);
+        const order = listing.media_order || [];
+        const saved = (listing.media || []).filter(function (item) {
+            return (item.media_type || 'photo') === 'photo' && !removed.has(item.id);
+        });
+        saved.sort(function (a, b) {
+            const left = order.indexOf(a.id);
+            const right = order.indexOf(b.id);
+            if (left < 0 && right < 0) return (a.sort_order || 0) - (b.sort_order || 0);
+            if (left < 0) return 1;
+            if (right < 0) return -1;
+            return left - right;
+        });
+        saved.forEach(function (item) {
+            listingPhotos.push({
+                key: 'saved-' + item.id,
+                file: null,
+                url: item.url,
+                mediaId: item.id,
+                published: item.published !== false,
+                remove: false,
+            });
+        });
+        renderPhotoPreview();
+    }
+
+    async function uploadListingPhotos(listingId) {
+        const errors = [];
+        let pendingReview = false;
+        for (const item of listingPhotos) {
+            if (!item.remove || !item.mediaId) continue;
+            try {
+                const resp = await fetch('/api/listings/' + listingId + '/media/' + item.mediaId, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok) errors.push('Could not remove a photo.');
+                if (data.pending_review) pendingReview = true;
+            } catch (err) {
+                errors.push('Could not remove a photo.');
+            }
+        }
+        let uploaded = 0;
+        for (const item of activeListingPhotos()) {
+            if (!item.file) continue;
+            const fd = new FormData();
+            fd.append('files', item.file);
+            try {
+                const resp = await fetch('/api/listings/' + listingId + '/media', {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd,
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                const created = (data.created || [])[0];
+                if (!resp.ok || !created) {
+                    const reason = data.rejected && data.rejected[0] ? data.rejected[0].reason : 'upload failed';
+                    errors.push((item.file.name || 'Photo') + ': ' + reason);
+                    continue;
+                }
+                item.mediaId = created.id;
+                item.file = null;
+                item.published = created.published !== false;
+                uploaded += 1;
+                if (data.pending_review) pendingReview = true;
+            } catch (err) {
+                errors.push((item.file && item.file.name) || 'A photo did not upload.');
+            }
+        }
+        const ids = activeListingPhotos().map(function (item) { return item.mediaId; }).filter(Boolean);
+        if (ids.length) {
+            try {
+                const resp = await fetch('/api/listings/' + listingId + '/media/order', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: ids }),
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (data.pending_review) pendingReview = true;
+            } catch (err) {
+                errors.push('The photo order could not be saved.');
+            }
+        }
+        return { uploaded: uploaded, errors: errors, pending_review: pendingReview };
     }
 
     async function startCheckoutOrFinish(listingId) {
@@ -811,6 +1067,16 @@
             localStorage.removeItem('listing_draft');
 
             if (EDIT_LISTING_ID) {
+                if (window.LISTING_NEEDS_RESUBMIT) {
+                    const again = await fetch(`/api/listings/${listingId}/resubmit`, { method: 'POST', credentials: 'include' });
+                    const againData = await again.json().catch(() => ({}));
+                    if (again.status === 402 && againData.payment_required) {
+                        return fail(againData.message || 'This listing still needs the listing fee before review.');
+                    }
+                    if (!again.ok && again.status !== 409) {
+                        return fail(againData.message || 'The changes were saved, but it could not be sent back for review.');
+                    }
+                }
                 window.location.href = amended ? '/dashboard?updated=amendment' : '/dashboard?updated=1';
                 return;
             }
@@ -880,12 +1146,16 @@
             // Profile is already chosen; the search field is only required for new listings.
             const profileSearch = document.getElementById('profileSearchInput');
             if (profileSearch) profileSearch.required = false;
-            const submitBtn = document.querySelector('#listing-form [type="submit"]');
+            const submitBtn = document.getElementById('listing-submit');
             const waiting = listing.status === 'active' || listing.pending_review;
+            const sentBack = listing.status === 'changes_requested' || listing.status === 'rejected' || !!listing.review_message;
+            window.LISTING_NEEDS_RESUBMIT = sentBack && !waiting;
             if (submitBtn) {
-                submitBtn.innerHTML = waiting
+                submitBtn.innerHTML = sentBack && !waiting
+                    ? '<i class="fas fa-paper-plane me-2"></i>Resubmit for review'
+                    : (waiting
                     ? '<i class="fas fa-paper-plane me-2"></i>Submit for approval'
-                    : '<i class="fas fa-save me-2"></i>Save Changes';
+                    : '<i class="fas fa-save me-2"></i>Save Changes');
             }
             if (waiting && submitBtn && !document.getElementById('edit-approval-note')) {
                 const note = document.createElement('p');
@@ -897,12 +1167,20 @@
             }
             const header = document.querySelector('.page-header h1, h1');
             if (header) header.textContent = 'Edit Listing';
-            // Show existing photos count
-            if (listing.media && listing.media.length) {
-                const statusDiv = document.getElementById('photosStatus');
-                if (statusDiv) {
-                    statusDiv.innerHTML = `<div class="alert alert-info"><i class="fas fa-images me-2"></i>${listing.media.length} photo(s) already attached. New photos you add will be appended.</div>`;
-                }
+            seedListingPhotos(listing);
+            const deleteBtn = document.getElementById('delete-listing');
+            if (deleteBtn) {
+                deleteBtn.hidden = false;
+                deleteBtn.addEventListener('click', async function () {
+                    if (!confirm('Delete this listing? It leaves the site. A monthly fee for this aircraft stops.')) return;
+                    const resp = await fetch('/api/listings/' + EDIT_LISTING_ID, { method: 'DELETE', credentials: 'include' });
+                    if (resp.ok) {
+                        window.location.href = '/dashboard';
+                        return;
+                    }
+                    const err = await resp.json().catch(function () { return {}; });
+                    alert(err.message || 'Could not delete this listing.');
+                });
             }
         } catch (err) {
             console.error('Edit mode init failed:', err);
@@ -931,12 +1209,12 @@
 
                 const files = e.dataTransfer.files;
                 const input = this.querySelector('input[type="file"]');
-                input.files = files;
-
-                // Update file status
                 if (input.id === 'photos') {
-                    updateFileStatus('photos', files);
-                } else if (input.id === 'documents') {
+                    addPhotoFiles(files);
+                    return;
+                }
+                input.files = files;
+                if (input.id === 'documents') {
                     updateFileStatus('documents', files);
                 }
             });
@@ -944,7 +1222,8 @@
 
         // Handle file input changes
         document.getElementById('photos').addEventListener('change', function (e) {
-            updateFileStatus('photos', e.target.files);
+            addPhotoFiles(e.target.files);
+            e.target.value = '';
         });
 
         const documentsInput = document.getElementById('documents');

@@ -1104,11 +1104,17 @@ def update_user_profile(user_id, fields):
                 safe[image_key] = cleaned
     if isinstance(safe.get('broker_bio'), str):
         safe['broker_bio'] = safe['broker_bio'][:1000]
+    if isinstance(safe.get('broker_specialties'), str):
+        safe['broker_specialties'] = safe['broker_specialties'][:500]
     if 'broker_years' in safe and safe['broker_years'] not in (None, ''):
         try:
-            safe['broker_years'] = int(safe['broker_years'])
+            years = int(safe['broker_years'])
         except (TypeError, ValueError):
+            years = None
+        if years is None or years < 0 or years > 80:
             safe.pop('broker_years', None)
+        else:
+            safe['broker_years'] = years
     if not safe:
         return False
     with get_session() as s:
@@ -1887,9 +1893,15 @@ def parse_listing_pending(raw):
 
     media_add = _ids('media_add')
     media_remove = _ids('media_remove')
-    if not fields and not media_add and not media_remove:
+    media_order = _ids('media_order')
+    if not fields and not media_add and not media_remove and not media_order:
         return None
-    return {'fields': fields, 'media_add': media_add, 'media_remove': media_remove}
+    return {
+        'fields': fields,
+        'media_add': media_add,
+        'media_remove': media_remove,
+        'media_order': media_order,
+    }
 
 
 def set_listing_pending_changes(listing_id, pending):
@@ -1899,6 +1911,7 @@ def set_listing_pending_changes(listing_id, pending):
         fields = pending.get('fields') or {}
         media_add = []
         media_remove = []
+        media_order = []
         for item in pending.get('media_add') or []:
             try:
                 media_add.append(int(item))
@@ -1909,8 +1922,18 @@ def set_listing_pending_changes(listing_id, pending):
                 media_remove.append(int(item))
             except (TypeError, ValueError):
                 continue
-        if fields or media_add or media_remove:
-            raw = json.dumps({'fields': fields, 'media_add': media_add, 'media_remove': media_remove})
+        for item in pending.get('media_order') or []:
+            try:
+                media_order.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        if fields or media_add or media_remove or media_order:
+            raw = json.dumps({
+                'fields': fields,
+                'media_add': media_add,
+                'media_remove': media_remove,
+                'media_order': media_order,
+            })
     values = {'pending_changes': raw}
     if raw is None:
         values['amendment_note'] = None
@@ -1998,12 +2021,25 @@ def set_broker_verified(user_id, verified: bool) -> bool:
         return n > 0
 
 
-def set_listing_review_message(listing_id, message: str, keep_status: bool = False) -> bool:
+def set_listing_review_message(listing_id, message: str, keep_status: bool = False, status: str | None = None) -> bool:
     values = {'review_message': message}
-    if not keep_status:
+    if status:
+        values['status'] = status
+    elif not keep_status:
         values['status'] = 'pending'
     with get_session() as s:
         n = s.query(UserListing).filter(UserListing.id == listing_id).update(values, synchronize_session=False)
+        return n > 0
+
+
+def resubmit_listing_for_review(listing_id) -> bool:
+    """Put a sent-back listing in the approval queue again. The fee is not touched."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == listing_id).update({
+            'status': 'pending',
+            'review_message': None,
+            'rejection_reason': None,
+        }, synchronize_session=False)
         return n > 0
 
 
@@ -2208,6 +2244,8 @@ def list_broker_applications(status='pending'):
             'phone': user.phone,
             'profile_role': user.profile_role,
             'profile_location': user.profile_location,
+            'broker_specialties': user.broker_specialties,
+            'broker_years': user.broker_years,
             'status': user.broker_application_status,
         } for user in rows]
 
@@ -2328,6 +2366,7 @@ def list_team_members(team_id, status=None):
                 'phone': user.phone,
                 'profile_photo_url': user.profile_photo_url,
                 'broker_specialties': user.broker_specialties,
+                'broker_years': user.broker_years,
                 'broker_bio': user.broker_bio,
                 'is_admin': user.id == s.query(BrokerTeam.admin_user_id).filter(BrokerTeam.id == team_id).scalar(),
             })
@@ -2471,6 +2510,8 @@ def list_approved_brokers():
                 'place': user.profile_location or '',
                 'photo': user.profile_photo_url or '',
                 'bio': (user.broker_bio or '')[:1000],
+                'specialties': user.broker_specialties or '',
+                'years': user.broker_years,
                 'lat': user.broker_lat,
                 'lon': user.broker_lon,
             })
@@ -2925,6 +2966,40 @@ def set_listing_media_published(media_id: int, published: bool = True) -> bool:
             {'published': bool(published)}, synchronize_session=False
         )
         return n > 0
+
+
+def reorder_listing_media(listing_id: int, ordered_ids) -> bool:
+    """Set photo sort order. Ids that are not photos on this listing are skipped."""
+    wanted = []
+    for item in ordered_ids or []:
+        try:
+            media_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if media_id not in wanted:
+            wanted.append(media_id)
+    with get_session() as s:
+        rows = (
+            s.query(ListingMedia)
+            .filter(ListingMedia.listing_id == int(listing_id), ListingMedia.media_type == 'photo')
+            .all()
+        )
+        by_id = {int(row.id): row for row in rows}
+        position = 0
+        seen = set()
+        for media_id in wanted:
+            row = by_id.get(media_id)
+            if not row:
+                continue
+            row.sort_order = position
+            position += 1
+            seen.add(media_id)
+        for media_id, row in by_id.items():
+            if media_id in seen:
+                continue
+            row.sort_order = position
+            position += 1
+        return True
 
 
 def delete_listing_media_row(media_id: int) -> bool:
