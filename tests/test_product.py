@@ -1428,12 +1428,17 @@ class ProductTests(unittest.TestCase):
             type = 'redirect'
             redirect = Redirect()
 
+        class Subscription:
+            trial_period_days = 14
+
         class Link:
             def __init__(self, url):
                 self.id = 'plink_broker'
                 self.url = url
                 self.active = False
                 self.after_completion = After()
+                self.subscription_data = Subscription()
+                self.payment_method_collection = 'if_required'
 
         page = type('Page', (), {'data': [Link('https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00')]})()
         try:
@@ -1443,9 +1448,14 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(calls[0]['active'], True)
             self.assertEqual(calls[0]['after_completion']['type'], 'hosted_confirmation')
             self.assertNotIn('redirect', calls[0]['after_completion'])
+            self.assertEqual(calls[0]['payment_method_collection'], 'always')
+            self.assertEqual(calls[0]['subscription_data']['trial_period_days'], '')
             home = self.client.get('/')
             self.assertIn(b'aspect-ratio: 16 / 9', home.data)
             self.assertIn(b'repeat(3, minmax(0, 1fr))', home.data)
+            self.assertIn(b'max-height: calc(5 * 2.35rem + 14px)', home.data)
+            card = home.data[home.data.find(b'class="listing-face"'):]
+            self.assertLess(card.find(b'class="listing-scroll"'), card.find(b'performance-scores-${index}'))
         finally:
             app_module._payment_links_restored = False
             if previous_key is None:

@@ -7080,7 +7080,7 @@ _payment_links_restored = False
 
 
 def _restore_payment_links():
-    """Undo the startup rewrite that turned these links off or sent them to the account page.
+    """Undo the startup rewrite, and charge the first invoice when someone pays.
 
     A link that was not changed is left as it is in Stripe.
     """
@@ -7099,13 +7099,20 @@ def _restore_payment_links():
             redirect_url = str(_stripe_field(redirect, 'url') or '').rstrip('/')
             forced_redirect = _stripe_field(after, 'type') == 'redirect' and redirect_url.endswith('/dashboard')
             inactive = _stripe_field(link, 'active') is False
-            if not forced_redirect and not inactive:
+            subscription = _stripe_field(link, 'subscription_data') or {}
+            trial_days = _stripe_field(subscription, 'trial_period_days')
+            collects_later = _stripe_field(link, 'payment_method_collection') == 'if_required'
+            if not forced_redirect and not inactive and not trial_days and not collects_later:
                 continue
             changes = {}
             if inactive:
                 changes['active'] = True
             if forced_redirect:
                 changes['after_completion'] = {'type': 'hosted_confirmation'}
+            if trial_days or collects_later:
+                changes['payment_method_collection'] = 'always'
+            if trial_days:
+                changes['subscription_data'] = {'trial_period_days': ''}
             stripe.PaymentLink.modify(link.id, **changes)
         _payment_links_restored = True
     except Exception:
