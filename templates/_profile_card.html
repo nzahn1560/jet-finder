@@ -198,6 +198,12 @@
                 {% if user.profile_role and user.profile_role != 'other' %}
                 <div><dt>Role</dt><dd>{{ user.profile_role|replace('_', ' ')|title }}</dd></div>
                 {% endif %}
+                {% if user.broker_specialties %}
+                <div><dt>Aircraft specialty</dt><dd>{{ user.broker_specialties }}</dd></div>
+                {% endif %}
+                {% if user.broker_years %}
+                <div><dt>Years in business</dt><dd>{{ user.broker_years }}</dd></div>
+                {% endif %}
             </dl>
             {% if user.broker_bio %}
             <p class="identity__bio">{{ user.broker_bio }}</p>
@@ -218,6 +224,8 @@
                 <label>City<input class="form-control" name="profile_city" value="{{ user.profile_city or '' }}"></label>
                 <label>State<input class="form-control" name="profile_state" value="{{ user.profile_state or '' }}"></label>
                 <label>Phone<input class="form-control" name="phone" value="{{ user.phone or '' }}"></label>
+                <label>Aircraft specialty<input class="form-control" name="broker_specialties" maxlength="500" value="{{ user.broker_specialties or '' }}" placeholder="Citations, King Air, Gulfstream"></label>
+                <label>Years in business<input class="form-control" name="broker_years" type="number" min="0" max="80" value="{{ user.broker_years or '' }}"></label>
                 <label style="grid-column: 1 / -1;">Bio<textarea class="form-control" name="broker_bio" maxlength="1000" rows="4">{{ user.broker_bio or '' }}</textarea></label>
                 <label>Role
                     <select class="form-select" name="profile_role">

@@ -50,6 +50,8 @@
             <p>{{ user.first_name or '' }} {{ user.last_name or '' }}</p>
             <p>{{ user.email }}</p>
             <p>{{ (user.profile_role or 'member')|replace('_', ' ')|title }}{% if user.company %} · {{ user.company }}{% endif %}</p>
+            {% if user.broker_specialties %}<p>Aircraft specialty: {{ user.broker_specialties }}</p>{% endif %}
+            {% if user.broker_years %}<p>Years in business: {{ user.broker_years }}</p>{% endif %}
             {% if user.created_at %}<p class="settings__note">Account opened {{ user.created_at }}</p>{% endif %}
             <p>Jet Finder is an aircraft information service and marketplace. It is not your broker, and it does not buy or sell the aircraft.</p>
             <p>

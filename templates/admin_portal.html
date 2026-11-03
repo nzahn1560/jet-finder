@@ -123,7 +123,7 @@
 <script>
 // Admin portal: all fetch calls send the jet_session HttpOnly cookie.
 const STATUS_COLORS = {
-    pending: '#fbbf24', unpaid: '#fbbf24', active: '#22c55e',
+    pending: '#fbbf24', unpaid: '#fbbf24', changes_requested: '#fbbf24', active: '#22c55e',
     rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
 };
 
@@ -131,6 +131,25 @@ function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
     });
+}
+
+function paymentMark(listing) {
+    const off = listing.market === 'off_market' || listing.market === 'broker_only';
+    if (off) return { label: 'No fee', color: '#c8c8c8', paid: 'free' };
+    if (listing.payment_status === 'paid') return { label: 'Paid', color: '#22c55e', paid: 'paid' };
+    const named = {
+        refunded: 'Refunded',
+        partially_refunded: 'Partly refunded',
+        canceled: 'Payment ended',
+        disputed: 'Disputed',
+        fraud_review: 'In review',
+    };
+    if (named[listing.payment_status]) return { label: named[listing.payment_status], color: '#fbbf24', paid: 'other' };
+    return { label: 'Not paid', color: '#ef4444', paid: 'unpaid' };
+}
+
+function paymentBadge(mark) {
+    return '<span class="ap__badge" data-stripe="' + mark.paid + '" style="background:' + mark.color + '22; color:' + mark.color + ';">' + esc(mark.label) + '</span>';
 }
 
 const highlightId = new URLSearchParams(window.location.search).get('highlight');
@@ -154,6 +173,7 @@ async function loadAdminListings() {
         target.innerHTML = items.map(function (l) {
             const updateWaiting = l.pending_review && l.status === 'active';
             const color = STATUS_COLORS[l.status] || '#8e8e93';
+            const pay = paymentMark(l);
             const owner = l.owner ? (l.owner.email || (l.owner.first_name + ' ' + l.owner.last_name)) : 'unknown';
             return ''
                 + '<div class="ap__card" data-id="' + l.id + '"' + (String(l.id) === String(highlightId) ? ' style="border-color:#3d6cb5;"' : '') + '>'
@@ -166,12 +186,13 @@ async function loadAdminListings() {
                 + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
                 + ' &middot; ' + esc(l.location || '') + '<br>'
                 + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + '</span>'
+                + ' <span style="color:' + pay.color + ';font-weight:700;">Stripe: ' + esc(pay.label) + '</span>'
                 + ((l.market === 'off_market' || l.market === 'broker_only') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
                 + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
                 + '    </div>'
-                + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
+                + '    <div class="ap__col">' + paymentBadge(pay) + ' <span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
+                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '" data-pay="' + pay.paid + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>' + (updateWaiting ? 'Reject update' : 'Reject') + '</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="notes" data-id="' + l.id + '">Private note</button>'
@@ -191,6 +212,7 @@ async function loadAdminListings() {
                 event.stopPropagation();
                 const id = btn.getAttribute('data-id');
                 const act = btn.getAttribute('data-act');
+                if (act === 'approve' && btn.getAttribute('data-pay') === 'unpaid' && !confirm('Stripe has not marked this listing paid. Approve it anyway?')) return;
                 let resp;
                 if (act === 'delete') {
                     if (!confirm('Delete this listing? It will leave the marketplace.')) return;
@@ -324,6 +346,7 @@ function money(value) {
 }
 
 let reviewId = null;
+let reviewPay = 'paid';
 
 function reviewRow(label, left, right, flagged) {
     return '<tr' + (flagged ? ' class="flag"' : '') + '><th>' + esc(label) + '</th><td>' + esc(left || '—') + '</td><td>' + esc(right || '—') + '</td></tr>';
@@ -348,9 +371,12 @@ async function openReview(id) {
     const ask = body.listing || {};
     const ref = body.aircraft_data || {};
     const place = [ask.city, ask.state].filter(Boolean).join(', ') || ask.location || '';
+    const pay = paymentMark(ask);
+    reviewPay = pay.paid;
     document.getElementById('review-heading').textContent = ask.title || 'Listing';
     document.getElementById('review-message').value = ask.review_message || '';
     listing.innerHTML = ''
+        + '<p style="color:' + pay.color + ';font-size:1.45rem;font-weight:800;margin-bottom:0.6rem;">Stripe: ' + esc(pay.label) + '</p>'
         + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">This listing</p>'
         + '<h2>' + esc(ask.title || '') + '</h2>'
         + '<div class="ask">' + money(ask.price) + '</div>'
@@ -419,6 +445,7 @@ document.getElementById('review-send').addEventListener('click', async function 
 });
 document.getElementById('review-approve').addEventListener('click', async function () {
     if (!reviewId) return;
+    if (reviewPay === 'unpaid' && !confirm('Stripe has not marked this listing paid. Approve it anyway?')) return;
     const response = await fetch('/api/admin/listings/' + reviewId + '/approve', { method: 'POST', credentials: 'include' });
     if (response.ok) { closeReview(); loadAdminListings(); }
 });
@@ -452,13 +479,15 @@ async function loadApprovals() {
     const data = await response.json();
     const brokers = (data.brokers || []).map(function (person) {
         const name = ((person.first_name || '') + ' ' + (person.last_name || '')).trim() || person.email;
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(person.email) + '<br>Broker application</div>'
+        const paid = person.stripe_paid ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">Paid</span>' : '<span class="ap__badge" style="background:#ef444422;color:#ef4444;">Not paid</span>';
+        const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong> ' + paid + '<br>' + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>Broker application</div>'
             + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div>';
     }).join('');
     const brokerages = (data.brokerages || []).map(function (team) {
         const leader = team.leader ? team.leader.name : 'No leader';
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(team.name) + '</strong><br>Leader ' + esc(leader) + '</div>'
+        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(team.name) + '</strong> <span class="ap__badge" style="background:#ef444422;color:#ef4444;">Not paid</span><br>Leader ' + esc(leader) + '</div>'
             + '<button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div></div>';
     }).join('');
     const members = (data.members || []).map(function (member) {
@@ -505,7 +534,7 @@ async function loadBrokerages() {
                 + '</div>';
         }).join('');
         return '<div class="ap__card"><strong style="color:#fff; font-size:1.2rem;">' + esc(team.name) + '</strong>'
-            + '<div class="ap__col">Leader ' + esc(team.leader ? team.leader.name : '—') + ' · ' + esc(team.subscription_status) + '</div>'
+            + '<div class="ap__col">Leader ' + esc(team.leader ? team.leader.name : '—') + ' · ' + (team.subscription_status === 'active' ? 'Paid' : 'Not paid') + '</div>'
             + '<div style="margin-top:0.6rem;"><select data-category="' + team.id + '">' + options + '</select></div>'
             + members
             + (team.subscription_status === 'active' ? '' : '<div style="margin-top:0.7rem;"><button class="ap__btn ap__btn--approve" data-approve-team="' + team.id + '">Approve brokerage</button></div>')

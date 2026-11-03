@@ -563,6 +563,8 @@ def brokers_page():
             'place': broker.get('place') or '',
             'logo': broker.get('photo') or '',
             'bio': broker.get('bio') or '',
+            'specialties': broker.get('specialties') or '',
+            'years': broker.get('years'),
             'member_count': 1,
             'category': broker.get('company') or 'Broker',
             'leader': broker.get('name') or '',
@@ -587,6 +589,7 @@ def api_broker_team_detail(team_id):
             'name': name,
             'photo': member.get('profile_photo_url') or '',
             'specialties': member.get('broker_specialties') or '',
+            'years': member.get('broker_years'),
             'bio': member.get('broker_bio') or '',
             'is_admin': bool(member.get('is_admin')),
             'listings': db_module.listings_for_user(member.get('user_id'), include_off_market=include_off_market),
@@ -2776,6 +2779,8 @@ def register():
                 profile_role=profile_role, profile_location=profile_location)
             if user_id is not None:
                 user_id_int = cast(int, user_id)
+                if wants_broker:
+                    _save_broker_application_details(user_id_int, request.form)
                 session['user_id'] = user_id_int
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
@@ -3158,6 +3163,28 @@ def _auth_rate_limited() -> bool:
     return db_module.consume_auth_rate(bucket, limit=_AUTH_MAX_PER_MIN, window_seconds=60)
 
 
+def _save_broker_application_details(user_id, source):
+    """Keep aircraft specialty and years in business with a broker application."""
+    specialties = (source.get('broker_specialties') or source.get('specialty') or '')
+    if not isinstance(specialties, str):
+        specialties = str(specialties or '')
+    fields = {}
+    if specialties.strip():
+        fields['broker_specialties'] = specialties.strip()[:500]
+    years_raw = source.get('broker_years')
+    if years_raw in (None, ''):
+        years_raw = source.get('years_in_business')
+    if years_raw not in (None, ''):
+        try:
+            years = int(years_raw)
+        except (TypeError, ValueError):
+            years = None
+        if years is not None and 0 <= years <= 80:
+            fields['broker_years'] = years
+    if fields:
+        db_module.update_user_profile(user_id, fields)
+
+
 def _user_public_dict(user) -> dict:
     """Strip sensitive fields before returning user JSON to the client."""
     if not user:
@@ -3208,6 +3235,7 @@ def api_auth_signup():
     user_id = cast(int, user_id)
     if wants_broker:
         db_module.set_broker_application(user_id, 'pending')
+        _save_broker_application_details(user_id, data)
     session['user_id'] = user_id
     token = _start_jet_session(user_id)
     _maybe_promote_admin(user_id, email)
@@ -5896,6 +5924,13 @@ def _mail_listing_status(email, title, outcome, reason):
                 f'Approval is pending for {title or "your listing"}.\n\n'
                 f'{reason or "Please update the listing and send it back."}'
             )
+        elif outcome == 'changes_requested':
+            subject = 'A change was requested on your JetSchool listing'
+            text = (
+                f'{title or "Your listing"} was sent back so you can fix it.\n\n'
+                f'{reason or "Please update the listing."}\n\n'
+                f'Edit it, then use Resubmit for review. A listing that is already paid is not charged again.'
+            )
         else:
             subject = 'Your JetSchool listing needs changes'
             text = f'{title or "Your listing"} was not approved. Reason: {reason or "No reason provided"}. You can edit it and send it back without paying again.'
@@ -5919,6 +5954,14 @@ def _notify_admins_new_listing(listing_id, title, seller_email, market='public',
             f'{title or "Listing"} #{listing_id}\n'
             f'Seller: {seller_email or "unknown"}\n'
             f'The listing stays as it is until you approve the update.\n'
+        )
+    elif kind == 'resubmit':
+        subject = f'Listing sent back for review: {title or ("#" + str(listing_id))}'
+        text = (
+            f'A seller sent a listing back after the requested changes.\n\n'
+            f'{title or "Listing"} #{listing_id}\n'
+            f'Seller: {seller_email or "unknown"}\n'
+            f'The listing fee was already paid, so this was not charged again.\n'
         )
     else:
         subject = f'Listing to approve: {title or ("#" + str(listing_id))}'
@@ -6438,13 +6481,22 @@ def api_listings_resubmit(listing_id: int):
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    if row.get('status') not in ('rejected', 'draft', 'suspended'):
-        return jsonify({'error': 'cannot_resubmit', 'message': 'Only a rejected, draft, or suspended listing can be sent back.'}), 409
+    sent_back = row.get('status') in ('rejected', 'draft', 'suspended', 'changes_requested') or (
+        row.get('status') == 'pending' and row.get('review_message')
+    )
+    if not sent_back:
+        return jsonify({'error': 'cannot_resubmit', 'message': 'This listing is not waiting to be sent back.'}), 409
     if _listing_needs_checkout(row.get('market')) and row.get('payment_status') != 'paid':
         return jsonify({'error': 'payment_required', 'payment_required': True}), 402
     previous = row.get('status')
-    db_module.set_user_listing_status(listing_id, 'pending')
+    if not db_module.resubmit_listing_for_review(listing_id):
+        return jsonify({'error': 'server_error'}), 500
     db_module.record_listing_audit(listing_id, user['id'], 'resubmit', previous, 'pending', None)
+    _notify_admins_new_listing(
+        listing_id, row.get('title'), row.get('email') or user.get('email'),
+        market=sections_module.normalize_market(row.get('market')),
+        kind='resubmit',
+    )
     return jsonify({'ok': True, 'status': 'pending', 'charged_again': False})
 
 
@@ -6487,7 +6539,7 @@ def _edits_wait_for_approval(row, user):
 
 
 def _blank_revision():
-    return {'fields': {}, 'media_add': [], 'media_remove': []}
+    return {'fields': {}, 'media_add': [], 'media_remove': [], 'media_order': []}
 
 
 def _revision_note(row, pending):
@@ -6498,6 +6550,8 @@ def _revision_note(row, pending):
         parts.append(f'Photos added: {added}')
     if removed:
         parts.append(f'Photos removed: {removed}')
+    if (pending or {}).get('media_order'):
+        parts.append('Photo order changed')
     if not parts:
         return None
     return 'Update waiting for approval. ' + '; '.join(parts)
@@ -6534,6 +6588,8 @@ def _apply_pending_listing_update(listing_id, row):
         return False
     if pending.get('fields'):
         db_module.update_user_listing_fields(listing_id, pending['fields'])
+    if pending.get('media_order'):
+        db_module.reorder_listing_media(listing_id, pending['media_order'])
     for media_id in pending.get('media_add') or []:
         media = db_module.get_listing_media_row(media_id)
         if media and media.get('listing_id') == listing_id:
@@ -6622,8 +6678,8 @@ def api_listings_patch(listing_id: int):
     if changes and is_owner and not user.get('is_admin'):
         note = 'Amendment. ' + '; '.join(changes)
         db_module.set_listing_amendment(listing_id, note)
-        if status in ('rejected', 'suspended'):
-            db_module.set_user_listing_status(listing_id, 'pending')
+        if status in ('rejected', 'suspended', 'changes_requested'):
+            db_module.resubmit_listing_for_review(listing_id)
             status = 'pending'
         db_module.record_listing_audit(listing_id, user['id'], 'amendment', row.get('status'), status, note)
         _notify_admins_new_listing(
@@ -7348,6 +7404,8 @@ def api_listing_mine(listing_id: int):
                 out[key] = value
     out.pop('pending_changes', None)
     out['media'] = db_module.list_listing_media(listing_id, include_unpublished=True)
+    out['media_order'] = (pending or {}).get('media_order') or []
+    out['media_remove'] = (pending or {}).get('media_remove') or []
     return jsonify({'listing': out}), 200
 
 
@@ -7357,6 +7415,21 @@ def api_listing_mine(listing_id: int):
 # Postgres only stores media metadata (see db.ListingMedia).
 # =============================================================================
 import r2_storage as _r2  # type: ignore[import-not-found]  # local module
+
+LISTING_PHOTO_LIMIT = 15
+
+
+def _kept_listing_photo_count(listing_id: int, row: dict, user: dict) -> int:
+    """Photos that still belong on the listing, not ones staged for removal."""
+    pending = None
+    if _edits_wait_for_approval(row, user):
+        pending = db_module.parse_listing_pending(row.get('pending_changes'))
+    removed = set((pending or {}).get('media_remove') or [])
+    photos = [
+        item for item in db_module.list_listing_media(listing_id, include_unpublished=True)
+        if item.get('media_type') == 'photo' and item.get('id') not in removed
+    ]
+    return len(photos)
 
 
 def _listing_owner_or_admin(listing_id: int, user: dict) -> tuple[dict | None, str | None]:
@@ -7418,7 +7491,7 @@ def api_listings_media_upload(listing_id: int):
     if not files:
         return jsonify({'error': 'no_files'}), 400
 
-    existing_photos = db_module.count_listing_media(listing_id, 'photo')
+    existing_photos = _kept_listing_photo_count(listing_id, row, user)
     existing_videos = db_module.count_listing_media(listing_id, 'video')
     try:
         start_sort = int(request.form.get('sort_order') or (existing_photos + existing_videos))
@@ -7436,7 +7509,7 @@ def api_listings_media_upload(listing_id: int):
             continue
 
         # Per-listing count caps
-        if kind == 'photo' and existing_photos >= _r2.MAX_PHOTOS_PER_LISTING:
+        if kind == 'photo' and existing_photos >= LISTING_PHOTO_LIMIT:
             rejected.append({'filename': f.filename, 'reason': 'photo_limit_reached'})
             continue
         if kind == 'video' and existing_videos >= _r2.MAX_VIDEOS_PER_LISTING:
@@ -7509,6 +7582,42 @@ def api_listings_media_upload(listing_id: int):
     }), status
 
 
+@app.route('/api/listings/<int:listing_id>/media/order', methods=['POST'])
+@require_auth
+def api_listings_media_order(listing_id: int):
+    """Save the order photos should appear in. The first id is the cover."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row, err = _listing_owner_or_admin(listing_id, user)
+    if err == 'not_found':
+        return jsonify({'error': 'not_found'}), 404
+    if err == 'forbidden':
+        return jsonify({'error': 'forbidden'}), 403
+    assert row is not None
+    data = request.get_json(silent=True) or {}
+    wanted = []
+    for item in data.get('ids') or []:
+        try:
+            media_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if media_id not in wanted:
+            wanted.append(media_id)
+    owned = {
+        item['id'] for item in db_module.list_listing_media(listing_id, include_unpublished=True)
+        if item.get('media_type') == 'photo'
+    }
+    ordered = [media_id for media_id in wanted if media_id in owned]
+    if not ordered:
+        return jsonify({'error': 'no_photos'}), 400
+    if _edits_wait_for_approval(row, user):
+        pending = db_module.parse_listing_pending(row.get('pending_changes')) or _blank_revision()
+        pending['media_order'] = ordered
+        note = _save_listing_revision(listing_id, row, user, pending)
+        return jsonify({'ok': True, 'pending_review': bool(note), 'ids': ordered}), 200
+    db_module.reorder_listing_media(listing_id, ordered)
+    return jsonify({'ok': True, 'pending_review': False, 'ids': ordered}), 200
+
+
 @app.route('/api/listings/<int:listing_id>/media/<int:media_id>', methods=['DELETE'])
 @require_auth
 def api_listings_media_delete(listing_id: int, media_id: int):
@@ -7557,15 +7666,19 @@ def api_listings_media_delete(listing_id: int, media_id: int):
 @app.route('/api/listings/<int:listing_id>', methods=['DELETE'])
 @require_auth
 def api_listings_delete(listing_id: int):
-    """Soft-archive a listing. Owner only; only allowed when status is draft/unpaid/pending/rejected."""
+    """Take the owner's listing off the site, including one that is already live."""
     user = request.current_user  # type: ignore[attr-defined]
     row = db_module.get_listing_with_owner(listing_id)
     if not row:
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    if not user.get('is_admin') and row.get('status') == 'active':
-        return jsonify({'error': 'cannot_delete_active', 'message': 'Approved listings cannot be deleted.'}), 403
+    subscription_id = row.get('stripe_subscription_id')
+    if subscription_id and _stripe_configured():
+        try:
+            stripe.Subscription.delete(subscription_id)
+        except Exception:
+            logger.exception('Could not cancel listing subscription %s', subscription_id)
     if not db_module.archive_user_listing(listing_id):
         return jsonify({'error': 'server_error'}), 500
     return jsonify({'ok': True}), 200
@@ -7794,8 +7907,15 @@ def api_admin_users():
 @require_admin
 def api_admin_approvals():
     """Everything waiting on the site admin: brokers, brokerages, and team members."""
+    brokers = []
+    for person in db_module.list_broker_applications('pending'):
+        person['stripe_paid'] = bool(
+            has_active_subscription(person['id'], 'broker')
+            or has_active_subscription(person['id'], 'broker_team')
+        )
+        brokers.append(person)
     return jsonify({
-        'brokers': db_module.list_broker_applications('pending'),
+        'brokers': brokers,
         'brokerages': [team for team in db_module.list_teams_for_admin() if team.get('subscription_status') != 'active'],
         'members': db_module.list_pending_memberships(),
         'categories': list(db_module.BROKERAGE_CATEGORIES),
@@ -7985,6 +8105,7 @@ def _admin_listing_review(row):
             'amendment_note': row.get('amendment_note'),
             'review_message': row.get('review_message'),
             'pending_review': bool(pending),
+            'payment_status': row.get('payment_status'),
             'currently_live': ', '.join(live_bits),
             'image': row.get('images'),
         },
@@ -8029,13 +8150,20 @@ def admin_listing_message(listing_id):
         return jsonify({'error': 'not_found'}), 404
     previous = existing.get('status')
     keep_live = previous == 'active' and bool(db_module.parse_listing_pending(existing.get('pending_changes')))
-    if not db_module.set_listing_review_message(listing_id, message, keep_status=keep_live):
+    if keep_live:
+        saved = db_module.set_listing_review_message(listing_id, message, keep_status=True)
+    else:
+        saved = db_module.set_listing_review_message(listing_id, message, status='changes_requested')
+    if not saved:
         return jsonify({'error': 'server_error'}), 500
-    new_status = previous if keep_live else 'pending'
+    new_status = previous if keep_live else 'changes_requested'
     db_module.record_listing_audit(
         listing_id, admin['id'], 'request_changes', previous, new_status, message,
     )
-    mailed = _mail_listing_status(existing.get('email'), existing.get('title'), 'pending', message)
+    mailed = _mail_listing_status(
+        existing.get('email'), existing.get('title'),
+        'pending' if keep_live else 'changes_requested', message,
+    )
     return jsonify({'ok': True, 'status': new_status, 'emailed': bool(mailed), 'kept_live': keep_live})
 
 
