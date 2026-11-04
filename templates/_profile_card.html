@@ -218,6 +218,14 @@
             {% if user.broker_bio %}
             <p class="identity__bio">{{ user.broker_bio }}</p>
             {% endif %}
+            {% if team_people %}
+            <p class="identity__line">Brokers at {{ membership.name or brokerage or 'this brokerage' }}</p>
+            <ul style="list-style:none; padding:0; margin:0.2rem 0 0;">
+                {% for person in team_people %}
+                <li style="margin-bottom:0.25rem; color:#fff;">{{ person.name }}{% if person.is_admin %} · Main{% endif %}{% if person.specialties %} · {{ person.specialties }}{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
             {% if is_owner and user.broker_application_status == 'pending' and membership and not membership.is_admin and membership.membership_status == 'pending' %}
             <p class="identity__line">The main company account has to approve you.</p>
             {% endif %}
@@ -263,34 +271,17 @@
             </div>
         </form>
         {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
-        {% set broker_live = on_team or (subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team']) %}
+        {% set paid_broker = subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team'] %}
+        {% set broker_approved = (user.profile_role or '') == 'broker' and (user.broker_application_status or '') == 'approved' %}
+        {% set broker_live = on_team or (paid_broker and broker_approved) %}
         <div style="margin-top:1rem;">
                 {% if broker_live and membership and membership.is_admin %}
                 <p class="broker-status">Subscription is active.</p>
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                    <input class="form-control" id="team-member-email" type="email" placeholder="Email of the person to add" style="max-width:280px;">
-                    <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add to the team</button>
-                </div>
-                {% if team_people %}
-                <p class="identity__line">Meet our team</p>
-                <ul style="list-style:none; padding:0; margin:0.2rem 0 0.6rem;">
-                    {% for person in team_people %}
-                    <li style="margin-bottom:0.3rem;"><a href="/people/{{ person.user_id }}" style="color:#fff;">{{ person.name }}</a>{% if person.is_admin %} · Main{% endif %}{% if person.specialties %} · {{ person.specialties }}{% endif %}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                {% if pending_members %}
-                <ul id="pending-members" style="list-style:none; padding:0; margin:0.4rem 0 0;">
-                    {% for member in pending_members %}
-                    <li style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.4rem; color:#fff;">
-                        <span>{{ member.first_name or 'Broker' }} {{ member.last_name or '' }} asked to be assigned</span>
-                        <button type="button" class="dash__btn dash__btn--primary allow-member" data-user="{{ member.user_id }}" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add</button>
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
+                <p class="identity__line">Approve and remove people in Manage members.</p>
                 {% elif broker_live %}
                 <p class="broker-status">Subscription is active.</p>
+                {% elif paid_broker and not broker_approved %}
+                <p class="identity__line">Payment received. This brokerage is waiting for approval.</p>
                 {% elif membership and membership.is_admin %}
                 <p class="identity__line">Pay $19.99 a month to activate this account. A team seat is free until you approve it.</p>
                 <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
@@ -469,7 +460,7 @@
                 body: JSON.stringify({ kind: 'assign', team_id: Number(teamId) }),
             });
             const data = await resp.json().catch(function () { return {}; });
-            status.textContent = resp.ok ? 'Asked. You are not a broker until they add you.' : (data.message || 'Could not send the request.');
+            status.textContent = resp.ok ? 'Asked. That brokerage approves you. There is no checkout.' : (data.message || 'Could not send the request.');
             if (resp.ok) setTimeout(function () { window.location.reload(); }, 700);
         });
     }

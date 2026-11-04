@@ -28,8 +28,8 @@
         {% if get_current_user_info() %}
         <a href="{{ url_for('dashboard') }}">Your profile</a>
         {% else %}
-        <a href="{{ url_for('register', broker=1) }}">Sign up as a broker</a>.
-        The main account pays $19.99 a month. A team seat is free until that account approves you.
+        <a href="{{ url_for('register') }}">Create an account</a>.
+        A brokerage starts from the profile after checkout. Joining a team is free when that brokerage approves you.
         {% endif %}
     </p>
 </div>
@@ -110,7 +110,8 @@
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(team)
             + '<p class="broker-status">Subscription is active.</p>'
-            + (people || '<p>No brokers are on this team yet.</p>');
+            + (people || '<p>No brokers are on this team yet.</p>')
+            + (team.user_id ? '<p><a href="/people/' + team.user_id + '" style="color:#F05545;">Open profile</a></p>' : '');
     }
 
     function cellDegrees(zoom) {
@@ -129,6 +130,12 @@
             groups[key].push(broker);
         });
         return Object.keys(groups).map(function (key) { return groups[key]; });
+    }
+
+    function peopleIn(group) {
+        return group.reduce(function (total, broker) {
+            return total + (Number(broker.member_count) || 1);
+        }, 0);
     }
 
     function groupCenter(group) {
@@ -156,7 +163,9 @@
         const bounds = map.getBounds();
         const inside = shownBrokers.filter(function (broker) {
             return bounds.contains([Number(broker.lat), Number(broker.lon)]);
-        }).length;
+        }).reduce(function (total, broker) {
+            return total + (Number(broker.member_count) || 1);
+        }, 0);
         const noun = inside === 1 ? 'broker' : 'brokers';
         viewCount.textContent = inside + ' ' + noun + ' in this view';
     }
@@ -165,9 +174,10 @@
         clusterLayer.clearLayers();
         groupBrokers(shownBrokers).forEach(function (group) {
             const spot = groupCenter(group);
-            const count = group.length;
+            const offices = group.length;
+            const count = peopleIn(group);
             const marker = L.marker(spot, { icon: countIcon(count), pane: 'brokers' });
-            if (count === 1) {
+            if (offices === 1) {
                 marker.bindTooltip(miniHtml(group[0]), {
                     direction: 'top', opacity: 1, className: 'broker-tip', offset: [0, -8]
                 });
@@ -177,7 +187,7 @@
             marker.on('click', function (event) {
                 pinClickAt = Date.now();
                 if (event) L.DomEvent.stopPropagation(event);
-                if (count === 1) selectBroker(group[0]);
+                if (offices === 1) selectBroker(group[0]);
                 else map.flyTo(spot, Math.min(map.getZoom() + 2, 12), { duration: 0.45 });
             });
             marker.addTo(clusterLayer);
@@ -194,7 +204,8 @@
     function searchText(team) {
         return [
             team.display_name, team.place, team.city, team.region, team.country,
-            team.iata, team.icao, team.airport_name, team.category, team.leader, team.specialties, team.years
+            team.iata, team.icao, team.airport_name, team.category, team.leader, team.specialties, team.years,
+            (team.member_names || []).join(' ')
         ].filter(Boolean).join(' ').toLowerCase();
     }
 
@@ -241,13 +252,20 @@
 
     function selectBroker(broker) {
         activeId = broker.pin_id;
+        if (broker.lat != null && broker.lon != null) {
+            map.flyTo([Number(broker.lat), Number(broker.lon)], Math.max(map.getZoom(), 11), { duration: 0.6 });
+        }
+        if (broker.kind === 'brokerage') {
+            fetch('/api/broker-teams/' + broker.id)
+                .then(function (response) { return response.ok ? response.json() : null; })
+                .then(function (detail) { showTeam(broker, detail); })
+                .catch(function () { showTeam(broker, null); });
+            return;
+        }
         selectedEl.hidden = false;
         selectedEl.innerHTML = miniHtml(broker)
             + (broker.bio ? '<p>' + esc(broker.bio) + '</p>' : '')
             + '<p><a href="/people/' + broker.user_id + '" style="color:#F05545;">Open profile</a></p>';
-        if (broker.lat != null && broker.lon != null) {
-            map.flyTo([Number(broker.lat), Number(broker.lon)], Math.max(map.getZoom(), 11), { duration: 0.6 });
-        }
     }
 
     const bounds = shownBrokers.map(function (broker) { return [Number(broker.lat), Number(broker.lon)]; });
