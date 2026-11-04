@@ -4603,7 +4603,7 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group mb-3">
-                                        <label class="form-label">Serial number</label>
+                                        <label class="form-label">Serial number *</label>
                                         <input type="text" class="form-control" id="listingSerial"
                                             placeholder="S/N">
                                     </div>
@@ -8272,6 +8272,7 @@
             if (!Number.isFinite(hours) || hours < 0) { alert('Enter total hours.'); return; }
             if (!price || price <= 0) { alert('Enter a price.'); return; }
             if (!city || !state || !email) { alert('City, state, and contact email are required.'); return; }
+            if (!serialNumber) { alert('Add the aircraft serial number. It is sent to Stripe with the listing fee.'); return; }
             createBtn.disabled = true;
             const original = createBtn.innerHTML;
             createBtn.innerHTML = 'Creating...';
@@ -8313,7 +8314,8 @@
                 }
                 if (data.payment_required && data.payment_status !== 'paid') {
                     const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
-                    payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}');
+                    const serial = serialNumber.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
+                    payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}' + (serial ? '-sn-' + serial : ''));
                     if (email) payUrl.searchParams.set('prefilled_email', email);
                     window.location.href = payUrl.toString();
                     return;

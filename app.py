@@ -3393,6 +3393,62 @@ def api_auth_logout():
     return resp, 200
 
 
+def _subscription_id_from(value):
+    if isinstance(value, dict):
+        return value.get('id')
+    return value if isinstance(value, str) else None
+
+
+def _cancel_listing_fee(row):
+    """Stop the Stripe subscription for this listing only.
+
+    The listing row does not always have the subscription id. The checkout
+    session still carries listing-{id}-user-{id}, including the serial number.
+    """
+    if not row or not _stripe_configured():
+        return False
+    listing_id = str(row.get('id') or '')
+    user_id = str(row.get('user_id') or '')
+    found = []
+    if row.get('stripe_subscription_id'):
+        found.append(row['stripe_subscription_id'])
+    customer_id = row.get('stripe_customer_id')
+    try:
+        if customer_id:
+            sessions = stripe.checkout.Session.list(customer=customer_id, limit=20)
+        else:
+            sessions = stripe.checkout.Session.list(limit=100, status='complete')
+        for sess in sessions.data or []:
+            identity = _checkout_identity(sess)
+            if str(identity.get('listing_id') or '') != listing_id:
+                continue
+            if user_id and str(identity.get('user_id') or '') not in ('', user_id):
+                continue
+            subscription_id = _subscription_id_from(_stripe_field(sess, 'subscription'))
+            if subscription_id:
+                found.append(subscription_id)
+        if customer_id:
+            subscriptions = stripe.Subscription.list(customer=customer_id, status='all', limit=20)
+            for subscription in subscriptions.data or []:
+                meta = _stripe_metadata(subscription)
+                if str(meta.get('listing_id') or '') == listing_id:
+                    subscription_id = _stripe_field(subscription, 'id')
+                    if subscription_id:
+                        found.append(subscription_id)
+    except Exception:
+        logger.exception('Could not find the Stripe subscription for listing %s', listing_id)
+    canceled = False
+    for subscription_id in dict.fromkeys(found):
+        if db_module.find_subscription_by_stripe_id(subscription_id):
+            continue
+        try:
+            stripe.Subscription.delete(subscription_id)
+            canceled = True
+        except Exception:
+            logger.exception('Could not cancel listing subscription %s', subscription_id)
+    return canceled
+
+
 def _cancel_user_billing(user_id):
     """Stop Stripe subscriptions for an account before it is deleted."""
     if not _stripe_configured():
@@ -3630,11 +3686,27 @@ def _broker_market_access(user) -> bool:
     )
 
 
+def _stripe_serial(value):
+    """Serial number safe to store on a Stripe payment. Letters and digits only."""
+    import re
+    return re.sub(r'[^A-Za-z0-9]', '', str(value or '')).upper()[:40]
+
+
+def _listing_client_reference(listing_id, user_id, serial=None):
+    """listing-{id}-user-{id}-sn-{serial}. The serial is what shows on the Stripe payment."""
+    ref = f"listing-{int(listing_id)}-user-{int(user_id)}"
+    serial = _stripe_serial(serial)
+    if not serial:
+        return ref
+    stamped = f"{ref}-sn-{serial}"
+    return stamped if len(stamped) <= 200 else ref
+
+
 def _checkout_reference(meta):
     """Same broker-{id} and listing-{id}-user-{id} values the webhook already understands."""
     purpose = (meta or {}).get('purpose')
     if purpose == 'listing_fee':
-        return f"listing-{meta.get('listing_id')}-user-{meta.get('user_id')}"
+        return _listing_client_reference(meta.get('listing_id'), meta.get('user_id'), meta.get('serial_number'))
     if purpose in ('broker_account', 'broker_team'):
         return f"broker-{meta.get('user_id')}"
     return ''
@@ -3703,9 +3775,10 @@ def _broker_payment_link(user):
 
 
 def _listing_payment_link(user, listing_id):
+    row = db_module.get_listing_with_owner(listing_id) or {}
     return _stripe_buy_link(
         LISTING_PAYMENT_LINK,
-        client_reference_id=f"listing-{listing_id}-user-{user['id']}",
+        client_reference_id=_listing_client_reference(listing_id, user['id'], row.get('serial_number')),
         prefilled_email=(user.get('email') or ''),
     )
 
@@ -3727,14 +3800,21 @@ def _payment_link_identity(sess):
             return {}
     if ref.startswith('listing-') and '-user-' in ref:
         listing_part, user_part = ref.split('-user-', 1)
+        serial = ''
+        if '-sn-' in user_part:
+            user_part, serial = user_part.split('-sn-', 1)
         try:
-            return {
+            found = {
                 'purpose': 'listing_fee',
                 'listing_id': str(int(listing_part.split('-', 1)[1])),
                 'user_id': str(int(user_part)),
             }
         except (TypeError, ValueError):
             return {}
+        serial = _stripe_serial(serial)
+        if serial:
+            found['serial_number'] = serial
+        return found
     return {}
 
 
@@ -6531,6 +6611,7 @@ def api_listings_me():
                 'market': sections_module.normalize_market(row.get('market')),
                 'status': row.get('status'),
                 'payment_status': row.get('payment_status'),
+                'serial_number': row.get('serial_number') or '',
                 'pricing_plan': row.get('pricing_plan'),
                 'rejection_reason': row.get('rejection_reason'),
                 'amendment_note': row.get('amendment_note'),
@@ -6737,6 +6818,12 @@ def _create_listing_for_user(user, data):
         pricing_plan = 'monthly'
     market = sections_module.normalize_market(data.get('market'))
     needs_payment = _listing_needs_checkout(market)
+    if needs_payment and not _stripe_serial(data.get('serial_number')):
+        return None, ({
+            'error': 'missing_fields',
+            'fields': ['serial_number'],
+            'message': 'Add the aircraft serial number. It is sent to Stripe with the listing fee.',
+        }, 400)
     initial_status = 'unpaid' if needs_payment else 'pending'
     try:
         listing_id = db_module.create_user_listing(
@@ -7573,12 +7660,16 @@ def _label_stripe_purchase(sess, identity):
         except (TypeError, ValueError):
             listing = {}
         title = listing.get('title') or 'listing'
+        serial = _stripe_serial(identity.get('serial_number') or listing.get('serial_number'))
         text = f"JetSchool listing #{identity.get('listing_id')} — {title} — {email}"
+        if serial:
+            text = f"JetSchool listing #{identity.get('listing_id')} — S/N {serial} — {title} — {email}"
         meta = {
             'purpose': 'listing_fee',
             'listing_id': str(identity.get('listing_id') or ''),
             'user_id': str(user_id or ''),
             'email': email,
+            'serial_number': serial,
         }
     elif purpose in ('broker_account', 'broker_team'):
         company = ((user or {}).get('company') or '').strip()
@@ -8459,12 +8550,7 @@ def api_listings_delete(listing_id: int):
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    subscription_id = row.get('stripe_subscription_id')
-    if subscription_id and _stripe_configured():
-        try:
-            stripe.Subscription.delete(subscription_id)
-        except Exception:
-            logger.exception('Could not cancel listing subscription %s', subscription_id)
+    _cancel_listing_fee(row)
     if not db_module.archive_user_listing(listing_id):
         return jsonify({'error': 'server_error'}), 500
     return jsonify({'ok': True}), 200
@@ -8665,7 +8751,7 @@ def api_admin_listings():
                 'payment_status': row.get('payment_status'),
                 'stripe_customer_id': row.get('stripe_customer_id'),
                 'stripe_reference': (
-                    f"listing-{row.get('id')}-user-{row.get('user_id')}"
+                    _listing_client_reference(row.get('id'), row.get('user_id'), row.get('serial_number'))
                     if row.get('id') and row.get('user_id') else ''
                 ),
                 'rejection_reason': row.get('rejection_reason'),
@@ -8939,6 +9025,7 @@ def admin_delete_listing(listing_id):
     existing = db_module.get_listing_with_owner(listing_id)
     if not existing:
         return jsonify({'error': 'not_found'}), 404
+    _cancel_listing_fee(existing)
     if not db_module.delete_user_listing_soft(listing_id):
         return jsonify({'error': 'server_error'}), 500
     return jsonify({'ok': True, 'status': 'deleted'}), 200
@@ -9085,7 +9172,7 @@ def _admin_listing_review(row):
             'payment_status': row.get('payment_status'),
             'stripe_customer_id': row.get('stripe_customer_id'),
             'stripe_reference': (
-                f"listing-{row.get('id')}-user-{row.get('user_id')}"
+                _listing_client_reference(row.get('id'), row.get('user_id'), row.get('serial_number'))
                 if row.get('id') and row.get('user_id') else ''
             ),
             'currently_live': ', '.join(live_bits),

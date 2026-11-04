@@ -328,6 +328,7 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(pay.status_code, 200, pay.get_json())
             self.assertIn('buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', pay.get_json().get('url') or '')
             self.assertIn(f"listing-{public.get_json()['id']}-user-", pay.get_json().get('url') or '')
+            self.assertIn('-sn-5501', pay.get_json().get('url') or '')
             page = self.client.get('/create-listing')
             self.assertIn(b'opens checkout', page.data)
             self.assertIn(b'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', page.data)
@@ -1550,6 +1551,54 @@ class ProductTests(unittest.TestCase):
         row = db_module.get_listing_with_owner(listing_id)
         self.assertEqual(row.get('payment_status'), 'paid')
         self.assertEqual(row.get('status'), 'pending')
+        stamped = self.client.post('/api/stripe/webhook', json={
+            'id': 'evt_paylink_serial',
+            'type': 'checkout.session.completed',
+            'data': {'object': {
+                'id': 'cs_paylink_serial',
+                'status': 'complete',
+                'payment_status': 'paid',
+                'client_reference_id': f'listing-{listing_id}-user-{self.seller["id"]}-sn-5501',
+                'metadata': {},
+            }},
+        })
+        self.assertEqual(stamped.status_code, 200, stamped.get_json())
+        self.assertEqual(db_module.get_listing_with_owner(listing_id).get('payment_status'), 'paid')
+
+    def test_taking_a_listing_down_cancels_its_stripe_subscription(self):
+        import app as app_module
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Cancel Fee Jet', 'public'))
+        listing_id = created.get_json()['id']
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'stripe_customer_id': 'cus_cancel_listing', 'payment_status': 'paid', 'status': 'active'},
+                synchronize_session=False,
+            )
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_cancel_listing'
+        deleted = []
+        sessions = type('Page', (), {'data': [{
+            'client_reference_id': f'listing-{listing_id}-user-{self.seller["id"]}-sn-5501',
+            'subscription': 'sub_listing_cancel',
+            'customer': 'cus_cancel_listing',
+        }]})()
+        subscriptions = type('Page', (), {'data': []})()
+        try:
+            with patch.object(app_module.stripe.checkout.Session, 'list', return_value=sessions), \
+                 patch.object(app_module.stripe.Subscription, 'list', return_value=subscriptions), \
+                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id: deleted.append(sub_id)):
+                removed = self.client.delete(f'/api/listings/{listing_id}')
+            self.assertEqual(removed.status_code, 200, removed.get_json())
+            self.assertEqual(deleted, ['sub_listing_cancel'])
+            row = db_module.get_listing_with_owner(listing_id)
+            self.assertEqual(row.get('status'), 'archived')
+            self.assertEqual(row.get('payment_status'), 'canceled')
+        finally:
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
 
     def test_paid_charge_matches_the_account_email_when_stripe_has_no_reference(self):
         person = self._signup('paid-match@example.com', 'seller-pass-1', 'seller')
@@ -1578,7 +1627,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Search Stripe for ', page.data)
         listed = self.client.get('/api/admin/listings')
         match = next(item for item in listed.get_json()['listings'] if item['id'] == listing_id)
-        self.assertEqual(match['stripe_reference'], f'listing-{listing_id}-user-{person["id"]}')
+        self.assertEqual(match['stripe_reference'], f'listing-{listing_id}-user-{person["id"]}-sn-5501')
         self.assertEqual(match['payment_status'], 'paid')
 
     def test_two_open_listings_are_not_assigned_from_the_email_alone(self):
@@ -1768,6 +1817,7 @@ class ProductTests(unittest.TestCase):
             'engine_hours': 700,
             'paint_year': 2020,
             'avionics': 'G1000',
+            'serial_number': '5501',
         }
 
 
