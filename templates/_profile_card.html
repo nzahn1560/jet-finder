@@ -263,7 +263,7 @@
             </div>
         </form>
         {% set on_team = membership and membership.membership_status == 'active' and membership.subscription_status == 'active' %}
-        {% set broker_live = on_team or (subscription and subscription.subscription_status == 'active' and subscription.subscription_type in ['broker', 'broker_team']) %}
+        {% set broker_live = on_team or (subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team']) %}
         <div style="margin-top:1rem;">
                 {% if broker_live and membership and membership.is_admin %}
                 <p class="broker-status">Subscription is active.</p>

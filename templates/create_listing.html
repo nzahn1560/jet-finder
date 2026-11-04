@@ -638,12 +638,12 @@
             } else {
                 next.textContent = off
                     ? 'Off-market listings go to an admin for approval. There is no listing fee.'
-                    : 'Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.';
+                    : 'Submit for approval saves the listing as a draft and opens checkout for $49.99 per month. After payment it says payment received and waits for approval. A listing that is already paid is not charged again.';
             }
         }
         const submitLink = document.getElementById('listing-submit');
         if (submitLink) {
-            if (off) submitLink.removeAttribute('href');
+            if (off || editing || window.LISTING_ALREADY_PAID) submitLink.removeAttribute('href');
             else submitLink.href = LISTING_PAYMENT_URL;
         }
     }
@@ -1089,6 +1089,7 @@
             const payload = buildListingPayload();
             let listingId = EDIT_LISTING_ID;
             let amended = false;
+            let savedListing = null;
 
             if (EDIT_LISTING_ID) {
                 const resp = await fetch(`/api/listings/${EDIT_LISTING_ID}`, {
@@ -1115,6 +1116,7 @@
                     return fail(data.message || 'The listing was not saved. Check the aircraft, year, hours, price, city, state, and email, then try again.');
                 }
                 listingId = data.id;
+                savedListing = data;
             }
 
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Uploading photos...';
@@ -1141,7 +1143,7 @@
                 return;
             }
 
-            if (payload.market !== 'broker_only') {
+            if (payload.market !== 'broker_only' && savedListing && savedListing.payment_required && savedListing.payment_status !== 'paid') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
                 const payUrl = new URL(LISTING_PAYMENT_URL);
                 payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID);
@@ -1218,6 +1220,7 @@
             const sentBack = listing.status === 'changes_requested' || listing.status === 'rejected' || !!listing.review_message;
             window.LISTING_NEEDS_RESUBMIT = sentBack && !waiting;
             window.LISTING_REVIEW_MESSAGE = listing.review_message || '';
+            window.LISTING_ALREADY_PAID = listing.payment_status === 'paid';
             syncOffMarketFields();
             if (submitBtn) {
                 submitBtn.innerHTML = sentBack && !waiting
