@@ -100,7 +100,7 @@ def marketplace_browse():
 @product.route('/listing/<int:listing_id>')
 def public_listing(listing_id):
     row = db_module.get_user_listing_by_id(listing_id, active_only=True)
-    if not row or sections_module.normalize_market(row.get('market')) != 'public':
+    if not row or row.get('paused') or sections_module.normalize_market(row.get('market')) != 'public':
         return render_template('error.html', error_code=404, message='Listing not found'), 404
     profiles = {item.get('id'): item for item in db_module.get_all_aircraft_profiles()}
     profile = profiles.get(row.get('profile_id')) or {}

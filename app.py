@@ -2985,6 +2985,16 @@ def _csrf_matches() -> bool:
     return secrets.compare_digest(str(expected), str(sent))
 
 
+def _billing_request_ok() -> bool:
+    """Same-site billing changes must carry the session token. A cross-site Origin is refused."""
+    origin = (request.headers.get('Origin') or '').rstrip('/')
+    if not origin:
+        return True
+    if origin != request.host_url.rstrip('/'):
+        return False
+    return _csrf_matches()
+
+
 @app.context_processor
 def _inject_csrf():
     return {'csrf_token': _csrf_token}
@@ -3484,9 +3494,9 @@ def _cancel_listing_fee(row):
         subscription_id = _find_listing_subscription_id(row)
     if not subscription_id:
         if paid and _stripe_configured():
-            return False, 'This listing is paid, but its Stripe subscription was not found. It is still on the site.'
+            return False, 'This listing is off the site. Its Stripe subscription was not found, so cancellation is not confirmed.'
         if paid and not _stripe_configured():
-            return False, 'Billing is not available, so this paid listing was left on the site.'
+            return False, 'This listing is off the site. Billing could not be reached, so cancellation is not confirmed.'
         return True, None
     if db_module.find_subscription_by_stripe_id(subscription_id):
         return False, 'That Stripe subscription belongs to a broker account, not this listing. The listing was left up.'
@@ -3500,7 +3510,7 @@ def _cancel_listing_fee(row):
             db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
             return True, None
         logger.exception('Could not read listing subscription %s', subscription_id)
-        return False, 'Stripe could not confirm this subscription. The listing is still up. Try again.'
+        return False, 'This listing is off the site. Stripe could not confirm the cancellation, so billing is not stopped yet.'
     if remote_status == 'canceled':
         db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
         return True, None
@@ -3516,12 +3526,74 @@ def _cancel_listing_fee(row):
             listing_id=listing_id,
             stripe_subscription_id=subscription_id,
             stripe_customer_id=row.get('stripe_customer_id'),
-            cancellation_status='failed',
+            cancellation_status='cancellation_pending',
+            cancellation_reason='stripe_cancel_failed',
+            cancellation_requested_at=datetime.utcnow(),
+            billing_status='cancellation_pending',
             status=remote_status or 'active',
         )
-        return False, 'Stripe could not cancel this subscription. The listing is still up and the card can still be charged. Try again.'
-    db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+        return False, 'This listing is off the site. Stripe did not confirm the cancellation, so a future charge is still possible until it does.'
+    try:
+        db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+    except Exception:
+        logger.exception('Stripe canceled %s but the local billing row was not saved', subscription_id)
+        return False, 'Stripe accepted the cancellation. The site has not stored that yet, so it will retry. This does not refund a charge already collected.'
     return True, None
+
+
+def _alert_billing_admins(title, body):
+    for admin_id in db_module.list_admin_user_ids():
+        person = get_user_by_id(admin_id) or {}
+        db_module.notify_user(admin_id, 'billing', title, body, '/admin', person.get('email'))
+
+
+def _apply_listing_cancellation(row, hide_status, reason, actor_id=None):
+    """Hide the listing, then cancel only its subscription. Pending stays pending until Stripe confirms."""
+    if not row:
+        return {'ok': False, 'error': 'not_found', 'message': 'Listing not found.'}
+    listing_id = row.get('id')
+    if listing_id and hide_status:
+        db_module.hide_listing_for_billing(listing_id, hide_status)
+    ok, message = _cancel_listing_fee(row)
+    stored = db_module.open_listing_subscription(listing_id) or db_module.listing_subscription_by_stripe_id(row.get('stripe_subscription_id'))
+    subscription_id = (stored or {}).get('stripe_subscription_id') or row.get('stripe_subscription_id')
+    if ok:
+        if listing_id:
+            db_module.mark_listing_payment_stopped(listing_id)
+        db_module.record_billing_audit(
+            actor_id, reason, subscription_id, listing_id, row.get('user_id'),
+            'Stripe confirmed the cancellation. No refund was created.',
+        )
+        return {
+            'ok': True,
+            'billing': 'canceled',
+            'message': 'The listing is off the site and future charges for it have stopped. A charge already collected is not refunded.',
+        }
+    if message and 'broker account' in message:
+        return {'ok': False, 'error': 'cancel_failed', 'retry': True, 'message': message}
+    db_module.save_listing_subscription(
+        user_id=row.get('user_id'),
+        listing_id=listing_id,
+        stripe_subscription_id=subscription_id,
+        stripe_customer_id=row.get('stripe_customer_id') or (stored or {}).get('stripe_customer_id'),
+        cancellation_status='cancellation_pending',
+        cancellation_reason=reason,
+        cancellation_requested_at=datetime.utcnow(),
+        billing_status='cancellation_pending',
+    )
+    _alert_billing_admins(
+        'Listing cancellation is not confirmed',
+        f'Listing {listing_id} is off the site. Subscription {subscription_id or "unknown"} is not confirmed canceled.',
+    )
+    db_module.record_billing_audit(
+        actor_id, 'cancellation_pending', subscription_id, listing_id, row.get('user_id'), message,
+    )
+    return {
+        'ok': True,
+        'billing': 'cancellation_pending',
+        'retry': True,
+        'message': message or 'The listing is off the site. Stripe has not confirmed the cancellation.',
+    }
 
 
 def _find_listing_subscription_id(row):
@@ -3705,12 +3777,10 @@ def _stripe_customer_for(user):
             chosen = None
             for remote in matches:
                 meta = _stripe_metadata(remote)
-                if str(meta.get('user_id') or '') == str(user['id']):
+                if str(meta.get('user_id') or meta.get('jetschool_user_id') or '') == str(user['id']):
                     chosen = remote
                     break
-            if chosen is None and matches:
-                chosen = max(matches, key=lambda remote: int(_stripe_field(remote, 'created') or 0))
-            customer_id = _stripe_ref(chosen)
+            customer_id = _stripe_ref(chosen) if chosen else None
             if customer_id:
                 fields = {'metadata': {'user_id': str(user['id'])}}
                 if email:
@@ -4183,11 +4253,24 @@ def _billing_record_view(row, invoices):
         'amount_cents': row.get('amount_cents'),
         'price': _money_label(row.get('amount_cents'), row.get('billing_interval')),
         'interval': row.get('billing_interval') or 'month',
-        'next_billing_date': row.get('current_period_end'),
+        'next_billing_date': row.get('next_renewal_at') or row.get('current_period_end'),
+        'current_period_start': row.get('current_period_start'),
         'cancellation_status': row.get('cancellation_status'),
+        'cancellation_reason': row.get('cancellation_reason'),
+        'cancellation_effective_at': row.get('cancellation_effective_at'),
+        'billing_status': row.get('billing_status'),
         'match_status': row.get('match_status'),
+        'match_class': row.get('match_class'),
+        'agreed_amount_cents': row.get('agreed_amount_cents'),
+        'agreed_price': _money_label(row.get('agreed_amount_cents'), row.get('billing_interval')),
         'grace_until': row.get('grace_until'),
         'past_due_since': row.get('past_due_since'),
+        'last_payment_at': row.get('last_payment_at'),
+        'last_reconciled_at': row.get('last_reconciled_at'),
+        'stripe_dashboard_url': (
+            'https://dashboard.stripe.com/subscriptions/' + row.get('stripe_subscription_id')
+            if row.get('stripe_subscription_id') else None
+        ),
         'invoices': history,
     }
 
@@ -4214,6 +4297,8 @@ def api_account_subscription_cancel(subscription_row_id):
     listing = db_module.get_listing_with_owner(row.get('listing_id')) if row.get('listing_id') else None
     if listing and listing.get('user_id') != user['id']:
         return jsonify({'error': 'forbidden'}), 403
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
     target = listing or {
         'id': row.get('listing_id'),
         'user_id': user['id'],
@@ -4221,12 +4306,10 @@ def api_account_subscription_cancel(subscription_row_id):
         'stripe_customer_id': row.get('stripe_customer_id'),
         'payment_status': 'paid',
     }
-    canceled, message = _cancel_listing_fee(target)
-    if not canceled:
-        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
-    if listing and listing.get('status') not in ('archived', 'deleted'):
-        db_module.archive_user_listing(listing['id'])
-    return jsonify({'ok': True, 'message': 'The subscription is canceled. This does not refund a charge already collected.'}), 200
+    result = _apply_listing_cancellation(target, 'archived', 'customer_cancel', user['id'])
+    if not result.get('ok'):
+        return jsonify(result), 502
+    return jsonify(result), 200
 
 
 @app.route('/api/brokers/directory')
@@ -6870,6 +6953,7 @@ def api_listings_me():
                 'market': sections_module.normalize_market(row.get('market')),
                 'status': row.get('status'),
                 'payment_status': row.get('payment_status'),
+                'paused': bool(row.get('paused')),
                 'serial_number': row.get('serial_number') or '',
                 'pricing_plan': row.get('pricing_plan'),
                 'rejection_reason': row.get('rejection_reason'),
@@ -7403,10 +7487,10 @@ def _show_value(value):
 # =============================================================================
 # Stripe payments for listings.
 # A configured Stripe key sends Submit for approval to Checkout. The listing
-# fee is $49.99 per month. Set REQUIRE_PAYMENT_FOR_LISTINGS=false to skip it.
+# fee is monthly. The amount comes from pricing.py. Set REQUIRE_PAYMENT_FOR_LISTINGS=false to skip it.
 # =============================================================================
 def _listing_fee_cents() -> int:
-    """Server-side listing fee. $49.99 per month."""
+    """Server-side price for a new listing subscription. An existing agreement is not changed."""
     return pricing_module.listing_price_cents()
 
 
@@ -7524,27 +7608,103 @@ def _listing_needs_checkout(market) -> bool:
     return _payment_required()
 
 
-def _subscription_price_fields(obj):
-    """Amount and interval from a Subscription or Invoice, using the server price when absent."""
+def _unix_to_utc(value):
+    if not value:
+        return None
+    try:
+        return datetime.utcfromtimestamp(int(value))
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _subscription_billing_fields(obj):
+    """Price and billing period. Item periods win. The 2023-10-16 API still puts them on the subscription."""
     items = _stripe_field(obj, 'items') or {}
     data = _stripe_field(items, 'data') or []
-    price = {}
-    if data:
-        first = data[0]
-        price = _stripe_field(first, 'price') or {}
+    first = data[0] if data else {}
+    price = _stripe_field(first, 'price') or {}
+    if not isinstance(price, dict):
+        try:
+            price = dict(price)
+        except Exception:
+            price = {}
     recurring = _stripe_field(price, 'recurring') or {}
     amount = _stripe_field(price, 'unit_amount')
     if amount is None:
         amount = _stripe_field(obj, 'amount_paid') or _stripe_field(obj, 'amount_due')
-    interval = _stripe_field(recurring, 'interval') or 'month'
-    period_end = _stripe_field(obj, 'current_period_end')
-    period = None
-    if period_end:
-        try:
-            period = datetime.utcfromtimestamp(int(period_end))
-        except (TypeError, ValueError, OSError):
-            period = None
-    return amount, interval, period
+    product = _stripe_field(price, 'product')
+    product_id = product.get('id') if isinstance(product, dict) else (product if isinstance(product, str) else None)
+    period_end = _unix_to_utc(_stripe_field(first, 'current_period_end') or _stripe_field(obj, 'current_period_end'))
+    period_start = _unix_to_utc(_stripe_field(first, 'current_period_start') or _stripe_field(obj, 'current_period_start'))
+    return {
+        'amount': amount,
+        'interval': _stripe_field(recurring, 'interval') or 'month',
+        'period_end': period_end,
+        'period_start': period_start,
+        'price_id': _stripe_field(price, 'id'),
+        'product_id': product_id,
+    }
+
+
+def _subscription_price_fields(obj):
+    """Amount and interval from a Subscription or Invoice, using the server price when absent."""
+    fields = _subscription_billing_fields(obj)
+    return fields['amount'], fields['interval'], fields['period_end']
+
+
+def _listing_checkout_metadata(row):
+    meta = {
+        'purpose': 'listing_fee',
+        'user_id': str(row.get('user_id') or ''),
+        'listing_id': str(row.get('id') or ''),
+        'jetschool_user_id': str(row.get('user_id') or ''),
+        'jetschool_listing_id': str(row.get('id') or ''),
+        'jetschool_billing_type': 'aircraft_listing',
+    }
+    serial = _stripe_serial(row.get('serial_number'))
+    if serial:
+        meta['serial_number'] = serial
+    return meta
+
+
+def _billing_metadata(metadata):
+    """Read the current keys and the older listing_id / user_id keys."""
+    metadata = dict(metadata or {})
+    if metadata.get('jetschool_listing_id') and not metadata.get('listing_id'):
+        metadata['listing_id'] = metadata.get('jetschool_listing_id')
+    if metadata.get('jetschool_user_id') and not metadata.get('user_id'):
+        metadata['user_id'] = metadata.get('jetschool_user_id')
+    if metadata.get('jetschool_billing_type') == 'aircraft_listing' and not metadata.get('purpose'):
+        metadata['purpose'] = 'listing_fee'
+    return metadata
+
+
+def _reuse_open_listing_checkout(existing):
+    """Return the checkout already started for this listing, or None when it is no longer open."""
+    session_id = (existing or {}).get('checkout_session_id')
+    if not session_id or not _stripe_configured():
+        return None
+    try:
+        remote = stripe.checkout.Session.retrieve(session_id)
+    except Exception:
+        logger.exception('Could not read the open listing checkout')
+        if existing.get('checkout_url'):
+            return {'url': existing.get('checkout_url')}
+        return {'error': True}
+    remote_status = _stripe_field(remote, 'status')
+    if remote_status == 'open' and existing.get('checkout_url'):
+        return {'url': existing.get('checkout_url')}
+    if remote_status == 'complete' and _checkout_collected(remote):
+        return {'already': True}
+    if remote_status == 'expired':
+        db_module.save_listing_subscription(
+            listing_id=existing.get('listing_id'),
+            checkout_session_id=session_id,
+            status='incomplete_expired',
+            billing_status='incomplete',
+        )
+        db_module.finish_checkout_attempt(existing.get('listing_id'), 'expired', session_id)
+    return None
 
 
 def _start_listing_checkout(user, row):
@@ -7556,19 +7716,17 @@ def _start_listing_checkout(user, row):
         return {'already': True}
     if row.get('payment_status') == 'paid' and (row.get('stripe_subscription_id') or (existing and existing.get('stripe_subscription_id'))):
         return {'already': True}
+    if existing and existing.get('status') == 'incomplete':
+        reused = _reuse_open_listing_checkout(existing)
+        if reused:
+            return reused
     customer_id = _stripe_customer_for(user)
     if not customer_id:
         return None
     amount = _listing_fee_cents()
-    meta = {
-        'purpose': 'listing_fee',
-        'user_id': str(row.get('user_id')),
-        'listing_id': str(row.get('id')),
-    }
-    serial = _stripe_serial(row.get('serial_number'))
-    if serial:
-        meta['serial_number'] = serial
-    reference = _listing_client_reference(row.get('id'), row.get('user_id'), serial)
+    meta = _listing_checkout_metadata(row)
+    reference = _listing_client_reference(row.get('id'), row.get('user_id'), meta.get('serial_number'))
+    attempt = db_module.start_checkout_attempt(row.get('user_id'), row.get('id'), amount, f"listing-{row.get('id')}-{int(datetime.utcnow().timestamp())}")
     base = _public_base()
     checkout = stripe.checkout.Session.create(
         mode='subscription',
@@ -7594,9 +7752,10 @@ def _start_listing_checkout(user, row):
         automatic_tax={'enabled': False},
         payment_method_collection='always',
         billing_address_collection='auto',
-        idempotency_key=_checkout_idempotency(f"listing-{row.get('id')}"),
+        idempotency_key=attempt.get('idempotency_key') or _checkout_idempotency(f"listing-{row.get('id')}"),
     )
     session_id = _stripe_field(checkout, 'id')
+    checkout_url = _stripe_field(checkout, 'url')
     db_module.save_listing_subscription(
         user_id=row.get('user_id'),
         listing_id=row.get('id'),
@@ -7604,14 +7763,18 @@ def _start_listing_checkout(user, row):
         checkout_session_id=session_id,
         status='incomplete',
         amount_cents=amount,
+        agreed_amount_cents=amount,
         currency='usd',
         billing_interval='month',
         match_status='matched',
         cancellation_status='none',
+        checkout_url=checkout_url,
+        billing_status='incomplete',
     )
+    db_module.finish_checkout_attempt(row.get('id'), 'open', session_id)
     if session_id:
         db_module.set_listing_payment_session(row.get('id'), session_id)
-    return {'url': _stripe_field(checkout, 'url')}
+    return {'url': checkout_url}
 
 
 def _listing_checkout_url(user, listing_id):
@@ -7635,6 +7798,8 @@ def _listing_checkout_url(user, listing_id):
 def api_listing_checkout(listing_id: int):
     """Create a Stripe Checkout session for the monthly listing fee. Returns {url}."""
     user = request.current_user  # type: ignore[attr-defined]
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
     row = db_module.get_listing_with_owner(listing_id)
     if not row:
         return jsonify({'error': 'not_found'}), 404
@@ -7759,6 +7924,17 @@ def api_stripe_webhook():
     if event_id and not db_module.claim_stripe_event(str(event_id)):
         return jsonify({'received': True, 'duplicate': True}), 200
 
+    try:
+        return _handle_stripe_event(event)
+    except Exception:
+        logger.exception('Stripe webhook was not stored')
+        if event_id:
+            db_module.release_stripe_event(str(event_id))
+        return jsonify({'error': 'processing_failed'}), 500
+
+
+def _handle_stripe_event(event):
+    """Apply one verified Stripe event. Raise if it was not stored."""
     event_type = event.get('type') if isinstance(event, dict) else event.type
     if event_type in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
         sess = event['data']['object'] if isinstance(event, dict) else event.data.object
@@ -7791,13 +7967,20 @@ def api_stripe_webhook():
             logger.info('Stripe webhook: listing %s payment_status %s', listing_id, payment_status)
         if event_type == 'charge.refunded' and _stripe_field(obj, 'refunded') is True:
             _end_broker_charge(obj, 'canceled')
+    elif event_type == 'checkout.session.expired':
+        sess = event['data']['object'] if isinstance(event, dict) else event.data.object
+        _expire_listing_checkout(sess)
+    elif event_type == 'checkout.session.async_payment_failed':
+        sess = event['data']['object'] if isinstance(event, dict) else event.data.object
+        _fail_listing_checkout(sess)
     elif event_type in (
         'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted',
-        'invoice.paid', 'invoice.payment_failed',
+        'invoice.paid', 'invoice.payment_failed', 'invoice.payment_action_required',
     ):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
         event_created = event.get('created') if isinstance(event, dict) else getattr(event, 'created', None)
-        _sync_broker_billing_event(event_type, obj)
+        if event_type != 'invoice.payment_action_required':
+            _sync_broker_billing_event(event_type, obj)
         _sync_listing_subscription_event(event_type, obj, event_created=event_created)
         if event_type == 'invoice.paid':
             _activate_listing_from_invoice(obj)
@@ -7963,11 +8146,10 @@ def _payment_email(sess):
 
 
 def _identity_from_payment(sess):
-    """Match a charge that has no listing or broker reference.
+    """Match a broker charge that has no account reference.
 
-    The email has to be the JetSchool account. $49.99 matches only when that
-    account has one open public listing. $19.99 is the broker subscription.
-    Two open listings stay unmatched instead of guessing.
+    A listing fee is never chosen from an email address. The listing id has to
+    be on the Checkout session or the subscription.
     """
     email = _payment_email(sess)
     user = db_module.get_user_by_email(email) if email else None
@@ -7976,24 +8158,7 @@ def _identity_from_payment(sess):
     amount = _payment_amount(sess)
     if amount == BROKER_FEE_CENTS:
         return {'purpose': 'broker_account', 'user_id': str(user['id'])}
-    if amount != _listing_fee_cents():
-        return {}
-    open_rows = []
-    for row in db_module.get_listings_by_user_id(user['id']):
-        if row.get('payment_status') == 'paid':
-            continue
-        if row.get('status') in ('deleted', 'archived'):
-            continue
-        if sections_module.normalize_market(row.get('market')) == 'broker_only':
-            continue
-        open_rows.append(row)
-    if len(open_rows) != 1:
-        return {}
-    return {
-        'purpose': 'listing_fee',
-        'listing_id': str(open_rows[0]['id']),
-        'user_id': str(user['id']),
-    }
+    return {}
 
 
 def _session_carrying(sess, identity):
@@ -8209,12 +8374,62 @@ def _record_listing_checkout(sess):
 _reconcile_paid_checkouts()
 
 
+def _expire_listing_checkout(sess):
+    """An abandoned Checkout does not activate the listing."""
+    session_id = _stripe_field(sess, 'id')
+    meta = _billing_metadata(_stripe_metadata(sess))
+    try:
+        listing_id = int(meta.get('listing_id') or 0)
+    except (TypeError, ValueError):
+        listing_id = 0
+    if session_id:
+        db_module.save_listing_subscription(
+            listing_id=listing_id or None,
+            checkout_session_id=session_id,
+            status='incomplete_expired',
+            billing_status='incomplete',
+        )
+        if listing_id:
+            db_module.finish_checkout_attempt(listing_id, 'expired', session_id)
+
+
+def _fail_listing_checkout(sess):
+    """A failed first payment stays unpaid. The listing is not sent for approval."""
+    meta = _billing_metadata(_stripe_metadata(sess))
+    if meta.get('purpose') not in (None, '', 'listing_fee'):
+        return
+    try:
+        listing_id = int(meta.get('listing_id') or 0)
+    except (TypeError, ValueError):
+        listing_id = 0
+    if not listing_id:
+        return
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row or str(meta.get('user_id') or row.get('user_id')) != str(row.get('user_id')):
+        return
+    db_module.save_listing_subscription(
+        user_id=row.get('user_id'),
+        listing_id=listing_id,
+        checkout_session_id=_stripe_field(sess, 'id'),
+        stripe_customer_id=_stripe_ref(_stripe_field(sess, 'customer')),
+        status='incomplete',
+        billing_status='unpaid',
+        match_status='matched',
+    )
+    owner = get_user_by_id(row.get('user_id')) or {}
+    db_module.notify_user(
+        row.get('user_id'), 'billing', 'Listing payment did not go through',
+        'The listing is still unpaid. You can start checkout again from the dashboard.',
+        '/dashboard#subscriptions', owner.get('email'),
+    )
+
+
 def _listing_from_billing_metadata(metadata, subscription_id=None):
     """Match a Stripe subscription to a listing by stored ids or metadata.
 
     An email address is not enough to claim a listing.
     """
-    metadata = metadata or {}
+    metadata = _billing_metadata(metadata)
     listing = db_module.find_listing_by_subscription(subscription_id) if subscription_id else None
     if listing:
         return listing, 'matched'
@@ -8242,25 +8457,37 @@ def _listing_from_billing_metadata(metadata, subscription_id=None):
 
 def _sync_listing_subscription_event(event_type, obj, event_created=None):
     """Keep the billing table aligned with Stripe. A failed renewal stays up for 7 days."""
-    metadata = _stripe_metadata(obj)
+    metadata = _billing_metadata(_stripe_metadata(obj))
     amount = None
     interval = None
     period = None
     if event_type in ('customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'):
         subscription_id = _stripe_ref(_stripe_field(obj, 'id'))
         stripe_status = 'canceled' if event_type == 'customer.subscription.deleted' else (_stripe_field(obj, 'status') or 'incomplete')
-        amount, interval, period = _subscription_price_fields(obj)
+        billing = _subscription_billing_fields(obj)
+        amount, interval, period = billing['amount'], billing['interval'], billing['period_end']
+        period_start = billing['period_start']
+        price_id = billing['price_id']
+        product_id = billing['product_id']
         customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
     elif event_type == 'invoice.payment_failed':
         subscription_id = _object_subscription_id(obj)
         stripe_status = 'past_due'
         customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
         amount = _stripe_field(obj, 'amount_due')
+        interval = period = period_start = price_id = product_id = None
+    elif event_type == 'invoice.payment_action_required':
+        subscription_id = _object_subscription_id(obj)
+        stripe_status = None
+        customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
+        amount = _stripe_field(obj, 'amount_due')
+        interval = period = period_start = price_id = product_id = None
     elif event_type == 'invoice.paid':
         subscription_id = _object_subscription_id(obj)
         stripe_status = 'active'
         customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
         amount = _stripe_field(obj, 'amount_paid')
+        interval = period = period_start = price_id = product_id = None
     else:
         return
     if not subscription_id:
@@ -8282,6 +8509,8 @@ def _sync_listing_subscription_event(event_type, obj, event_created=None):
             amount_cents=amount,
             match_status='matched' if listing_id else 'unmatched',
             event_created=event_created,
+            last_payment_at=datetime.utcnow(),
+            billing_status='active',
         )
         if saved:
             db_module.save_billing_invoice(
@@ -8331,6 +8560,27 @@ def _sync_listing_subscription_event(event_type, obj, event_created=None):
                 '/dashboard#subscriptions', owner.get('email'),
             )
         return
+    if event_type == 'invoice.payment_action_required':
+        db_module.save_billing_invoice(
+            stripe_invoice_id=_stripe_field(obj, 'id'),
+            status='open',
+            user_id=user_id,
+            listing_id=listing_id,
+            stripe_subscription_id=subscription_id,
+            stripe_customer_id=customer_id,
+            amount_cents=amount,
+            hosted_invoice_url=_stripe_field(obj, 'hosted_invoice_url'),
+            failure_message='The bank needs the customer to confirm this payment.',
+        )
+        if listing:
+            owner = get_user_by_id(listing.get('user_id')) or {}
+            db_module.notify_user(
+                listing.get('user_id'), 'billing', 'Confirm the listing payment',
+                'The bank needs you to confirm the listing payment. The listing is not canceled by this notice.',
+                '/dashboard#subscriptions', owner.get('email'),
+            )
+        return
+    renewal = period if stripe_status in ('active', 'trialing', 'past_due') and not _stripe_field(obj, 'cancel_at_period_end') else None
     saved = db_module.save_listing_subscription(
         user_id=user_id,
         listing_id=listing_id,
@@ -8340,11 +8590,17 @@ def _sync_listing_subscription_event(event_type, obj, event_created=None):
         amount_cents=amount,
         billing_interval=interval,
         current_period_end=period,
+        current_period_start=period_start,
+        next_renewal_at=renewal,
+        stripe_price_id=price_id,
+        stripe_product_id=product_id,
         cancel_at_period_end=bool(_stripe_field(obj, 'cancel_at_period_end')),
         canceled_at=datetime.utcnow() if stripe_status == 'canceled' else None,
+        cancellation_effective_at=datetime.utcnow() if stripe_status == 'canceled' else None,
         cancellation_status='canceled' if stripe_status == 'canceled' else None,
         match_status='matched' if listing_id else 'unmatched',
         event_created=event_created,
+        last_reconciled_at=datetime.utcnow(),
     )
     if not listing or not saved:
         return
@@ -9058,12 +9314,67 @@ def api_listings_delete(listing_id: int):
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    canceled, message = _cancel_listing_fee(row)
-    if not canceled:
-        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
-    if not db_module.archive_user_listing(listing_id):
-        return jsonify({'error': 'server_error', 'retry': True, 'message': 'The subscription was canceled. The listing could not be archived. Try again.'}), 500
-    return jsonify({'ok': True}), 200
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
+    result = _apply_listing_cancellation(row, 'deleted', 'delete_listing', user['id'])
+    status = 200 if result.get('ok') else 502
+    return jsonify(result), status
+
+
+@app.route('/api/listings/<int:listing_id>/sold', methods=['POST'])
+@require_auth
+def api_listing_sold(listing_id: int):
+    """Mark the aircraft sold and cancel only this listing's subscription."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id']:
+        return jsonify({'error': 'forbidden'}), 403
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
+    result = _apply_listing_cancellation(row, 'sold', 'mark_sold', user['id'])
+    return jsonify(result), (200 if result.get('ok') else 502)
+
+
+@app.route('/api/listings/<int:listing_id>/pause', methods=['POST'])
+@require_auth
+def api_listing_pause(listing_id: int):
+    """Hide a listing from the public site. The monthly fee keeps billing."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id']:
+        return jsonify({'error': 'forbidden'}), 403
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    if not db_module.set_listing_paused(listing_id, True):
+        return jsonify({'error': 'not_found'}), 404
+    db_module.record_billing_audit(user['id'], 'pause_listing', row.get('stripe_subscription_id'), listing_id, user['id'], 'Hidden. Billing continues.')
+    return jsonify({
+        'ok': True,
+        'paused': True,
+        'message': 'This listing is hidden from the public site. The monthly fee continues until you cancel it or delete the listing.',
+    }), 200
+
+
+@app.route('/api/listings/<int:listing_id>/resume', methods=['POST'])
+@require_auth
+def api_listing_resume(listing_id: int):
+    """Show a paused listing again. This does not start a new charge."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    if row.get('user_id') != user['id']:
+        return jsonify({'error': 'forbidden'}), 403
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    if row.get('status') != 'active':
+        return jsonify({'error': 'not_active', 'message': 'Only a live listing can be shown again from here.'}), 400
+    db_module.set_listing_paused(listing_id, False)
+    return jsonify({'ok': True, 'paused': False, 'message': 'The listing is public again. The monthly fee was not changed.'}), 200
 
 
 @app.route('/api/my-listings')
@@ -9592,13 +9903,28 @@ def api_admin_billing():
     if query:
         records = [row for row in records if _billing_matches_query(row, query)]
     failed = [row for row in invoices if row.get('status') in ('failed', 'open', 'uncollectible')]
-    unmatched = [row for row in records if row.get('match_status') == 'unmatched']
+    unmatched = [row for row in records if row.get('match_status') == 'unmatched' or row.get('match_class') in (
+        'UNMATCHED_CUSTOMER', 'UNMATCHED_LISTING', 'ORPHANED', 'CONFLICT',
+    )]
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    year_start = datetime(now.year, 1, 1)
+    counts = {}
+    for row in records:
+        key = row.get('billing_status') or row.get('status') or 'unknown'
+        counts[key] = counts.get(key, 0) + 1
     return jsonify({
         'subscriptions': records,
         'unmatched': unmatched,
         'failed_payments': failed,
+        'refunds': db_module.list_refunded_listings(),
+        'problems': db_module.billing_problem_rows(),
         'monthly_recurring_cents': db_module.monthly_recurring_cents(),
+        'collected_month_cents': db_module.collected_revenue_cents(month_start),
+        'collected_year_cents': db_module.collected_revenue_cents(year_start),
+        'counts': counts,
         'grace_days': db_module.BILLING_GRACE_DAYS,
+        'last_sync': _billing_sync_stamp(),
     }), 200
 
 
@@ -9656,11 +9982,85 @@ def api_admin_billing_reconcile():
     return jsonify({'ok': True, 'matched': matched, 'unmatched': unmatched, 'canceled': 0}), 200
 
 
+_billing_last_sync = None
+
+
+def _billing_sync_stamp():
+    return _billing_last_sync.isoformat() if _billing_last_sync else None
+
+
+def _sync_matched_subscriptions(limit=50):
+    """Copy Stripe status onto subscriptions that are already tied to a listing.
+
+    This does not assign a customer, cancel a subscription, or change the agreed price.
+    """
+    global _billing_last_sync
+    if not _stripe_configured():
+        return {'ok': False, 'updated': 0, 'canceled': 0, 'message': 'Stripe is not configured.'}
+    updated = 0
+    try:
+        rows = db_module.list_listing_subscriptions(match_status='matched')
+    except Exception:
+        logger.exception('Could not read local subscriptions')
+        return {'ok': False, 'updated': 0, 'canceled': 0}
+    for row in rows[:limit]:
+        subscription_id = row.get('stripe_subscription_id')
+        if not subscription_id or not row.get('listing_id') or not row.get('user_id'):
+            continue
+        try:
+            remote = stripe.Subscription.retrieve(subscription_id)
+        except Exception:
+            logger.exception('Could not read subscription %s', subscription_id)
+            continue
+        fields = _subscription_billing_fields(remote)
+        status = _stripe_field(remote, 'status') or row.get('status')
+        saved = db_module.save_listing_subscription(
+            user_id=row.get('user_id'),
+            listing_id=row.get('listing_id'),
+            stripe_customer_id=row.get('stripe_customer_id'),
+            stripe_subscription_id=subscription_id,
+            status=status,
+            amount_cents=fields['amount'] if fields['amount'] is not None else row.get('amount_cents'),
+            billing_interval=fields['interval'],
+            current_period_start=fields['period_start'],
+            current_period_end=fields['period_end'],
+            next_renewal_at=fields['period_end'] if status in ('active', 'trialing', 'past_due') else None,
+            stripe_price_id=fields['price_id'],
+            stripe_product_id=fields['product_id'],
+            cancel_at_period_end=bool(_stripe_field(remote, 'cancel_at_period_end')),
+            last_reconciled_at=datetime.utcnow(),
+            match_status='matched',
+        )
+        updated += 1
+        if status == 'canceled' and saved and saved.get('status') == 'canceled':
+            db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=row.get('listing_id'))
+            listing = db_module.get_listing_with_owner(row.get('listing_id'))
+            if listing and listing.get('status') == 'active':
+                db_module.end_listing_subscription(row.get('listing_id'))
+    _billing_last_sync = datetime.utcnow()
+    return {'ok': True, 'updated': updated, 'canceled': 0}
+
+
+@app.route('/api/internal/billing/reconcile', methods=['POST'])
+def api_internal_billing_reconcile():
+    """Railway can call this on a schedule. It does not cancel or reassign subscriptions."""
+    expected = (os.environ.get('BILLING_RECONCILE_TOKEN') or '').strip()
+    sent = (request.headers.get('X-Billing-Reconcile-Token') or '').strip()
+    if not expected or not sent or not secrets.compare_digest(expected, sent):
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify(_sync_matched_subscriptions()), 200
+
+
 @app.route('/api/admin/billing/match', methods=['POST'])
 @require_admin
 def api_admin_billing_match():
     """Attach an unmatched Stripe subscription to a listing. The admin chooses the listing."""
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    admin = request.current_user  # type: ignore[attr-defined]
     data = request.get_json(silent=True) or {}
+    if data.get('confirm') is not True:
+        return jsonify({'error': 'confirm_required', 'message': 'Confirm the customer, aircraft, and subscription before saving.'}), 400
     subscription_id = str(data.get('stripe_subscription_id') or '').strip()
     try:
         listing_id = int(data.get('listing_id'))
@@ -9668,7 +10068,21 @@ def api_admin_billing_match():
         return jsonify({'error': 'missing_fields', 'message': 'Choose a listing.'}), 400
     if not subscription_id:
         return jsonify({'error': 'missing_fields', 'message': 'A Stripe subscription id is required.'}), 400
-    saved = db_module.match_listing_subscription_to_listing(subscription_id, listing_id)
+    listing = db_module.get_listing_with_owner(listing_id)
+    if not listing:
+        return jsonify({'error': 'not_found', 'message': 'That listing was not found.'}), 404
+    if _stripe_configured():
+        try:
+            stripe.Subscription.retrieve(subscription_id)
+        except Exception:
+            logger.exception('Could not verify subscription %s before matching', subscription_id)
+            return jsonify({'error': 'stripe_error', 'message': 'Stripe could not be read. Nothing was linked.'}), 502
+    saved, error = db_module.link_subscription_to_listing(subscription_id, listing_id, admin.get('id'))
+    if error == 'conflict':
+        return jsonify({
+            'error': 'conflict',
+            'message': 'That listing already has an open subscription, or this subscription is already linked to another listing.',
+        }), 409
     if not saved:
         return jsonify({'error': 'not_found', 'message': 'That listing was not found.'}), 404
     return jsonify({'ok': True, 'subscription': saved}), 200
@@ -9677,22 +10091,24 @@ def api_admin_billing_match():
 @app.route('/api/admin/billing/<subscription_id>/cancel', methods=['POST'])
 @require_admin
 def api_admin_billing_cancel(subscription_id):
-    """Cancel one Stripe subscription. A failed cancel leaves the listing in place."""
+    """Cancel one Stripe subscription after the admin confirms the exact subscription."""
+    admin = get_current_user_from_request() or {}
+    data = request.get_json(silent=True) or {}
+    if data.get('confirm') is not True:
+        return jsonify({'error': 'confirm_required', 'message': 'Confirm the customer, aircraft, and subscription before canceling.'}), 400
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden'}), 403
     row = db_module.listing_subscription_by_stripe_id(subscription_id)
     if row and row.get('listing_id'):
         listing = db_module.get_listing_with_owner(row.get('listing_id'))
-        canceled, message = _cancel_listing_fee(listing or {
+        result = _apply_listing_cancellation(listing or {
             'id': row.get('listing_id'),
             'user_id': row.get('user_id'),
             'stripe_subscription_id': subscription_id,
             'stripe_customer_id': row.get('stripe_customer_id'),
             'payment_status': 'paid',
-        })
-        if not canceled:
-            return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
-        if listing and listing.get('status') not in ('archived', 'deleted'):
-            db_module.archive_user_listing(listing['id'])
-        return jsonify({'ok': True}), 200
+        }, 'archived', 'admin_cancel', admin.get('id'))
+        return jsonify(result), (200 if result.get('ok') else 502)
     broker = db_module.find_subscription_by_stripe_id(subscription_id)
     if not broker:
         return jsonify({'error': 'not_found'}), 404
@@ -9720,12 +10136,28 @@ def admin_delete_listing(listing_id):
     existing = db_module.get_listing_with_owner(listing_id)
     if not existing:
         return jsonify({'error': 'not_found'}), 404
-    canceled, message = _cancel_listing_fee(existing)
-    if not canceled:
-        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
-    if not db_module.delete_user_listing_soft(listing_id):
-        return jsonify({'error': 'server_error'}), 500
-    return jsonify({'ok': True, 'status': 'deleted'}), 200
+    admin = get_current_user_from_request() or {}
+    decision = ((request.get_json(silent=True) or {}).get('billing') or 'cancel').strip().lower()
+    if decision == 'keep':
+        if not db_module.delete_user_listing_soft(listing_id):
+            return jsonify({'error': 'server_error'}), 500
+        db_module.record_billing_audit(
+            admin.get('id'), 'admin_remove_keep_billing', existing.get('stripe_subscription_id'),
+            listing_id, existing.get('user_id'), 'Listing removed. Subscription was left in place on purpose.',
+        )
+        _alert_billing_admins(
+            'Removed listing still has billing',
+            f'Listing {listing_id} was removed and its subscription was kept.',
+        )
+        return jsonify({
+            'ok': True,
+            'status': 'deleted',
+            'billing': 'unchanged',
+            'message': 'The listing is off the site. Its subscription is still billing.',
+        }), 200
+    result = _apply_listing_cancellation(existing, 'deleted', 'admin_remove', admin.get('id'))
+    result['status'] = 'deleted'
+    return jsonify(result), (200 if result.get('ok') else 502)
 
 
 @app.route('/admin/listings')

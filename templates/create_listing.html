@@ -657,6 +657,10 @@
             ? '<span style="text-decoration:line-through;color:#888;font-size:1.2rem;">' + regular + '</span> <strong style="font-size:2rem;margin-left:0.5rem;">' + current + '</strong>'
             : '<strong style="font-size:2rem;">' + current + '</strong>';
         if (note) note.textContent = price.label || '';
+        const next = document.getElementById('listing-next-step');
+        if (next && !next.hidden && next.textContent.indexOf('checkout') !== -1) {
+            next.textContent = 'Submit for approval saves the listing as a draft and opens checkout for ' + current + '. ' + (price.label || '');
+        }
     }).catch(function () {});
     let currentListingType = 'aircraft';
 
