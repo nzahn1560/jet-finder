@@ -432,9 +432,9 @@
                                         required placeholder="Auto-filled from selected profile">
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Serial Number</label>
+                                    <label class="form-label">Serial Number <span data-public-star>*</span></label>
                                     <input type="text" class="form-control" id="serialNumber" name="serial_number"
-                                        placeholder="e.g., 5501">
+                                        required placeholder="e.g., 5501">
                                 </div>
                             </div>
                             <div class="row">
@@ -615,7 +615,7 @@
     function syncOffMarketFields() {
         const picked = document.querySelector('[name="market"]:checked');
         const off = picked && picked.value === 'broker_only';
-        ['price', 'engineType', 'totalTime', 'manufacturerInput', 'listingCity', 'listingState', 'email'].forEach(function (id) {
+        ['price', 'engineType', 'totalTime', 'manufacturerInput', 'listingCity', 'listingState', 'email', 'serialNumber'].forEach(function (id) {
             const field = document.getElementById(id);
             if (field) field.required = !off;
         });
@@ -1146,7 +1146,8 @@
             if (payload.market !== 'broker_only' && savedListing && savedListing.payment_required && savedListing.payment_status !== 'paid') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
                 const payUrl = new URL(LISTING_PAYMENT_URL);
-                payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID);
+                const serial = String(payload.serial_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
+                payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID + (serial ? '-sn-' + serial : ''));
                 if (payload.email) payUrl.searchParams.set('prefilled_email', payload.email);
                 window.location.href = payUrl.toString();
                 return;
@@ -1209,9 +1210,6 @@
             if (marketRadio) marketRadio.checked = true;
             const planRadio = document.querySelector(`[name="pricing_plan"][value="${listing.pricing_plan || 'monthly'}"]`);
             if (planRadio) { planRadio.checked = true; updatePrice(); }
-            // Serial number lives inside the description in edit mode; relax the field.
-            const serialEl = document.getElementById('serialNumber');
-            if (serialEl) serialEl.required = false;
             // Profile is already chosen; the search field is only required for new listings.
             const profileSearch = document.getElementById('profileSearchInput');
             if (profileSearch) profileSearch.required = false;

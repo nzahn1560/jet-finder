@@ -2008,10 +2008,10 @@ def set_listing_pending_changes(listing_id, pending):
 
 
 def archive_user_listing(listing_id):
-    """Soft-archive a listing (status=archived). Returns True if updated."""
+    """Soft-archive a listing (status=archived) and stop its listing fee."""
     with get_session() as s:
         n = s.query(UserListing).filter(UserListing.id == listing_id).update(
-            {'status': 'archived'}, synchronize_session=False
+            {'status': 'archived', 'payment_status': 'canceled'}, synchronize_session=False
         )
         return n > 0
 
