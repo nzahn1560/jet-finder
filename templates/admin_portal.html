@@ -130,6 +130,8 @@
                 <button class="ap__btn ap__btn--secondary" id="billing-refresh" type="button">Refresh from Stripe</button>
             </div>
             <p id="billing-summary" style="color:#d0d0d0;"></p>
+            <div id="billing-problems"></div>
+            <h2 style="color:#fff;font-size:1.1rem;">Reconciliation</h2>
             <div id="billing-unmatched"></div>
             <div id="billing-failed"></div>
             <div id="billing-list"></div>
@@ -550,14 +552,24 @@ async function loadAdminBilling() {
         return;
     }
     const dollars = ((data.monthly_recurring_cents || 0) / 100).toFixed(2);
-    summary.textContent = 'Monthly recurring revenue $' + dollars + '. A failed card keeps the listing up for ' + (data.grace_days || 7) + ' days, then it leaves the public site. Canceling does not refund a charge.';
+    const month = ((data.collected_month_cents || 0) / 100).toFixed(2);
+    const year = ((data.collected_year_cents || 0) / 100).toFixed(2);
+    summary.textContent = 'Monthly recurring estimate $' + dollars + '. Collected this month $' + month + '. Collected this year $' + year + '. A failed card keeps the listing up for ' + (data.grace_days || 7) + ' days, then it leaves the public site. Canceling does not refund a charge. Last sync ' + (data.last_sync || 'not run') + '.';
+    const problems = data.problems || [];
+    const problemBox = document.getElementById('billing-problems');
+    if (problemBox) {
+        problemBox.innerHTML = problems.length ? problems.map(function (row) {
+            return '<p>' + esc(row.match_class) + ' · listing ' + esc(row.listing_id || '—') + ' · ' + esc(row.stripe_subscription_id || 'no subscription') + '</p>';
+        }).join('') : '';
+    }
     const unmatched = data.unmatched || [];
-    unmatchedBox.innerHTML = unmatched.length ? '<h2>Unmatched subscriptions</h2>' + unmatched.map(function (row) {
-        return '<article class="ap__card"><p>' + esc(row.stripe_subscription_id || 'No subscription id') + ' · ' + esc(row.stripe_customer_id || '') + ' · ' + esc(row.status) + '</p>'
-            + '<form data-match="' + esc(row.stripe_subscription_id || '') + '" style="display:flex;gap:0.5rem;align-items:center;">'
+    unmatchedBox.innerHTML = unmatched.length ? unmatched.map(function (row) {
+        return '<article class="ap__card"><p>' + esc(row.match_class || row.match_status) + ' · ' + esc(row.stripe_subscription_id || 'No subscription id') + ' · ' + esc(row.stripe_customer_id || '') + ' · ' + esc(row.status) + '</p>'
+            + '<p>Possible listing ' + esc(row.listing_id || 'unknown') + ' · ' + esc(row.aircraft || '') + ' · ' + esc(row.customer_name || '') + '</p>'
+            + '<form data-match="' + esc(row.stripe_subscription_id || '') + '" data-label="' + esc((row.customer_name || '') + ' ' + (row.aircraft || '') + ' ' + (row.stripe_subscription_id || '')) + '" style="display:flex;gap:0.5rem;align-items:center;">'
             + '<input name="listing_id" type="number" min="1" placeholder="Listing ID" required>'
             + '<button class="ap__btn" type="submit">Match to listing</button></form></article>';
-    }).join('') : '';
+    }).join('') : '<p>No subscriptions are waiting for a manual match.</p>';
     const failed = data.failed_payments || [];
     failedBox.innerHTML = failed.length ? '<h2>Failed payments</h2>' + failed.map(function (row) {
         return '<p>Invoice ' + esc(row.stripe_invoice_id) + ' · listing ' + esc(row.listing_id || '—') + ' · ' + esc(row.failure_message || row.status) + '</p>';
@@ -567,23 +579,28 @@ async function loadAdminBilling() {
         const listingLink = row.listing_id ? '<a href="/listing/' + row.listing_id + '">Open listing ' + esc(row.listing_id) + '</a>' : 'No listing';
         const personLink = row.user_id ? '<button type="button" data-user="' + row.user_id + '">Open customer</button>' : 'No customer';
         const cancel = row.stripe_subscription_id && row.status !== 'canceled'
-            ? '<button type="button" data-cancel-billing="' + esc(row.stripe_subscription_id) + '">Cancel subscription</button>'
+            ? '<button type="button" data-cancel-billing="' + esc(row.stripe_subscription_id) + '" data-who="' + esc((row.customer_name || '') + ' · ' + (row.aircraft || '') + ' · ' + (row.stripe_subscription_id || '')) + '">Cancel subscription</button>'
             : '';
+        const stripeLink = row.stripe_dashboard_url ? '<a href="' + esc(row.stripe_dashboard_url) + '" target="_blank" rel="noopener">Stripe</a>' : '';
         return '<article class="ap__card"><strong>' + esc(row.aircraft || row.kind) + '</strong>'
             + '<p>' + esc(row.customer_name || '') + ' · ' + esc(row.email || '') + '</p>'
-            + '<p>' + esc(row.price || '') + ' · ' + esc(row.status) + ' · next ' + esc(row.next_billing_date || '—') + '</p>'
+            + '<p>Listing ' + esc(row.listing_id || '—') + ' · ' + esc(row.price || '') + ' · ' + esc(row.billing_status || row.status) + ' · next ' + esc(row.next_billing_date || '—') + '</p>'
             + '<p>Customer ' + esc(row.stripe_customer_id || '—') + '<br>Subscription ' + esc(row.stripe_subscription_id || '—') + '</p>'
-            + '<p>' + listingLink + ' · ' + personLink + ' ' + cancel + '</p></article>';
+            + '<p>' + listingLink + ' · ' + personLink + ' ' + cancel + ' ' + stripeLink + '</p></article>';
     }).join('') : '<div class="ap__empty">No subscriptions stored yet.</div>';
     unmatchedBox.querySelectorAll('form[data-match]').forEach(function (form) {
         form.addEventListener('submit', async function (event) {
             event.preventDefault();
+            const who = form.getAttribute('data-label') || form.getAttribute('data-match');
+            if (!window.confirm('Link ' + who + ' to listing ' + form.listing_id.value + '? This does not charge or cancel anything.')) return;
+            const token = document.querySelector('meta[name="csrf-token"]');
             const response = await fetch('/api/admin/billing/match', {
                 method: 'POST', credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : '' },
                 body: JSON.stringify({
                     stripe_subscription_id: form.getAttribute('data-match'),
                     listing_id: Number(form.listing_id.value),
+                    confirm: true,
                 }),
             });
             const body = await response.json().catch(function () { return {}; });
@@ -593,9 +610,13 @@ async function loadAdminBilling() {
     });
     list.querySelectorAll('[data-cancel-billing]').forEach(function (button) {
         button.addEventListener('click', async function () {
-            if (!window.confirm('Cancel this subscription? Future charges stop. A collected charge is not refunded.')) return;
+            const who = button.getAttribute('data-who') || button.getAttribute('data-cancel-billing');
+            if (!window.confirm('Cancel ' + who + '? Future charges stop when Stripe confirms. A collected charge is not refunded.')) return;
+            const token = document.querySelector('meta[name="csrf-token"]');
             const response = await fetch('/api/admin/billing/' + encodeURIComponent(button.getAttribute('data-cancel-billing')) + '/cancel', {
                 method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : '' },
+                body: JSON.stringify({ confirm: true }),
             });
             const body = await response.json().catch(function () { return {}; });
             if (!response.ok) { alert(body.message || 'Stripe could not cancel this subscription. Try again.'); return; }
