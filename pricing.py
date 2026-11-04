@@ -33,20 +33,11 @@ def listing_price(now: datetime | None = None) -> dict:
     """Display payload for the listing form and for Stripe."""
     cents = listing_price_cents(now)
     promotional = cents != LISTING_FEE_CENTS
-    if promotional:
-        label = (
-            '$14.99 per month through December 31, 2026. '
-            'A new listing on or after January 1, 2027 is $49.99 per month. '
-            'A subscription already started keeps its price. '
-            'Canceling stops future charges and does not refund a charge already collected. '
-            'A listing fee is non-refundable once the listing is approved and published.'
-        )
-    else:
-        label = (
-            '$49.99 per month, billed until you cancel. '
-            'Canceling stops future charges and does not refund a charge already collected. '
-            'A listing fee is non-refundable once the listing is approved and published.'
-        )
+    label = (
+        'A purchase bought with a discount does not expire. '
+        'No price change will come. '
+        'Wait 1-5 business days for approval.'
+    )
     return {
         'currency': 'usd',
         'amount_cents': cents,

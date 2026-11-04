@@ -162,6 +162,51 @@
         font-weight: 700;
         white-space: nowrap;
     }
+    .roster { list-style: none; padding: 0; margin: 0.85rem 0 0; display: grid; gap: 0.45rem; }
+    .roster li {
+        display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline;
+        padding: 0.7rem 0.85rem; border-radius: 14px; background: rgba(255,255,255,0.04);
+        color: #fff;
+    }
+    .roster span { color: #F05545; font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; }
+    .broker-panel {
+        grid-column: 1 / -1;
+        margin-top: 0.4rem;
+        padding: 1.25rem 1.3rem 1.35rem;
+        border-radius: 22px;
+        background:
+            radial-gradient(420px 160px at 100% 0%, rgba(240,85,69,0.22), transparent 60%),
+            linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+        border: 1px solid rgba(255,255,255,0.1);
+    }
+    .broker-panel h2 {
+        margin: 0.2rem 0 0.45rem;
+        color: #fff;
+        font-family: Georgia, "Iowan Old Style", Palatino, serif;
+        font-size: 1.85rem;
+        font-weight: 500;
+        letter-spacing: -0.03em;
+    }
+    .broker-panel p { margin: 0; color: #e4e0d8; line-height: 1.5; max-width: 62ch; }
+    .broker-panel__kicker {
+        margin: 0;
+        color: #F05545;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+    }
+    .broker-panel__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; align-items: center; }
+    .broker-panel__fields { display: grid; grid-template-columns: 1.4fr 1fr 0.7fr; gap: 0.55rem; margin-top: 0.9rem; }
+    .broker-panel__fields input, .broker-panel select {
+        background: #111; color: #fff; border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 12px; padding: 0.7rem 0.8rem;
+    }
+    .broker-panel .dash__btn--primary { background: #F05545; color: #fff; border: 0; border-radius: 999px; padding: 0.75rem 1.15rem; font-weight: 700; cursor: pointer; }
+    .broker-panel .dash__btn--ghost { background: transparent; color: #fff; border: 0; padding: 0.75rem 0.4rem; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    @media (max-width: 720px) {
+        .broker-panel__fields { grid-template-columns: 1fr; }
+    }
     @media (max-width: 640px) {
         .identity__body { grid-template-columns: 1fr; padding: 0 1.15rem 1.5rem; }
         .identity__name { margin-top: 0.85rem; font-size: 2.4rem; }
@@ -220,9 +265,9 @@
             {% endif %}
             {% if team_people %}
             <p class="identity__line">Brokers at {{ membership.name or brokerage or 'this brokerage' }}</p>
-            <ul style="list-style:none; padding:0; margin:0.2rem 0 0;">
+            <ul class="roster">
                 {% for person in team_people %}
-                <li style="margin-bottom:0.25rem; color:#fff;">{{ person.name }}{% if person.is_admin %} · Main{% endif %}{% if person.specialties %} · {{ person.specialties }}{% endif %}</li>
+                <li>{{ person.name }}{% if person.specialties %} · {{ person.specialties }}{% endif %}<span>{% if person.is_admin %}Brokerage{% else %}Broker{% endif %}</span></li>
                 {% endfor %}
             </ul>
             {% endif %}
@@ -274,38 +319,55 @@
         {% set paid_broker = subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team'] %}
         {% set broker_approved = (user.profile_role or '') == 'broker' and (user.broker_application_status or '') == 'approved' %}
         {% set broker_live = on_team or (paid_broker and broker_approved) %}
-        <div style="margin-top:1rem;">
+        <div class="broker-panel">
                 {% if broker_live and membership and membership.is_admin %}
+                <p class="broker-panel__kicker">Brokerage</p>
+                <h2>{{ membership.name or brokerage or 'Your brokerage' }}</h2>
                 <p class="broker-status">Subscription is active.</p>
-                <p class="identity__line">Approve and remove people in Manage members.</p>
+                <p>This account is the brokerage. It has the same access as a broker. Add brokers in Manage members. They do not pay.</p>
                 {% elif broker_live %}
+                <p class="broker-panel__kicker">Broker</p>
+                <h2>{{ membership.name or 'Your brokerage' }}</h2>
                 <p class="broker-status">Subscription is active.</p>
+                <p>You are a broker on this brokerage. The brokerage pays. Your seat does not.</p>
                 {% elif paid_broker and not broker_approved %}
-                <p class="identity__line">Payment received. This brokerage is waiting for approval.</p>
+                <p class="broker-panel__kicker">Brokerage</p>
+                <h2>Payment received</h2>
+                <p>Payment received. This brokerage is waiting for approval.</p>
                 {% elif membership and membership.is_admin %}
-                <p class="identity__line">Pay $19.99 a month to activate this account. A team seat is free until you approve it.</p>
-                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Pay $19.99 a month</button>
-                {% elif membership and membership.membership_status == 'pending' %}
-                <p class="identity__line">Waiting for {{ membership.name }} to approve you.</p>
-                {% else %}
-                <p class="identity__line">The main account pays $19.99 a month. A team seat is free until that account approves you.</p>
-                <label style="color:#fff; display:block; margin:0.4rem 0;"><input type="radio" name="broker-path" value="main" checked> I am the main brokerage</label>
-                <label style="color:#fff; display:block; margin:0.4rem 0 0.7rem;"><input type="radio" name="broker-path" value="assign"> Assign me to a team</label>
-                <div id="broker-main-fields" style="display:grid; gap:0.45rem; max-width:360px;">
-                    <input class="form-control" id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}">
-                    <input class="form-control" id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}">
-                    <input class="form-control" id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}">
-                    <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer; width:max-content;">Pay $19.99 a month</button>
+                <p class="broker-panel__kicker">Brokerage</p>
+                <h2>Become a broker</h2>
+                <p>Pay $19.99 a month to activate this brokerage. A brokerage has the same access as a broker. Brokers you add do not pay.</p>
+                <div class="broker-panel__actions">
+                    <button type="button" class="dash__btn dash__btn--primary" id="become-broker">Become a broker</button>
                 </div>
+                {% elif membership and membership.membership_status == 'pending' %}
+                <p class="broker-panel__kicker">Broker</p>
+                <h2>Waiting for {{ membership.name }}</h2>
+                <p>Waiting for {{ membership.name }} to approve you. There is no payment for a broker added to a brokerage.</p>
+                {% else %}
+                <p class="broker-panel__kicker">Brokerage</p>
+                <h2>Become a broker</h2>
+                <p>Pay $19.99 a month. You become the brokerage, with the same access as a broker. A broker added to your brokerage does not pay.</p>
+                <div class="broker-panel__fields">
+                    <input id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}" aria-label="Brokerage name">
+                    <input id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}" aria-label="City">
+                    <input id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}" aria-label="State">
+                </div>
+                <div class="broker-panel__actions">
+                    <button type="button" class="dash__btn dash__btn--primary" id="become-broker">Become a broker</button>
+                    <button type="button" class="dash__btn dash__btn--ghost" id="show-join">Join a brokerage</button>
+                </div>
+                <p id="broker-cta-status" class="identity__line"></p>
                 <div id="broker-assign-fields" hidden>
                     {% if teams %}
-                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                        <select class="form-select" id="join-team" style="max-width:280px;">
+                    <div class="broker-panel__actions">
+                        <select id="join-team" aria-label="Brokerage">
                             {% for team in teams %}
                             <option value="{{ team.id }}">{{ team.name }}{% if team.location %} · {{ team.location }}{% endif %}</option>
                             {% endfor %}
                         </select>
-                        <button type="button" class="dash__btn dash__btn--secondary" id="request-join" style="border:0; cursor:pointer;">Assign me to this team</button>
+                        <button type="button" class="dash__btn dash__btn--primary" id="request-join">Ask to join</button>
                     </div>
                     {% else %}
                     <p class="identity__line">No paid brokerage is on the map yet.</p>
@@ -423,18 +485,24 @@
             window.location.href = '/';
         });
     }
-    document.querySelectorAll('input[name="broker-path"]').forEach(function (input) {
-        input.addEventListener('change', function () {
-            const main = document.getElementById('broker-main-fields');
+    const showJoin = document.getElementById('show-join');
+    if (showJoin) {
+        showJoin.addEventListener('click', function () {
             const assign = document.getElementById('broker-assign-fields');
-            if (main) main.hidden = input.value !== 'main' || !input.checked;
-            if (assign) assign.hidden = input.value !== 'assign' || !input.checked;
+            if (assign) assign.hidden = !assign.hidden;
         });
-    });
+    }
     const becomeBroker = document.getElementById('become-broker');
     if (becomeBroker) becomeBroker.addEventListener('click', async function (event) {
         event.preventDefault();
-        const status = document.getElementById('profile-save-status');
+        const status = document.getElementById('broker-cta-status') || document.getElementById('profile-save-status');
+        const name = (document.getElementById('brokerage-name') || {}).value || '';
+        const city = (document.getElementById('brokerage-city') || {}).value || '';
+        const state = (document.getElementById('brokerage-state') || {}).value || '';
+        if (document.getElementById('brokerage-name') && (!name.trim() || !city.trim() || !state.trim())) {
+            if (status) status.textContent = 'Add the brokerage name, city, and state.';
+            return;
+        }
         const response = await fetch('/api/account/broker-application', {
             method: 'POST',
             credentials: 'include',
@@ -453,7 +521,7 @@
     const requestJoin = document.getElementById('request-join');
     if (requestJoin) {
         requestJoin.addEventListener('click', async function () {
-            const status = document.getElementById('profile-save-status');
+            const status = document.getElementById('broker-cta-status') || document.getElementById('profile-save-status');
             const teamId = document.getElementById('join-team').value;
             const resp = await fetch('/api/account/broker-application', {
                 method: 'POST',

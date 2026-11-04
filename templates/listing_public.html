@@ -46,6 +46,7 @@
     .showroom__notes { color: #ddd; margin-top: 1rem; line-height: 1.55; }
     .showroom__notes summary { cursor: pointer; color: #f4f4f4; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.85rem; }
     .showroom__notes p { margin: 0.55rem 0 0; white-space: pre-wrap; }
+    .showroom__number { margin: 0.45rem 0 0; color: #9a9a9a; font-size: 0.72rem; letter-spacing: 0.04em; }
     .showroom__send { margin-top: 1.25rem; display: grid; gap: 0.55rem; }
     .showroom__send textarea, .showroom__send select {
         background: #111; color: #fff; border: 1px solid #404040; border-radius: 8px; padding: 0.6rem 0.7rem;
@@ -96,12 +97,11 @@
                 {% if listing.hours is not none %}<div class="showroom__stat"><span>Airframe</span><b>{{ '{:,.0f}'.format(listing.hours or 0) }} hrs</b></div>{% endif %}
                 {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}
             </div>
-            {% if listing.description %}
             <details class="showroom__notes">
                 <summary>Seller notes</summary>
-                <p>{{ listing.description }}</p>
+                <p class="showroom__number">{{ listing.id }}</p>
+                {% if seller_notes %}<p>{{ seller_notes }}</p>{% endif %}
             </details>
-            {% endif %}
             {% if listing.avionics or listing.paint_year or listing.interior_year %}
             <p class="showroom__notes">
                 {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}

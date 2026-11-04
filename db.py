@@ -2919,6 +2919,26 @@ def record_listing_audit(listing_id, actor_id, action, previous_status, new_stat
         return row.id
 
 
+def resubmitted_listing_ids(listing_ids):
+    """Listing ids that were sent back to approval after an earlier review."""
+    ids = []
+    for listing_id in listing_ids or []:
+        try:
+            ids.append(int(listing_id))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return set()
+    with get_session() as s:
+        rows = (
+            s.query(ListingAudit.listing_id)
+            .filter(ListingAudit.listing_id.in_(ids), ListingAudit.action == 'resubmit')
+            .distinct()
+            .all()
+        )
+        return {int(row[0]) for row in rows}
+
+
 def list_listing_audits(listing_id, limit=50):
     with get_session() as s:
         rows = (
@@ -3803,7 +3823,7 @@ def listings_for_user(user_id, include_off_market=False):
         out = []
         for row in rows:
             market = (row.market or 'public').lower()
-            if market in ('private',):
+            if market in ('private',) or row.paused:
                 continue
             if market in ('off_market', 'broker_only') and not include_off_market:
                 continue
@@ -3822,11 +3842,30 @@ def listings_for_user(user_id, include_off_market=False):
                 'city': city,
                 'state': state,
                 'place': place,
+                'location': row.location or '',
                 'serial_number': row.serial_number or '',
+                'registration': row.registration or '',
+                'variant': row.variant or '',
                 'year': row.year,
-                'engine_type': row.engine_type or '',
-                'manufacturer': row.manufacturer or '',
+                'hours': row.hours,
+                'engine_type': row.engine_type or profile_data.get('engine_type') or '',
+                'engine_program': row.engine_program or '',
+                'engine_hours': row.engine_hours,
+                'engine_cycles': row.engine_cycles,
+                'manufacturer': row.manufacturer or profile_data.get('manufacturer') or '',
+                'avionics': row.avionics or '',
+                'paint_year': row.paint_year,
+                'interior_year': row.interior_year,
+                'passenger_config': row.passenger_config or '',
+                'maintenance_status': row.maintenance_status or '',
+                'description': row.description or '',
+                'listing_intent': row.listing_intent or 'sale',
                 'market': market,
+                'range': profile_data.get('range'),
+                'speed': profile_data.get('speed'),
+                'passengers': profile_data.get('passengers'),
+                'cabin_volume': profile_data.get('cabin_volume'),
+                'category': profile_data.get('category') or '',
             })
         return out
 

@@ -123,9 +123,13 @@ def public_listing(listing_id):
     if owner:
         seller_name = ' '.join(part for part in [owner.get('first_name'), owner.get('last_name')] if part)
     brokers = [broker for broker in db_module.list_approved_brokers() if broker.get('id') != row.get('user_id')]
+    seller_notes = '\n'.join(
+        line for line in (row.get('description') or '').splitlines()
+        if not line.strip().lower().startswith('listing number:')
+    ).strip()
     return render_template(
         'listing_public.html', listing=row, profile=profile, media=media,
-        seller_name=seller_name or 'Seller', brokers=brokers,
+        seller_name=seller_name or 'Seller', brokers=brokers, seller_notes=seller_notes,
     )
 
 

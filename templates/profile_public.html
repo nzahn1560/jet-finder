@@ -11,10 +11,28 @@
     .fold__tools { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; }
     .fold__tools input, .fold__tools select { background: #111; color: #fff; border: 1px solid #333; padding: 0.55rem 0.7rem; font-size: 1.05rem; }
     .fold__tools input { flex: 1; }
-    .sale-card { display: block; background: #161616; color: #f4f4f4; padding: 1rem 1.1rem; margin-bottom: 0.7rem; text-decoration: none; border: 1px solid transparent; }
-    .sale-card:hover { color: #fff; border-color: #F05545; }
-    .sale-card h3 { margin: 0 0 0.3rem; font-size: 1.35rem; }
-    .sale-card p { margin: 0; font-size: 1.1rem; color: #e4e4e4; }
+    .sale-card { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 1rem; background: #161616; color: #f4f4f4; padding: 1rem; margin-bottom: 0.85rem; border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; }
+    .sale-card:hover { border-color: #F05545; }
+    .sale-card img { width: 100%; height: 160px; object-fit: cover; border-radius: 12px; background: #111; }
+    .sale-card h3 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+    .sale-card h3 a { color: #fff; text-decoration: none; }
+    .sale-card h3 a:hover { color: #F05545; }
+    .sale-card .price { margin: 0 0 0.7rem; color: #F05545; font-size: 1.45rem; font-weight: 700; }
+    .sale-card dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.55rem 0.8rem; margin: 0; }
+    .sale-card dt { color: #9d9d9d; font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; }
+    .sale-card dd { margin: 0.15rem 0 0; color: #f7f4ef; }
+    .sale-card .notes { margin: 0.8rem 0 0; color: #e6e1d8; line-height: 1.5; white-space: pre-wrap; }
+    .sale-card .listing-no { margin: 0.7rem 0 0; color: #9d9d9d; font-size: 0.72rem; letter-spacing: 0.04em; }
+    .profile-listings { margin-top: 0.5rem; }
+    @media (max-width: 700px) { .sale-card { grid-template-columns: 1fr; } }
+    .profile-listings h2 {
+        margin: 0 0 0.8rem;
+        color: #fff;
+        font-family: Georgia, "Iowan Old Style", Palatino, serif;
+        font-size: 1.8rem;
+        font-weight: 500;
+    }
+    .profile-listings a.manage { color: #fff; margin-left: 0.8rem; }
 </style>
 {% endblock %}
 
@@ -22,6 +40,94 @@
 <div class="profile-page">
     <div class="profile-page__inner">
         {% include '_profile_card.html' %}
+        <section class="profile-listings" data-person="{{ user.id }}" data-owner="{{ 1 if is_owner else 0 }}">
+            <h2>Listings</h2>
+            <div id="profile-listings"></div>
+        </section>
     </div>
 </div>
+<script>
+(function () {
+    const section = document.querySelector('.profile-listings');
+    const list = document.getElementById('profile-listings');
+    if (!section || !list) return;
+    const owner = section.getAttribute('data-owner') === '1';
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    fetch('/api/people/' + section.getAttribute('data-person') + '/listings', { credentials: 'include' })
+        .then(function (response) { return response.ok ? response.json() : { listings: [] }; })
+        .then(function (data) {
+            const rows = data.listings || [];
+            if (!rows.length) {
+                list.innerHTML = '<p style="color:#c8c8c8;margin:0;">Nothing listed yet.</p>';
+                return;
+            }
+            function fact(label, value) {
+                if (value == null || value === '') return '';
+                return '<div><dt>' + esc(label) + '</dt><dd>' + esc(value) + '</dd></div>';
+            }
+            function money(value) {
+                const amount = Number(value);
+                return amount > 0 ? '$' + amount.toLocaleString() : '';
+            }
+            function notesBody(text) {
+                return String(text || '').split('\n').filter(function (line) {
+                    return line.trim().toLowerCase().indexOf('listing number:') !== 0;
+                }).join('\n').trim();
+            }
+            function hours(value) {
+                if (value == null || value === '') return '';
+                return Number(value).toLocaleString() + ' hrs';
+            }
+            list.innerHTML = rows.map(function (row) {
+                const photo = (row.photos && row.photos[0]) || '/static/images/aircraft_placeholder.jpg';
+                const place = row.place || [row.city, row.state].filter(Boolean).join(', ') || row.location;
+                const manage = owner
+                    ? '<a class="manage" href="https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00" target="_blank" rel="noopener">Manage payment</a>'
+                    : '';
+                const who = row.broker_name ? fact('Listed by', row.broker_name) : '';
+                return '<article class="sale-card">'
+                    + '<img src="' + esc(photo) + '" alt="">'
+                    + '<div><h3><a href="/listing/' + row.id + '">' + esc(row.title || 'Listing') + '</a></h3>'
+                    + '<p class="price">' + esc(money(row.price) || 'Price on request') + '</p>'
+                    + '<dl>'
+                    + fact('Location', place)
+                    + fact('Year', row.year)
+                    + fact('Manufacturer', row.manufacturer)
+                    + fact('Model', row.model)
+                    + fact('Variant', row.variant)
+                    + fact('Category', row.category)
+                    + fact('Registration', row.registration)
+                    + fact('Serial', row.serial_number)
+                    + fact('Airframe', hours(row.hours))
+                    + fact('Engines', hours(row.engine_hours))
+                    + fact('Engine cycles', row.engine_cycles)
+                    + fact('Engine', row.engine_type)
+                    + fact('Engine program', row.engine_program)
+                    + fact('Avionics', row.avionics)
+                    + fact('Paint', row.paint_year)
+                    + fact('Interior', row.interior_year)
+                    + fact('Cabin', row.passenger_config)
+                    + fact('Maintenance', row.maintenance_status)
+                    + fact('Range', row.range ? row.range + ' nm' : '')
+                    + fact('Speed', row.speed ? row.speed + ' kts' : '')
+                    + fact('Passengers', row.passengers)
+                    + fact('Cabin volume', row.cabin_volume ? row.cabin_volume + ' cu ft' : '')
+                    + fact('Listing', row.listing_intent === 'wanted' ? 'Wanted' : 'Sale')
+                    + who
+                    + '</dl>'
+                    + '<p class="listing-no">' + esc(row.id) + '</p>'
+                    + (notesBody(row.description) ? '<p class="notes">' + esc(notesBody(row.description)) + '</p>' : '')
+                    + manage
+                    + '</div></article>';
+            }).join('');
+        })
+        .catch(function () {
+            list.innerHTML = '<p style="color:#c8c8c8;margin:0;">Listings could not be loaded.</p>';
+        });
+})();
+</script>
 {% endblock %}

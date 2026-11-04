@@ -72,7 +72,9 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(pricing.listing_price_cents(after), 4999)
         self.assertTrue(pricing.listing_price(promo)['promotional'])
         self.assertFalse(pricing.listing_price(after)['promotional'])
-        self.assertIn('per month', pricing.listing_price(promo)['label'])
+        self.assertIn('does not expire', pricing.listing_price(promo)['label'])
+        self.assertIn('No price change will come', pricing.listing_price(promo)['label'])
+        self.assertIn('1-5 business days', pricing.listing_price(promo)['label'])
 
     def test_login_logout_and_wrong_password(self):
         bad = self.client.post('/api/auth/login', json={'email': 'buyer@example.com', 'password': 'nope-nope'})
@@ -348,6 +350,8 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(public.status_code, 201, public.get_json())
             self.assertTrue(public.get_json()['payment_required'])
             self.assertEqual(public.get_json()['status'], 'unpaid')
+            stored = db_module.get_user_listing_by_id(public.get_json()['id'], active_only=False)
+            self.assertTrue(stored['description'].endswith(f"Listing number: {public.get_json()['id']}"))
             page = self.client.get('/create-listing')
             token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
             blocked = self.client.post(
@@ -366,7 +370,8 @@ class ProductTests(unittest.TestCase):
             self.assertIn(f"listing-{public.get_json()['id']}-user-{self.seller['id']}-sn-5501", url)
             self.assertNotIn('amount_cents=1', url)
             page = self.client.get('/create-listing')
-            self.assertIn(b'opens checkout', page.data)
+            self.assertIn(b'does not expire', page.data)
+            self.assertNotIn(b'opens checkout', page.data)
             self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
             self.assertIn(b'X-CSRF-Token', page.data)
             home = self.client.get('/')
@@ -635,9 +640,10 @@ class ProductTests(unittest.TestCase):
         paid_row = next(row for row in paid_queue.get_json()['listings'] if 'Queue Public' in (row.get('title') or ''))
         self.assertEqual(paid_row.get('payment_status'), 'paid')
         page = self.client.get('/admin')
-        self.assertIn(b'Stripe: ', page.data)
-        self.assertIn(b'Not paid', page.data)
-        self.assertIn(b"label: 'Paid'", page.data)
+        self.assertNotIn(b'Stripe: ', page.data)
+        self.assertNotIn(b'Not paid', page.data)
+        self.assertNotIn(b'The customer name is the company typed at checkout.', page.data)
+        self.assertIn(b'Resubmitted. Already paid', page.data)
         notes = self.client.get('/api/notifications')
         self.assertEqual(notes.status_code, 200)
         note_titles = [row.get('title') for row in notes.get_json()['notifications']]
@@ -766,6 +772,13 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200, again.get_json())
         self.assertFalse(again.get_json()['charged_again'])
         self.assertEqual(again.get_json()['status'], 'pending')
+        mine = self.client.get('/api/listings/me')
+        found = next(item for item in mine.get_json()['listings'] if item['id'] == listing_id)
+        self.assertTrue(found['resubmitted'])
+        self._login('admin@example.com', 'admin-pass-1')
+        queue = self.client.get('/api/admin/listings?status=pending')
+        queued = next(item for item in queue.get_json()['listings'] if item['id'] == listing_id)
+        self.assertTrue(queued['resubmitted'])
 
     def test_turning_paint_off_changes_the_rank(self):
         cards = [
@@ -1667,11 +1680,20 @@ class ProductTests(unittest.TestCase):
                  patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_listing_cancel', 'status': 'active'}), \
                  patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id, **kwargs: deleted.append(sub_id)):
                 removed = self.client.delete(f'/api/listings/{listing_id}')
+            self.assertEqual(removed.status_code, 409, removed.get_json())
+            self.assertIn('Manage payment', removed.get_json().get('message') or '')
+            self.assertEqual(deleted, [])
+            row = db_module.get_listing_with_owner(listing_id)
+            self.assertEqual(row.get('status'), 'active')
+            db_module.save_listing_subscription(
+                user_id=self.seller['id'], listing_id=listing_id, stripe_subscription_id='sub_listing_cancel',
+                status='canceled', match_status='matched',
+            )
+            removed = self.client.delete(f'/api/listings/{listing_id}')
             self.assertEqual(removed.status_code, 200, removed.get_json())
-            self.assertEqual(deleted, ['sub_listing_cancel'])
+            self.assertEqual(deleted, [])
             row = db_module.get_listing_with_owner(listing_id)
             self.assertEqual(row.get('status'), 'deleted')
-            self.assertEqual(row.get('payment_status'), 'canceled')
         finally:
             if previous_key is None:
                 os.environ.pop('STRIPE_SECRET_KEY', None)
@@ -1967,19 +1989,20 @@ class ProductTests(unittest.TestCase):
             with patch.object(app_module.stripe.Subscription, 'retrieve', side_effect=RuntimeError('stripe down')), \
                  patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('delete must not run')):
                 blocked = self.client.delete(f'/api/listings/{first}')
-            self.assertEqual(blocked.status_code, 200, blocked.get_json())
-            self.assertEqual(blocked.get_json().get('billing'), 'cancellation_pending')
-            self.assertTrue(blocked.get_json().get('retry'))
+            self.assertEqual(blocked.status_code, 409, blocked.get_json())
+            self.assertEqual(db_module.get_listing_with_owner(first)['status'], 'active')
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['status'], 'active')
+            removed = self.client.post(f"/api/account/subscriptions/{rows[first]['id']}/cancel")
+            self.assertEqual(removed.status_code, 409, removed.get_json())
+            self.assertIn('billing.stripe.com', removed.get_json().get('portal_url') or '')
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['status'], 'active')
+            db_module.save_listing_subscription(
+                user_id=person['id'], listing_id=first, stripe_subscription_id='sub_bill_one',
+                status='canceled', match_status='matched',
+            )
+            cleared = self.client.delete(f'/api/listings/{first}')
+            self.assertEqual(cleared.status_code, 200, cleared.get_json())
             self.assertEqual(db_module.get_listing_with_owner(first)['status'], 'deleted')
-            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['stripe_subscription_id'], 'sub_bill_one')
-            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['cancellation_status'], 'cancellation_pending')
-            deleted = []
-            with patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_bill_one', 'status': 'active'}), \
-                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id, **kwargs: deleted.append((sub_id, kwargs))):
-                removed = self.client.post(f"/api/account/subscriptions/{rows[first]['id']}/cancel")
-            self.assertEqual(removed.status_code, 200, removed.get_json())
-            self.assertEqual(deleted, [('sub_bill_one', {'prorate': False, 'invoice_now': False})])
-            self.assertIn(db_module.get_listing_with_owner(first)['status'], ('archived', 'deleted'))
             self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['status'], 'canceled')
             self.assertTrue(db_module.list_billing_invoices(stripe_subscription_id='sub_bill_one'))
             with patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_bill_one', 'status': 'canceled'}), \
@@ -2006,7 +2029,10 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/admin')
         self.assertIn(b'Billing', page.data)
         self.assertIn(b'My subscriptions', self.client.get('/dashboard').data)
-        self.assertIn(b'My billing', self.client.get('/dashboard').data)
+        dashboard = self.client.get('/dashboard')
+        self.assertIn(b'My billing', dashboard.data)
+        self.assertIn(b'Manage payment', dashboard.data)
+        self.assertIn(b'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00', dashboard.data)
         billing = self.client.get('/api/admin/billing?q=sub_stranger')
         self.assertEqual(billing.status_code, 200, billing.get_json())
         self.assertTrue(any(row.get('stripe_subscription_id') == 'sub_stranger' for row in billing.get_json()['unmatched']))
@@ -2149,16 +2175,26 @@ class ProductTests(unittest.TestCase):
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_sold'
         try:
             with patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_period_item', 'status': 'active'}), \
-                 patch.object(app_module.stripe.Subscription, 'delete', return_value={'id': 'sub_period_item', 'status': 'canceled'}):
-                sold = self.client.post(f'/api/listings/{listing_id}/sold')
-            self.assertEqual(sold.status_code, 200, sold.get_json())
-            self.assertEqual(sold.get_json().get('billing'), 'canceled')
-            self.assertEqual(db_module.get_listing_with_owner(listing_id)['status'], 'sold')
-            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_keep_jet')['status'], 'active')
-            with patch.object(app_module.stripe.Subscription, 'retrieve', side_effect=RuntimeError('stripe down')), \
                  patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('do not delete')):
-                again = self.client.delete(f'/api/listings/{listing_id}')
+                sold = self.client.post(f'/api/listings/{listing_id}/sold')
+            self.assertEqual(sold.status_code, 409, sold.get_json())
+            self.assertEqual(db_module.get_listing_with_owner(listing_id)['status'], 'active')
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_period_item')['status'], 'active')
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_keep_jet')['status'], 'active')
+            db_module.save_listing_subscription(
+                user_id=self.seller['id'], listing_id=listing_id, stripe_subscription_id='sub_period_item',
+                status='canceled', match_status='matched',
+            )
+            sold = self.client.post(f'/api/listings/{listing_id}/sold')
+            self.assertEqual(sold.status_code, 200, sold.get_json())
+            self.assertEqual(db_module.get_listing_with_owner(listing_id)['status'], 'sold')
+            sold_notes = db_module.list_notifications(self.admin['id'])
+            self.assertTrue(any((note.get('title') or '').startswith('Sold aircraft to approve') for note in sold_notes))
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_keep_jet')['status'], 'active')
+            again = self.client.delete(f'/api/listings/{listing_id}')
             self.assertEqual(again.status_code, 200, again.get_json())
+            removed_notes = db_module.list_notifications(self.admin['id'])
+            self.assertTrue(any((note.get('title') or '').startswith('Deleted aircraft to approve') for note in removed_notes))
         finally:
             if previous_key is None:
                 os.environ.pop('STRIPE_SECRET_KEY', None)

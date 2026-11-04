@@ -3581,6 +3581,12 @@
         white-space: pre-wrap;
     }
 
+    .seller-notes .listing-no {
+        color: #9a9a9a;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+    }
+
     .listing-photo-nav--prev { left: 8px; }
     .listing-photo-nav--next { right: 52px; }
 
@@ -6612,7 +6618,11 @@
         }
 
         const listingTitle = escCard((aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim());
-        const listingDescription = escCard(aircraft.listing_description || aircraft.description || '');
+        const rawNotes = String(aircraft.listing_description || aircraft.description || '');
+        const listingDescription = escCard(rawNotes.split('\n').filter(function (line) {
+            return line.trim().toLowerCase().indexOf('listing number:') !== 0;
+        }).join('\n').trim());
+        const listingNumber = aircraft.is_user_listing ? (aircraft.listing_id || aircraft.id) : '';
         const cityName = String(aircraft.city || '').trim();
         const stateName = String(aircraft.state || '').trim();
         let listingPlace = [cityName, stateName].filter(Boolean).join(', ');
@@ -6710,10 +6720,11 @@
                         }).join('')}
                     </div>
                         
-                        ${listingDescription ? `
+                        ${(listingDescription || listingNumber) ? `
                         <details class="seller-notes">
                             <summary>Seller notes</summary>
-                            <p>${listingDescription}</p>
+                            ${listingNumber ? `<p class="listing-no">${escCard(listingNumber)}</p>` : ''}
+                            ${listingDescription ? `<p>${listingDescription}</p>` : ''}
                         </details>` : ''}
                         
                         <div class="listing-actions">

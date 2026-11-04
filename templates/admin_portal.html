@@ -14,10 +14,12 @@
     .ap__tab.active { background: linear-gradient(135deg, rgba(240,85,69,0.25), rgba(240,85,69,0.1)); color: #F05545; border-color: rgba(240,85,69,0.4); }
     .ap__card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 1.25rem; margin-bottom: 1rem; }
     .ap__row { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: center; }
-    .ap__col { color: #d0d0d0; font-family: 'Rajdhani', sans-serif; font-size: 0.95rem; }
-    .ap__col strong { color: #fff; }
-    .ap__badge { padding: 0.2rem 0.65rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-    .ap__btn { padding: 0.5rem 0.9rem; border-radius: 8px; border: 0; font-weight: 700; font-family: 'Rajdhani', sans-serif; cursor: pointer; }
+    .ap__col { color: #d0d0d0; font-family: 'Rajdhani', sans-serif; font-size: 1.45rem; line-height: 1.35; }
+    .ap__col strong { color: #fff; font-size: 1.7rem; }
+    .ap__badge { padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 1.05rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .ap__listing-no { margin: 0 0 0.35rem; color: #fff; font-size: 4.25rem; font-weight: 800; line-height: 1; letter-spacing: 0.02em; }
+    .ap__resubmitted { margin: 0.35rem 0 0.5rem; color: #f4f4f4; font-size: 1.7rem; font-weight: 800; }
+    .ap__btn { padding: 0.6rem 1rem; border-radius: 8px; border: 0; font-weight: 700; font-size: 1.15rem; font-family: 'Rajdhani', sans-serif; cursor: pointer; }
     .ap__btn--approve { background: #22c55e; color: #000; }
     .ap__btn--reject { background: #ef4444; color: #fff; }
     .ap__btn--secondary { background: rgba(255,255,255,0.1); color: #fff; }
@@ -36,10 +38,10 @@
     .review__top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
     .review__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
     .review__panel { background: #161616; border: 1px solid #2e2e2e; padding: 1.25rem; }
-    .review h2 { margin: 0 0 0.4rem; font-size: 2rem; color: #fff; }
-    .review .ask { font-size: 2.6rem; font-weight: 800; color: #F05545; margin: 0.4rem 0; }
-    .review p { font-size: 1.2rem; margin: 0.25rem 0; color: #e8e8e8; }
-    .review table { width: 100%; border-collapse: collapse; font-size: 1.15rem; }
+    .review h2 { margin: 0 0 0.4rem; font-size: 2.6rem; color: #fff; }
+    .review .ask { font-size: 3.2rem; font-weight: 800; color: #F05545; margin: 0.4rem 0; }
+    .review p { font-size: 1.55rem; margin: 0.3rem 0; color: #e8e8e8; }
+    .review table { width: 100%; border-collapse: collapse; font-size: 1.45rem; }
     .review th, .review td { text-align: left; padding: 0.65rem 0.4rem; border-bottom: 1px solid #333; vertical-align: top; }
     .review th { color: #bdbdbd; font-weight: 600; }
     .review .flag { color: #fbbf24; }
@@ -84,6 +86,7 @@
                     <option value="rejected">Rejected</option>
                     <option value="archived">Archived</option>
                     <option value="deleted">Deleted</option>
+                    <option value="sold">Sold</option>
                     <option value="">All</option>
                 </select>
                 <button class="ap__btn ap__btn--secondary" id="refresh-listings">Refresh</button>
@@ -185,38 +188,13 @@
 // Admin portal: all fetch calls send the jet_session HttpOnly cookie.
 const STATUS_COLORS = {
     pending: '#fbbf24', unpaid: '#fbbf24', changes_requested: '#fbbf24', active: '#22c55e',
-    rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280',
+    rejected: '#ef4444', archived: '#6b7280', draft: '#6b7280', deleted: '#6b7280', sold: '#60a5fa',
 };
 
 function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
     });
-}
-
-function paymentMark(listing) {
-    const off = listing.market === 'off_market' || listing.market === 'broker_only';
-    if (off) return { label: 'No fee', color: '#c8c8c8', paid: 'free' };
-    if (listing.payment_status === 'paid') return { label: 'Paid', color: '#22c55e', paid: 'paid' };
-    const named = {
-        refunded: 'Refunded',
-        refund_recorded: 'Refunded',
-        partially_refunded: 'Partly refunded',
-        canceled: 'Payment ended',
-        disputed: 'Disputed',
-        fraud_review: 'In review',
-    };
-    if (named[listing.payment_status]) return { label: named[listing.payment_status], color: '#fbbf24', paid: 'other' };
-    return { label: 'Not paid', color: '#ef4444', paid: 'unpaid' };
-}
-
-function stripeSearchLine(listing) {
-    const off = listing.market === 'off_market' || listing.market === 'broker_only';
-    if (off) return '';
-    const ref = listing.stripe_reference || '';
-    if (!ref) return '';
-    const customer = listing.stripe_customer_id ? ' · customer ' + listing.stripe_customer_id : '';
-    return '<br><span style="color:#c8c8c8;font-size:0.85rem;">Search Stripe for ' + esc(ref) + esc(customer) + '. The customer name is the company typed at checkout.</span>';
 }
 
 function photoStrip(photos, large) {
@@ -232,8 +210,10 @@ function photoStrip(photos, large) {
     }).join('') + '</div>';
 }
 
-function paymentBadge(mark) {
-    return '<span class="ap__badge" data-stripe="' + mark.paid + '" style="background:' + mark.color + '22; color:' + mark.color + ';">' + esc(mark.label) + '</span>';
+function notesBody(text) {
+    return String(text || '').split('\n').filter(function (line) {
+        return line.trim().toLowerCase().indexOf('listing number:') !== 0;
+    }).join('\n').trim();
 }
 
 const highlightId = new URLSearchParams(window.location.search).get('highlight');
@@ -257,28 +237,27 @@ async function loadAdminListings() {
         target.innerHTML = items.map(function (l) {
             const updateWaiting = l.pending_review && l.status === 'active';
             const color = STATUS_COLORS[l.status] || '#8e8e93';
-            const pay = paymentMark(l);
             const owner = l.owner ? (l.owner.email || (l.owner.first_name + ' ' + l.owner.last_name)) : 'unknown';
             return ''
                 + '<div class="ap__card" data-id="' + l.id + '"' + (String(l.id) === String(highlightId) ? ' style="border-color:#3d6cb5;"' : '') + '>'
                 + '  <div class="ap__row">'
                 + '    <div class="ap__col" style="flex:1;min-width:220px;">'
+                + '      <div class="ap__listing-no">' + esc(l.id) + '</div>'
+                + (l.resubmitted ? '<div class="ap__resubmitted">Resubmitted. Already paid</div>' : '')
                 + '      <strong>' + esc(l.title || l.name || 'Listing #' + l.id) + '</strong><br>'
                 + '      ' + esc(l.manufacturer || '') + ' &middot; ' + esc(l.category || '') + '<br>'
                 + '      $' + (Number(l.price) || 0).toLocaleString()
                 + ' &middot; ' + esc(l.year || 'year n/a')
                 + ' &middot; ' + (Number(l.hours) || 0).toLocaleString() + ' hrs'
                 + ' &middot; ' + esc(l.location || '') + '<br>'
-                + '      <span style="color:#c8c8c8;font-size:0.85rem;">Seller: ' + esc(l.email || owner) + (l.owner && l.owner.company ? ' · ' + esc(l.owner.company) : '') + '</span>'
-                + ' <span style="color:' + pay.color + ';font-weight:700;">Stripe: ' + esc(pay.label) + '</span>'
-                + stripeSearchLine(l)
+                + '      <span>Seller: ' + esc(l.email || owner) + (l.owner && l.owner.company ? ' · ' + esc(l.owner.company) : '') + '</span>'
                 + ((l.market === 'off_market' || l.market === 'broker_only') ? ' <span class="ap__badge" style="background:#F0554522;color:#F05545;">Off market</span>' : '')
-                + (l.description ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(l.description) + '</span>' : '')
+                + (notesBody(l.description) ? '<br><span style="color:#d0d0d0;font-size:0.9rem;">' + esc(notesBody(l.description)) + '</span>' : '')
                 + '    </div>'
-                + '    <div class="ap__col">' + paymentBadge(pay) + ' <span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
+                + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
                 + (l.owner && l.owner.id ? '      <button class="ap__btn ap__btn--approve" data-user-message="' + l.owner.id + '">Message</button>' : '')
-                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '" data-pay="' + pay.paid + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
+                + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>' + (updateWaiting ? 'Reject update' : 'Reject') + '</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="notes" data-id="' + l.id + '">Private note</button>'
@@ -303,7 +282,6 @@ async function loadAdminListings() {
                 event.stopPropagation();
                 const id = btn.getAttribute('data-id');
                 const act = btn.getAttribute('data-act');
-                if (act === 'approve' && btn.getAttribute('data-pay') === 'unpaid' && !confirm('Stripe has not marked this listing paid. Approve it anyway?')) return;
                 let resp;
                 if (act === 'delete') {
                     if (!confirm('Delete this listing? It will leave the marketplace.')) return;
@@ -715,7 +693,6 @@ function money(value) {
 }
 
 let reviewId = null;
-let reviewPay = 'paid';
 
 function reviewRow(label, left, right, flagged) {
     return '<tr' + (flagged ? ' class="flag"' : '') + '><th>' + esc(label) + '</th><td>' + esc(left || '—') + '</td><td>' + esc(right || '—') + '</td></tr>';
@@ -740,21 +717,19 @@ async function openReview(id) {
     const ask = body.listing || {};
     const ref = body.aircraft_data || {};
     const place = [ask.city, ask.state].filter(Boolean).join(', ') || ask.location || '';
-    const pay = paymentMark(ask);
-    reviewPay = pay.paid;
     document.getElementById('review-heading').textContent = ask.title || 'Listing';
     document.getElementById('review-message').value = ask.review_message || '';
     listing.innerHTML = ''
         + photoStrip(ask.photos, true)
-        + '<p style="color:' + pay.color + ';font-size:1.45rem;font-weight:800;margin-bottom:0.6rem;">Stripe: ' + esc(pay.label) + '</p>'
-        + (ask.stripe_reference ? '<p style="color:#c8c8c8;">Search Stripe for ' + esc(ask.stripe_reference) + (ask.stripe_customer_id ? ' · customer ' + esc(ask.stripe_customer_id) : '') + '. The customer name is the company typed at checkout.</p>' : '')
+        + '<p class="ap__listing-no">' + esc(ask.id) + '</p>'
+        + (ask.resubmitted ? '<p class="ap__resubmitted">Resubmitted. Already paid</p>' : '')
         + '<p style="color:#bdbdbd;text-transform:uppercase;letter-spacing:0.04em;">This listing</p>'
         + '<h2>' + esc(ask.title || '') + '</h2>'
         + '<div class="ask">' + money(ask.price) + '</div>'
         + '<p>' + esc(ask.year || 'Year not set') + ' · ' + (Number(ask.hours) || 0).toLocaleString() + ' hours</p>'
         + '<p>' + esc(place || 'Location not set') + (ask.serial_number ? ' · S/N ' + esc(ask.serial_number) : '') + '</p>'
         + '<p>' + esc(ask.manufacturer || '') + '</p>'
-        + '<p>' + esc(ask.description || '') + '</p>'
+        + '<p>' + esc(notesBody(ask.description)) + '</p>'
         + '<p style="color:#bdbdbd;">Seller ' + esc(ask.email || '') + '</p>'
         + (ask.pending_review ? '<p class="flag">This update is not on the listing yet. Approve it to publish these changes. Reject it and the live listing stays as it is.</p>' : '')
         + (ask.currently_live ? '<p>Currently live: ' + esc(ask.currently_live) + '</p>' : '')
@@ -814,7 +789,6 @@ document.getElementById('review-send').addEventListener('click', async function 
 });
 document.getElementById('review-approve').addEventListener('click', async function () {
     if (!reviewId) return;
-    if (reviewPay === 'unpaid' && !confirm('Stripe has not marked this listing paid. Approve it anyway?')) return;
     const response = await fetch('/api/admin/listings/' + reviewId + '/approve', { method: 'POST', credentials: 'include' });
     if (response.ok) { closeReview(); loadAdminListings(); }
 });
@@ -913,6 +887,11 @@ document.getElementById('refresh-listings').addEventListener('click', loadAdminL
     if (!u || !u.is_admin) {
         document.querySelector('.ap__inner').innerHTML = '<h1 class="ap__title">Admin access required</h1><p class="ap__sub">Your account is not an admin.</p>';
         return;
+    }
+    const requested = new URLSearchParams(window.location.search).get('status');
+    const filter = document.getElementById('status-filter');
+    if (requested && filter && Array.from(filter.options).some(function (option) { return option.value === requested; })) {
+        filter.value = requested;
     }
     loadAdminListings();
 })();
