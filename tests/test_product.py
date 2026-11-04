@@ -120,7 +120,8 @@ class ProductTests(unittest.TestCase):
         })
         self.assertEqual(created.status_code, 201, created.get_json())
         self.assertEqual(created.get_json()['user']['profile_role'], 'buyer')
-        self.assertTrue(created.get_json().get('broker_checkout_required'))
+        self.assertFalse(created.get_json().get('broker_checkout_required'))
+        self.assertNotEqual(created.get_json()['user'].get('broker_application_status'), 'pending')
         blocked = self.client.get('/off-market')
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
@@ -144,14 +145,11 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(user['broker_specialties'], 'Citation, King Air')
         self.assertEqual(user['broker_years'], 14)
         form = self.client.get('/register')
-        self.assertIn(b'Sign up as a broker', form.data)
-        self.assertIn(b'The main account pays $19.99 a month', form.data)
-        self.assertIn(b'A team seat is free until that account approves you', form.data)
-        self.assertIn(b'Aircraft specialty', form.data)
-        self.assertIn(b'Years in business', form.data)
+        self.assertNotIn(b'Sign up as a broker', form.data)
+        self.assertNotIn(b'broker-signup-check', form.data)
+        self.assertNotIn(b'I am signing up as a broker', form.data)
         opened = self.client.get('/register?broker=1')
-        self.assertIn(b'id="broker-signup-check"', opened.data)
-        self.assertIn(b'checked', opened.data)
+        self.assertNotIn(b'broker-signup-check', opened.data)
         profile = self.client.get('/dashboard')
         self.assertIn(b'Citation, King Air', profile.data)
         self.assertIn(b'Years in business', profile.data)
@@ -167,11 +165,10 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Gulfstream', shown.data)
         self.assertIn(b'21', shown.data)
 
-    def test_broker_signup_collects_the_paid_main_account_or_a_free_team(self):
-        page = self.client.get('/register?broker=1')
-        self.assertIn(b'Northstar', page.data)
-        self.assertIn(b'Sign up as a broker', page.data)
-        self.assertNotIn(b'Become a broker', page.data)
+    def test_signup_does_not_open_a_broker_account(self):
+        page = self.client.get('/register')
+        self.assertNotIn(b'Sign up as a broker', page.data)
+        self.assertNotIn(b'Northstar', page.data)
         main = self.client.post('/register', data={
             'email': 'main-signup@example.com',
             'password': 'broker-pass-1',
@@ -180,36 +177,17 @@ class ProductTests(unittest.TestCase):
             'company': 'North Hangar',
             'profile_city': 'Dallas',
             'profile_state': 'TX',
+            'profile_role': 'broker',
             'broker_signup': '1',
             'broker_path': 'main',
-            'broker_specialties': 'Citation',
-            'broker_years': '9',
         })
         self.assertEqual(main.status_code, 302)
-        self.assertIn('buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', main.headers['Location'])
+        self.assertNotIn('buy.stripe.com', main.headers['Location'])
+        self.assertTrue(main.headers['Location'].endswith('/profile') or main.headers['Location'].endswith('/dashboard'))
         person = db_module.get_user_by_email('main-signup@example.com')
         self.assertNotEqual(person['profile_role'], 'broker')
-        self.assertEqual(person['broker_application_status'], 'pending')
-        seat = db_module.team_membership(person['id'])
-        self.assertTrue(seat['is_admin'])
-        self.assertNotEqual(seat['subscription_status'], 'active')
-        self.assertEqual(self.client.get('/off-market').status_code, 403)
-        assigned = self.client.post('/register', data={
-            'email': 'join-signup@example.com',
-            'password': 'broker-pass-1',
-            'first_name': 'Join',
-            'last_name': 'Signup',
-            'broker_signup': '1',
-            'broker_path': 'assign',
-            'team_id': str(self.team_id),
-        })
-        self.assertEqual(assigned.status_code, 302)
-        self.assertNotIn('buy.stripe.com', assigned.headers['Location'])
-        joiner = db_module.get_user_by_email('join-signup@example.com')
-        self.assertNotEqual(joiner['profile_role'], 'broker')
-        waiting = db_module.team_membership(joiner['id'])
-        self.assertEqual(waiting['membership_status'], 'pending')
-        self.assertFalse(waiting['is_admin'])
+        self.assertNotEqual(person.get('broker_application_status'), 'pending')
+        self.assertIsNone(db_module.team_membership(person['id']))
         self.assertEqual(self.client.get('/off-market').status_code, 403)
 
     def test_role_alone_does_not_open_off_market(self):
@@ -238,6 +216,41 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(checkout.status_code, 200)
         self.assertTrue(checkout.get_json().get('already'))
 
+    def test_a_team_request_is_approved_by_the_brokerage_not_checkout(self):
+        joiner = self._signup('queue-join@example.com', 'broker-pass-1', 'buyer')
+        self._login(joiner['email'], 'broker-pass-1')
+        asked = self.client.post('/api/account/broker-application', json={
+            'kind': 'assign', 'team_id': self.team_id,
+        })
+        self.assertEqual(asked.status_code, 200, asked.get_json())
+        self.assertNotIn('url', asked.get_json())
+        self.assertFalse(asked.get_json().get('checkout'))
+        self.assertNotEqual(db_module.get_user_by_id(joiner['id']).get('broker_application_status'), 'pending')
+        self.assertNotEqual(db_module.get_user_by_id(joiner['id'])['profile_role'], 'broker')
+        self._login('admin@example.com', 'admin-pass-1')
+        queued = [row['id'] for row in self.client.get('/api/admin/approvals').get_json()['brokers']]
+        self.assertNotIn(joiner['id'], queued)
+        self._login('broker@example.com', 'broker-pass-1')
+        notes = self.client.get('/api/notifications').get_json()['notifications']
+        self.assertTrue(any('join' in (note.get('title') or '').lower() for note in notes))
+        account = self.client.get('/dashboard')
+        self.assertIn(b'Manage members', account.data)
+        team = self.client.get('/api/account/team')
+        self.assertEqual(team.status_code, 200, team.get_json())
+        self.assertEqual(team.get_json()['pending'][0]['user_id'], joiner['id'])
+        allowed = self.client.post(f'/api/broker-teams/{self.team_id}/members/{joiner["id"]}/allow')
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        self.assertEqual(db_module.get_user_by_id(joiner['id'])['profile_role'], 'broker')
+        office = self.client.get('/brokers')
+        self.assertIn(b'Northstar', office.data)
+        self.assertIn(b'Buyer', office.data)
+        self.assertNotIn(f'"pin_id": "broker-{joiner["id"]}"'.encode(), office.data)
+        self.assertIn(b'Brokers at Northstar', self.client.get(f'/people/{self.broker["id"]}').data)
+        removed = self.client.delete(f'/api/broker-teams/{self.team_id}/members/{joiner["id"]}')
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        self.assertNotEqual(db_module.get_user_by_id(joiner['id'])['profile_role'], 'broker')
+        self.assertIsNone(db_module.team_membership(joiner['id']))
+
     def test_a_broker_is_added_by_a_paid_account_and_listings_follow(self):
         applicant = self._signup('assign-me@example.com', 'broker-pass-1', 'seller')
         self._login(applicant['email'], 'broker-pass-1')
@@ -263,10 +276,11 @@ class ProductTests(unittest.TestCase):
         listing_id = created.get_json()['id']
         db_module.admin_approve_listing_any(listing_id, self.admin['id'])
         own = self.client.get(f'/api/people/{applicant["id"]}/listings')
-        self.assertEqual(own.get_json()['listings'][0]['title'], 'Team Jet')
+        self.assertTrue(own.get_json()['listings'][0]['title'].startswith('2018 '))
+        self.assertIn('Team Jet', own.get_json()['listings'][0]['title'])
         office = self.client.get(f'/api/people/{self.broker["id"]}/listings')
         office_rows = office.get_json()['listings']
-        team_jet = next(row for row in office_rows if row['title'] == 'Team Jet')
+        team_jet = next(row for row in office_rows if 'Team Jet' in row['title'])
         self.assertEqual(team_jet['broker_name'], 'Seller')
         page = self.client.get(f'/people/{self.broker["id"]}')
         self.assertIn(b'Broker', page.data)
@@ -324,15 +338,30 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(public.status_code, 201, public.get_json())
             self.assertTrue(public.get_json()['payment_required'])
             self.assertEqual(public.get_json()['status'], 'unpaid')
-            pay = self.client.post(f"/api/listings/{public.get_json()['id']}/checkout")
+            import app as app_module
+            created_sessions = []
+
+            def create_session(**kwargs):
+                created_sessions.append(kwargs)
+                return type('Session', (), {'id': 'cs_paywall', 'url': 'https://checkout.stripe.com/c/pay/cs_paywall'})()
+
+            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
+                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_paywall'}), \
+                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_paywall'}), \
+                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
+                pay = self.client.post(f"/api/listings/{public.get_json()['id']}/checkout", json={'amount_cents': 1})
             self.assertEqual(pay.status_code, 200, pay.get_json())
-            self.assertIn('buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', pay.get_json().get('url') or '')
-            self.assertIn(f"listing-{public.get_json()['id']}-user-", pay.get_json().get('url') or '')
-            self.assertIn('-sn-5501', pay.get_json().get('url') or '')
+            self.assertEqual(pay.get_json().get('url'), 'https://checkout.stripe.com/c/pay/cs_paywall')
+            self.assertEqual(created_sessions[0]['line_items'][0]['price_data']['unit_amount'], 4999)
+            self.assertEqual(created_sessions[0]['metadata']['listing_id'], str(public.get_json()['id']))
+            self.assertEqual(created_sessions[0]['metadata']['user_id'], str(self.seller['id']))
+            self.assertEqual(created_sessions[0]['subscription_data']['metadata']['listing_id'], str(public.get_json()['id']))
+            self.assertEqual(created_sessions[0]['metadata']['serial_number'], '5501')
+            self.assertNotIn('payment_method_types', created_sessions[0])
             page = self.client.get('/create-listing')
             self.assertIn(b'opens checkout', page.data)
-            self.assertIn(b'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', page.data)
-            self.assertIn(b'window.location.href = payUrl.toString()', page.data)
+            self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
+            self.assertNotIn(b'buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', page.data)
             self.assertIn(b'There is no listing fee', page.data)
             self._login('broker@example.com', 'broker-pass-1')
             sale = self.client.post('/api/listings', json=dict(
@@ -372,7 +401,8 @@ class ProductTests(unittest.TestCase):
         })
         self.assertEqual(created.status_code, 201, created.get_json())
         row = db_module.get_listing_with_owner(created.get_json()['id'])
-        self.assertEqual(row['title'], 'Quiet Name')
+        self.assertTrue(row['title'].startswith('2016 '))
+        self.assertIn('Quiet Name', row['title'])
         self.assertEqual(row['year'], 2016)
         self.assertEqual(row.get('listing_intent') or 'sale', 'sale')
         wanted = self.client.post('/api/listings', json={
@@ -546,13 +576,14 @@ class ProductTests(unittest.TestCase):
         self._login('admin@example.com', 'admin-pass-1')
         queue = self.client.get('/api/admin/listings?status=pending')
         self.assertEqual(queue.status_code, 200)
-        rows = {row.get('title'): row for row in queue.get_json()['listings']}
-        self.assertIn('Queue Public', rows)
-        self.assertIn('Queue Off Market', rows)
-        self.assertNotEqual(rows['Queue Public'].get('payment_status'), 'paid')
+        listings = queue.get_json()['listings']
+        public_row = next(row for row in listings if 'Queue Public' in (row.get('title') or ''))
+        off_row = next(row for row in listings if 'Queue Off Market' in (row.get('title') or ''))
+        self.assertNotEqual(public_row.get('payment_status'), 'paid')
+        self.assertEqual(off_row.get('market'), 'broker_only')
         db_module.mark_listing_fee_paid(public.get_json()['id'])
         paid_queue = self.client.get('/api/admin/listings?status=pending')
-        paid_row = next(row for row in paid_queue.get_json()['listings'] if row.get('title') == 'Queue Public')
+        paid_row = next(row for row in paid_queue.get_json()['listings'] if 'Queue Public' in (row.get('title') or ''))
         self.assertEqual(paid_row.get('payment_status'), 'paid')
         page = self.client.get('/admin')
         self.assertIn(b'Stripe: ', page.data)
@@ -582,15 +613,22 @@ class ProductTests(unittest.TestCase):
             'profile_role': 'broker',
         })
         applicant_id = created.get_json()['user']['id']
-        self.assertEqual(created.get_json()['user']['broker_application_status'], 'pending')
+        self.assertNotEqual(created.get_json()['user'].get('broker_application_status'), 'pending')
         self._login('buyer@example.com', 'buyer-pass-1')
         self.assertEqual(self.client.post(f'/api/admin/brokers/{applicant_id}/approve').status_code, 403)
         self._login('admin@example.com', 'admin-pass-1')
         approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
         self.assertEqual(approved.status_code, 402, approved.get_json())
+        db_module.update_user_subscription(applicant_id, 'broker', subscription_status='active', stripe_subscription_id='sub_queue_broker')
+        db_module.set_broker_application(applicant_id, 'pending')
+        approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
+        self.assertEqual(approved.status_code, 200, approved.get_json())
         person = db_module.get_user_by_id(applicant_id)
-        self.assertNotEqual(person['profile_role'], 'broker')
-        self.assertEqual(person['broker_application_status'], 'pending')
+        self.assertEqual(person['profile_role'], 'broker')
+        self.assertEqual(person['broker_application_status'], 'approved')
+        seat = db_module.team_membership(applicant_id)
+        self.assertTrue(seat['is_admin'])
+        self.assertEqual(seat['subscription_status'], 'active')
         queue = self.client.get('/api/admin/approvals')
         self.assertEqual(queue.status_code, 200)
         self._login('seller@example.com', 'seller-pass-1')
@@ -1150,13 +1188,6 @@ class ProductTests(unittest.TestCase):
         )
         return person
 
-    def _stripe_event(self, event_id, event_type, obj):
-        return self.client.post('/api/stripe/webhook', json={
-            'id': event_id,
-            'type': event_type,
-            'data': {'object': obj},
-        })
-
     def test_cancelled_broker_subscription_closes_off_market(self):
         person = self._paid_broker('cancel-broker@example.com', 'sub_cancel_broker')
         self._login(person['email'], 'broker-pass-1')
@@ -1587,7 +1618,8 @@ class ProductTests(unittest.TestCase):
         try:
             with patch.object(app_module.stripe.checkout.Session, 'list', return_value=sessions), \
                  patch.object(app_module.stripe.Subscription, 'list', return_value=subscriptions), \
-                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id: deleted.append(sub_id)):
+                 patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_listing_cancel', 'status': 'active'}), \
+                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id, **kwargs: deleted.append(sub_id)):
                 removed = self.client.delete(f'/api/listings/{listing_id}')
             self.assertEqual(removed.status_code, 200, removed.get_json())
             self.assertEqual(deleted, ['sub_listing_cancel'])
@@ -1698,13 +1730,26 @@ class ProductTests(unittest.TestCase):
             second = self.client.post('/api/listings', json=self._payload('Second Customer Jet', 'public'))
             first_id = first.get_json()['id']
             second_id = second.get_json()['id']
-            pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
-            pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
+            import app as app_module
+            created_sessions = []
+
+            def create_session(**kwargs):
+                created_sessions.append(kwargs)
+                suffix = kwargs['metadata']['listing_id']
+                return type('Session', (), {'id': 'cs_' + suffix, 'url': 'https://checkout.stripe.com/c/pay/cs_' + suffix})()
+
+            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
+                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_one'}), \
+                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_one'}), \
+                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
+                pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
+                pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
             self.assertEqual(pay1.status_code, 200, pay1.get_json())
             self.assertEqual(pay2.status_code, 200, pay2.get_json())
-            self.assertIn('buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', pay1.get_json().get('url') or '')
-            self.assertIn(f'listing-{first_id}-user-{person["id"]}', pay1.get_json().get('url') or '')
-            self.assertIn(f'listing-{second_id}-user-{person["id"]}', pay2.get_json().get('url') or '')
+            self.assertEqual(created_sessions[0]['metadata']['listing_id'], str(first_id))
+            self.assertEqual(created_sessions[1]['metadata']['listing_id'], str(second_id))
+            self.assertEqual(created_sessions[0]['customer'], created_sessions[1]['customer'])
+            self.assertEqual(created_sessions[0]['subscription_data']['metadata']['user_id'], str(person['id']))
             sent = []
             original = db_module._send_notice_email
             db_module._send_notice_email = lambda email, title, body: sent.append((email, title, body)) or True
@@ -1774,7 +1819,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Send message', page.data)
         self.assertIn(b'data-user-message="\' + broker.id', page.data)
         self.assertIn(b'data-user-message="\' + person.id', page.data)
-        self.assertIn(b'data-user-message="\' + member.user_id', page.data)
+        self.assertIn(b'data-user-message="\' + broker.id', page.data)
         self.assertIn(b'data-user-message="\' + l.owner.id', page.data)
         buyers = self.client.get('/api/admin/users?role=buyer&q=account-view')
         self.assertEqual(buyers.status_code, 200)
@@ -1802,6 +1847,169 @@ class ProductTests(unittest.TestCase):
         removed = self.client.delete(f'/api/admin/users/{user_id}')
         self.assertEqual(removed.status_code, 200, removed.get_json())
         self.assertIsNone(db_module.get_user_by_id(user_id))
+
+    def test_listing_billing_is_owned_canceled_and_reconciled_without_stripe(self):
+        import app as app_module
+        person = self._signup('billing-owner@example.com', 'seller-pass-1', 'seller')
+        self._login(person['email'], 'seller-pass-1')
+        first = self.client.post('/api/listings', json=self._payload('Billing One', 'public')).get_json()['id']
+        second = self.client.post('/api/listings', json=self._payload('Billing Two', 'public')).get_json()['id']
+        db_module.admin_approve_listing_any(first, self.admin['id'])
+        db_module.admin_approve_listing_any(second, self.admin['id'])
+        paid = self._stripe_event('evt_bill_one', 'checkout.session.completed', {
+            'id': 'cs_bill_one',
+            'status': 'complete',
+            'payment_status': 'paid',
+            'client_reference_id': f'listing-{first}-user-{person["id"]}',
+            'customer': 'cus_bill',
+            'subscription': 'sub_bill_one',
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(first), 'user_id': str(person['id'])},
+        })
+        self.assertEqual(paid.status_code, 200, paid.get_json())
+        other = self._stripe_event('evt_bill_two', 'customer.subscription.created', {
+            'id': 'sub_bill_two',
+            'object': 'subscription',
+            'status': 'active',
+            'customer': 'cus_bill',
+            'current_period_end': 1893456000,
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(second), 'user_id': str(person['id'])},
+            'items': {'data': [{'price': {'unit_amount': 4999, 'recurring': {'interval': 'month'}}}]},
+        }, created=20)
+        self.assertEqual(other.status_code, 200, other.get_json())
+        rows = {row['listing_id']: row for row in db_module.list_listing_subscriptions(user_id=person['id'])}
+        self.assertEqual(rows[first]['stripe_subscription_id'], 'sub_bill_one')
+        self.assertEqual(rows[second]['stripe_subscription_id'], 'sub_bill_two')
+        self.assertNotEqual(rows[first]['stripe_subscription_id'], rows[second]['stripe_subscription_id'])
+        renewed = self._stripe_event('evt_bill_renew', 'invoice.paid', {
+            'id': 'in_bill_renew',
+            'object': 'invoice',
+            'amount_paid': 4999,
+            'customer': 'cus_bill',
+            'subscription': 'sub_bill_one',
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(first), 'user_id': str(person['id'])},
+        }, created=30)
+        self.assertEqual(renewed.status_code, 200, renewed.get_json())
+        again = self._stripe_event('evt_bill_renew', 'invoice.paid', {
+            'id': 'in_bill_renew',
+            'object': 'invoice',
+            'amount_paid': 4999,
+            'customer': 'cus_bill',
+            'subscription': 'sub_bill_one',
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(first), 'user_id': str(person['id'])},
+        }, created=30)
+        self.assertEqual(again.get_json().get('duplicate'), True)
+        self.assertEqual(len(db_module.list_billing_invoices(user_id=person['id'], stripe_subscription_id='sub_bill_one')), 1)
+        failed = self._stripe_event('evt_bill_fail', 'invoice.payment_failed', {
+            'id': 'in_bill_fail',
+            'object': 'invoice',
+            'amount_due': 4999,
+            'customer': 'cus_bill',
+            'subscription': 'sub_bill_two',
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(second), 'user_id': str(person['id'])},
+        }, created=40)
+        self.assertEqual(failed.status_code, 200, failed.get_json())
+        second_row = db_module.listing_subscription_by_stripe_id('sub_bill_two')
+        self.assertEqual(second_row['status'], 'past_due')
+        self.assertEqual(db_module.get_listing_with_owner(second)['status'], 'active')
+        stale = self._stripe_event('evt_bill_stale', 'customer.subscription.updated', {
+            'id': 'sub_bill_two',
+            'object': 'subscription',
+            'status': 'active',
+            'customer': 'cus_bill',
+            'metadata': {'purpose': 'listing_fee', 'listing_id': str(second), 'user_id': str(person['id'])},
+        }, created=10)
+        self.assertEqual(stale.status_code, 200, stale.get_json())
+        self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_two')['status'], 'past_due')
+        mine = self.client.get('/api/account/subscriptions')
+        self.assertEqual(mine.status_code, 200, mine.get_json())
+        self.assertEqual(len(mine.get_json()['subscriptions']), 2)
+        self._login('buyer@example.com', 'buyer-pass-1')
+        denied = self.client.post(f"/api/account/subscriptions/{rows[first]['id']}/cancel")
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(db_module.get_listing_with_owner(first)['status'], 'active')
+        self._login(person['email'], 'seller-pass-1')
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_billing_cancel'
+        try:
+            with patch.object(app_module.stripe.Subscription, 'retrieve', side_effect=RuntimeError('stripe down')), \
+                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('delete must not run')):
+                blocked = self.client.delete(f'/api/listings/{first}')
+            self.assertEqual(blocked.status_code, 502, blocked.get_json())
+            self.assertTrue(blocked.get_json().get('retry'))
+            self.assertEqual(db_module.get_listing_with_owner(first)['status'], 'active')
+            deleted = []
+            with patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_bill_one', 'status': 'active'}), \
+                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=lambda sub_id, **kwargs: deleted.append((sub_id, kwargs))):
+                removed = self.client.post(f"/api/account/subscriptions/{rows[first]['id']}/cancel")
+            self.assertEqual(removed.status_code, 200, removed.get_json())
+            self.assertEqual(deleted, [('sub_bill_one', {'prorate': False, 'invoice_now': False})])
+            self.assertEqual(db_module.get_listing_with_owner(first)['status'], 'archived')
+            self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_bill_one')['status'], 'canceled')
+            self.assertTrue(db_module.list_billing_invoices(stripe_subscription_id='sub_bill_one'))
+            with patch.object(app_module.stripe.Subscription, 'retrieve', return_value={'id': 'sub_bill_one', 'status': 'canceled'}), \
+                 patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('already canceled')):
+                repeat = self.client.delete(f'/api/listings/{first}')
+            self.assertIn(repeat.status_code, (200, 404))
+        finally:
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
+        stranger = self._stripe_event('evt_bill_stranger', 'customer.subscription.created', {
+            'id': 'sub_stranger',
+            'object': 'subscription',
+            'status': 'active',
+            'customer': 'cus_stranger',
+            'metadata': {},
+        }, created=50)
+        self.assertEqual(stranger.status_code, 200, stranger.get_json())
+        stranger_row = db_module.listing_subscription_by_stripe_id('sub_stranger')
+        self.assertEqual(stranger_row['match_status'], 'unmatched')
+        self.assertIsNone(stranger_row['listing_id'])
+        self._login('admin@example.com', 'admin-pass-1')
+        page = self.client.get('/admin')
+        self.assertIn(b'Billing', page.data)
+        self.assertIn(b'My subscriptions', self.client.get('/dashboard').data)
+        billing = self.client.get('/api/admin/billing?q=sub_stranger')
+        self.assertEqual(billing.status_code, 200, billing.get_json())
+        self.assertTrue(any(row.get('stripe_subscription_id') == 'sub_stranger' for row in billing.get_json()['unmatched']))
+        matched = self.client.post('/api/admin/billing/match', json={
+            'stripe_subscription_id': 'sub_stranger',
+            'listing_id': second,
+        })
+        self.assertEqual(matched.status_code, 200, matched.get_json())
+        self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_stranger')['listing_id'], second)
+        self.assertEqual(db_module.listing_subscription_by_stripe_id('sub_stranger')['user_id'], person['id'])
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_billing_reconcile'
+        try:
+            page = type('Page', (), {'data': [{
+                'id': 'sub_remote_only',
+                'status': 'active',
+                'customer': 'cus_remote',
+                'metadata': {'purpose': 'listing_fee', 'listing_id': str(second), 'user_id': str(person['id'])},
+                'items': {'data': [{'price': {'unit_amount': 4999, 'recurring': {'interval': 'month'}}}]},
+            }], 'has_more': False})()
+            with patch.object(app_module.stripe.Subscription, 'list', return_value=page):
+                reconciled = self.client.post('/api/admin/billing/reconcile')
+            self.assertEqual(reconciled.status_code, 200, reconciled.get_json())
+            self.assertEqual(reconciled.get_json()['canceled'], 0)
+            self.assertGreaterEqual(reconciled.get_json()['matched'], 1)
+        finally:
+            os.environ.pop('STRIPE_SECRET_KEY', None)
+        with db_module.get_session() as session:
+            record = session.query(db_module.ListingSubscription).filter(
+                db_module.ListingSubscription.stripe_subscription_id == 'sub_bill_two'
+            ).first()
+            record.grace_until = datetime(2020, 1, 1)
+        db_module.enforce_listing_grace()
+        self.assertEqual(db_module.get_listing_with_owner(second)['status'], 'suspended')
+        self.assertIsNotNone(db_module.listing_subscription_by_stripe_id('sub_bill_two'))
+
+    def _stripe_event(self, event_id, event_type, obj, created=None):
+        payload = {'id': event_id, 'type': event_type, 'data': {'object': obj}}
+        if created is not None:
+            payload['created'] = created
+        return self.client.post('/api/stripe/webhook', json=payload)
 
     def _payload(self, title, market):
         return {

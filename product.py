@@ -37,13 +37,19 @@ def api_listing_price():
 
 
 def _listing_cards():
+    from app import _listing_title
     profiles = {row.get('id'): row for row in db_module.get_all_aircraft_profiles()}
     cards = []
     for row in db_module.get_active_user_listings():
         profile = profiles.get(row.get('profile_id')) or {}
         cards.append({
             'id': row.get('id'),
-            'title': row.get('title'),
+            'title': _listing_title(
+                row.get('year'),
+                profile.get('aircraft_name') or profile.get('name'),
+                row.get('title'),
+                profile.get('manufacturer') or row.get('manufacturer'),
+            ),
             'manufacturer': row.get('manufacturer') or profile.get('manufacturer'),
             'price': row.get('price'),
             'year': row.get('year'),
@@ -104,6 +110,14 @@ def public_listing(listing_id):
             {'media_type': 'photo', 'url': url.strip()}
             for url in (row.get('images') or '').split(',') if url.strip()
         ] + media
+    from app import _listing_title
+    row = dict(row)
+    row['title'] = _listing_title(
+        row.get('year'),
+        profile.get('aircraft_name') or profile.get('name'),
+        row.get('title'),
+        profile.get('manufacturer') or row.get('manufacturer'),
+    )
     owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
     seller_name = ''
     if owner:

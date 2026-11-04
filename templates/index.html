@@ -4640,7 +4640,7 @@
                                 <div style="color:#888; text-decoration: line-through;">$70</div>
                                 <strong>$49</strong> <span style="background:#F05545; color:#fff; font-size:0.75rem; padding:2px 6px;">30% off</span>
                             </div>
-                            <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-success" id="createListingBtn" role="button">
+                            <a href="#" class="btn btn-success" id="createListingBtn" role="button">
                                 <i class="fas fa-check me-2"></i>Submit listing — $49.99 per month
                             </a>
                         </div>
@@ -8225,6 +8225,23 @@
             if (el && el.tagName === 'SELECT') el.addEventListener('change', function () { renderProfiles(filteredProfiles()); });
         });
 
+        function fillHomepageTitle() {
+            const title = document.getElementById('listingTitle');
+            const yearField = document.getElementById('listingYear');
+            if (!title || !homepageSelectedProfile) return;
+            if (title.value && title.dataset.auto !== '1') return;
+            const year = yearField ? String(yearField.value || '').trim() : '';
+            const model = homepageSelectedProfile.name || '';
+            title.value = (year ? year + ' ' : '') + model;
+            title.dataset.auto = '1';
+        }
+        const homepageTitle = document.getElementById('listingTitle');
+        if (homepageTitle) {
+            homepageTitle.addEventListener('input', function () { homepageTitle.dataset.auto = ''; });
+        }
+        const homepageYear = document.getElementById('listingYear');
+        if (homepageYear) homepageYear.addEventListener('input', fillHomepageTitle);
+
         grid.addEventListener('click', function (event) {
             const btn = event.target.closest('[data-profile-id]');
             if (!btn) return;
@@ -8236,10 +8253,7 @@
                 details.innerHTML = '<strong>' + homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name + '</strong>'
                     + '<div>Range ' + (homepageSelectedProfile.range || 0) + ' nm · Speed ' + (homepageSelectedProfile.speed || 0) + ' kts · Cabin ' + (homepageSelectedProfile.cabin_volume || 0) + ' cu ft</div>';
             }
-            const title = document.getElementById('listingTitle');
-            if (title && homepageSelectedProfile && !title.value) {
-                title.value = (homepageSelectedProfile.manufacturer || '') + ' ' + (homepageSelectedProfile.name || '');
-            }
+            fillHomepageTitle();
             if (continueBtn) continueBtn.disabled = !homepageSelectedProfile;
             renderProfiles(filteredProfiles());
         });
@@ -8283,7 +8297,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         profile_id: homepageSelectedProfile.id,
-                        title: title || (homepageSelectedProfile.manufacturer + ' ' + homepageSelectedProfile.name),
+                        title: title || ((year ? year + ' ' : '') + (homepageSelectedProfile.name || '')),
                         year: year,
                         hours: hours,
                         price: price,
@@ -8313,11 +8327,13 @@
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
                 if (data.payment_required && data.payment_status !== 'paid') {
-                    const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
-                    const serial = serialNumber.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
-                    payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}' + (serial ? '-sn-' + serial : ''));
-                    if (email) payUrl.searchParams.set('prefilled_email', email);
-                    window.location.href = payUrl.toString();
+                    const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
+                    const payData = await pay.json().catch(function () { return {}; });
+                    if (pay.ok && payData.url) {
+                        window.location.href = payData.url;
+                        return;
+                    }
+                    alert(payData.message || 'Checkout could not be started. The listing is saved as a draft.');
                     return;
                 }
                 window.location.href = '/dashboard?submitted=' + data.id + (data.payment_status === 'paid' ? '&paid=confirmed' : '');

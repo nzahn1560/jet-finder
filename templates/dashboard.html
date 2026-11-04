@@ -337,6 +337,31 @@
         </script>
         {% endif %}
 
+        {% if membership and membership.is_admin and membership.subscription_status == 'active' and membership.membership_status == 'active' %}
+        <section class="fold" id="members">
+            <button type="button" class="fold__toggle" id="members-toggle" aria-expanded="false">Manage members</button>
+            <div class="fold__body" id="members-body" hidden>
+                <p style="color:#d0d0d0; margin:0 0 0.8rem;">People who ask to join {{ membership.name or 'this brokerage' }} show up here and in Alerts. Approving them makes them a broker on this team. They do not pay.</p>
+                <div id="member-requests"></div>
+                <div id="member-roster" style="margin-top:0.8rem;"></div>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:1rem;">
+                    <input class="form-control" id="team-member-email" type="email" placeholder="Email of the person to add" style="max-width:280px;">
+                    <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add to the team</button>
+                </div>
+                <p id="members-status" style="color:#c8c8c8; margin:0.6rem 0 0;"></p>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="fold" id="subscriptions">
+            <button type="button" class="fold__toggle" id="subscriptions-toggle" aria-expanded="false">My subscriptions</button>
+            <div class="fold__body" id="subscriptions-body" hidden>
+                <p style="color:#d0d0d0; margin:0 0 0.8rem;">Each aircraft listing has its own monthly fee. Canceling stops future charges and takes that listing off the site. It does not refund a charge already collected.</p>
+                <div id="subscription-list"></div>
+                <p id="subscription-status" style="color:#c8c8c8; margin:0.6rem 0 0;"></p>
+            </div>
+        </section>
+
         <section class="fold" id="messages">
             <button type="button" class="fold__toggle" id="messages-toggle" aria-expanded="false">Messages</button>
             <div class="fold__body" id="messages-body" hidden>
@@ -511,7 +536,7 @@
                 + rej + amendment + review + feeNote + '\n'
                 + '  <div style="margin-top:0.8rem; display:flex; gap:0.75rem; flex-wrap:wrap;">'
                 + (l.status === 'active' ? '<a class="dash__card-link" href="' + (offMarket ? '/off-market' : '/?listing=' + encodeURIComponent(l.id)) + '">' + (offMarket ? 'View off market' : 'View on marketplace') + '</a>' : '')
-                + (feeDraft ? '<a class="dash__card-link" href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01?client_reference_id=' + encodeURIComponent('listing-' + l.id + '-user-{{ user.id }}' + (String(l.serial_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40) ? '-sn-' + String(l.serial_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40) : '')) + '&prefilled_email=' + encodeURIComponent({{ (user.email or '')|tojson }}) + '" style="color:#fbbf24;">Pay $49.99 per month</a>' : '')
+                + (feeDraft ? '<button class="dash__card-link" data-pay="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fbbf24;">Pay $49.99 per month</button>' : '')
                 + ((paidFee || offMarket) && (l.status === 'changes_requested' || l.status === 'rejected' || l.status === 'draft' || l.status === 'suspended' || (l.status === 'pending' && l.review_message)) ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Resubmit for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
@@ -546,6 +571,15 @@
         sellingSearch.addEventListener('input', applySelling);
         sellingSort.addEventListener('change', applySelling);
         applySelling();
+        listEl.querySelectorAll('[data-pay]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+                const id = btn.getAttribute('data-pay');
+                const pay = await fetch('/api/listings/' + id + '/checkout', { method: 'POST', credentials: 'include' });
+                const payData = await pay.json().catch(function () { return {}; });
+                if (pay.ok && payData.url) { window.location.href = payData.url; return; }
+                alert(payData.message || 'Checkout could not be started.');
+            });
+        });
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
                 if (!confirm('Delete this listing? It leaves the site. A monthly fee for this aircraft stops.')) return;
@@ -697,6 +731,76 @@
         statusEl.textContent = 'Could not load saved aircraft.';
         console.error(err);
     }
+})();
+
+(function () {
+    const list = document.getElementById('subscription-list');
+    const status = document.getElementById('subscription-status');
+    if (!list) return;
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    function openFold() {
+        const body = document.getElementById('subscriptions-body');
+        const toggle = document.getElementById('subscriptions-toggle');
+        if (body) body.hidden = false;
+        if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    }
+    async function loadSubscriptions() {
+        const response = await fetch('/api/account/subscriptions', { credentials: 'include' });
+        const data = await response.json().catch(function () { return {}; });
+        const rows = data.subscriptions || [];
+        if (!rows.length) {
+            list.innerHTML = '<p style="color:#d0d0d0;margin:0;">No listing subscriptions yet.</p>';
+            return;
+        }
+        list.innerHTML = rows.map(function (row) {
+            const problem = row.status === 'past_due'
+                ? '<p style="color:#fbbf24;margin:0.35rem 0 0;">Payment failed. This listing stays up until ' + esc(row.grace_until || 'the grace period ends') + '.</p>'
+                : '';
+            const history = (row.invoices || []).map(function (invoice) {
+                return '<li>' + esc(invoice.status) + ' · ' + esc(invoice.amount_cents != null ? ('$' + (invoice.amount_cents / 100).toFixed(2)) : '') + '</li>';
+            }).join('');
+            const canCancel = row.status && row.status !== 'canceled' && row.status !== 'incomplete_expired';
+            return '<article style="border-bottom:1px solid rgba(255,255,255,0.12);padding:0.8rem 0;">'
+                + '<strong>' + esc(row.aircraft || 'Listing') + '</strong>'
+                + '<p style="margin:0.3rem 0;color:#d0d0d0;">Listing ' + esc(row.listing_id) + ' · ' + esc(row.price || '') + ' · ' + esc(row.status) + '</p>'
+                + '<p style="margin:0;color:#d0d0d0;">Next billing ' + esc(row.next_billing_date || '—') + '</p>'
+                + problem
+                + (history ? '<ul style="margin:0.4rem 0 0;color:#d0d0d0;">' + history + '</ul>' : '')
+                + '<div style="display:flex;gap:0.6rem;margin-top:0.5rem;flex-wrap:wrap;">'
+                + (canCancel ? '<button type="button" data-cancel-sub="' + row.id + '" style="background:none;border:0;color:#ef4444;cursor:pointer;">Cancel subscription</button>' : '')
+                + '<button type="button" data-update-card="1" style="background:none;border:0;color:#fff;cursor:pointer;">Update payment method</button>'
+                + '</div></article>';
+        }).join('');
+        list.querySelectorAll('[data-cancel-sub]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                if (!window.confirm('Cancel this subscription? Future charges stop. A charge already collected is not refunded. The listing comes off the site.')) return;
+                button.disabled = true;
+                const response = await fetch('/api/account/subscriptions/' + button.getAttribute('data-cancel-sub') + '/cancel', { method: 'POST', credentials: 'include' });
+                const body = await response.json().catch(function () { return {}; });
+                if (!response.ok) {
+                    button.disabled = false;
+                    if (status) status.textContent = body.message || 'Stripe could not cancel this subscription. Try again.';
+                    return;
+                }
+                if (status) status.textContent = body.message || 'Canceled.';
+                loadSubscriptions();
+            });
+        });
+        list.querySelectorAll('[data-update-card]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include' });
+                const body = await response.json().catch(function () { return {}; });
+                if (body.url) { window.location = body.url; return; }
+                if (status) status.textContent = body.message || 'The card update page could not be opened.';
+            });
+        });
+    }
+    if (location.hash === '#subscriptions') openFold();
+    loadSubscriptions();
 })();
 
 document.querySelectorAll('.fold__toggle').forEach(function (button) {
@@ -869,18 +973,48 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
             return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
         });
     }
+    async function loadTeamRequests() {
+        const response = await fetch('/api/account/team', { credentials: 'include' });
+        if (!response.ok) return { pending: [], teamId: '' };
+        const data = await response.json();
+        return { pending: data.pending || [], teamId: data.team && data.team.id ? data.team.id : '' };
+    }
+    function requestCards(pending, teamId) {
+        if (!pending.length) return '';
+        return pending.map(function (person) {
+            return '<article class="alert-item"><strong>' + esc(person.name) + ' asked to join</strong>'
+                + esc(person.email || '')
+                + '<br><button type="button" class="dash__btn dash__btn--primary" data-approve-member="' + person.user_id + '" data-team="' + teamId + '" style="border:0; cursor:pointer; margin-top:0.45rem;">Approve</button></article>';
+        }).join('');
+    }
+    async function approveMember(userId, button) {
+        const teamId = button.getAttribute('data-team');
+        if (!teamId) return;
+        button.disabled = true;
+        const response = await fetch('/api/broker-teams/' + teamId + '/members/' + userId + '/allow', {
+            method: 'POST', credentials: 'include',
+        });
+        if (!response.ok) { button.disabled = false; return; }
+        loadAlerts();
+        document.dispatchEvent(new Event('jet-team-changed'));
+        if (window.jetLoadMembers) window.jetLoadMembers();
+    }
     async function loadAlerts() {
         const response = await fetch('/api/notifications', { credentials: 'include' });
         if (!response.ok) return;
         const data = await response.json();
         const notes = data.notifications || [];
-        if (clearAlerts) clearAlerts.hidden = !notes.length;
-        toggle.textContent = 'Alerts' + (data.unread ? ' (' + data.unread + ')' : '');
-        if (!notes.length) {
+        const teamQueue = await loadTeamRequests();
+        const pending = teamQueue.pending;
+        if (clearAlerts) clearAlerts.hidden = !notes.length && !pending.length;
+        const waiting = data.unread + pending.length;
+        toggle.textContent = 'Alerts' + (waiting ? ' (' + waiting + ')' : '');
+        const requests = requestCards(pending, teamQueue.teamId);
+        if (!notes.length && !requests) {
             list.innerHTML = '<p style="color:#d0d0d0;">No alerts yet.</p>';
         } else {
-            list.innerHTML = notes.map(function (note) {
-                const open = note.href ? '<a href="' + esc(note.href) + '" style="color:#F05545;">Open in admin</a>' : '';
+            list.innerHTML = requests + notes.map(function (note) {
+                const open = note.href ? '<a href="' + esc(note.href) + '" style="color:#F05545;">Open</a>' : '';
                 return '<article class="alert-item"><strong>' + esc(note.title) + '</strong>' + esc(note.body || '') + (open ? '\n' + open : '')
                     + '<br><button type="button" class="dash__btn" data-delete-alert="' + note.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0;">Delete</button></article>';
             }).join('');
@@ -894,8 +1028,13 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
                     else button.disabled = false;
                 });
             });
+            list.querySelectorAll('[data-approve-member]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    approveMember(button.getAttribute('data-approve-member'), button);
+                });
+            });
         }
-        if (data.unread || location.hash === '#alerts') {
+        if (data.unread || pending.length || location.hash === '#alerts') {
             body.hidden = false;
             toggle.setAttribute('aria-expanded', 'true');
             if (data.unread) fetch('/api/notifications/read', { method: 'POST', credentials: 'include' });
@@ -910,7 +1049,81 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
             if (response.ok) loadAlerts();
         });
     }
+    document.addEventListener('jet-team-changed', loadAlerts);
     loadAlerts();
+})();
+
+(function () {
+    const body = document.getElementById('members-body');
+    if (!body) return;
+    const requests = document.getElementById('member-requests');
+    const roster = document.getElementById('member-roster');
+    const status = document.getElementById('members-status');
+    const addButton = document.getElementById('add-team-member');
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    async function loadMembers() {
+        const response = await fetch('/api/account/team', { credentials: 'include' });
+        if (!response.ok) return;
+        const data = await response.json();
+        const teamId = data.team && data.team.id;
+        const pending = data.pending || [];
+        const members = data.members || [];
+        requests.innerHTML = pending.length ? pending.map(function (person) {
+            return '<article class="alert-item"><strong>' + esc(person.name) + '</strong>' + esc(person.email)
+                + '<br><button type="button" class="dash__btn dash__btn--primary" data-approve-member="' + person.user_id + '" data-team="' + teamId + '" style="border:0; cursor:pointer; margin-top:0.45rem;">Approve</button>'
+                + ' <button type="button" class="dash__btn" data-remove-member="' + person.user_id + '" data-team="' + teamId + '" style="border:0; background:transparent; color:#F05545; cursor:pointer;">Remove</button></article>';
+        }).join('') : '<p style="color:#d0d0d0;">No one is waiting to join.</p>';
+        roster.innerHTML = members.map(function (person) {
+            const remove = person.is_admin ? '' : ' <button type="button" class="dash__btn" data-remove-member="' + person.user_id + '" data-team="' + teamId + '" style="border:0; background:transparent; color:#F05545; cursor:pointer;">Remove</button>';
+            return '<p style="color:#fff; margin:0 0 0.45rem;">' + esc(person.name) + (person.is_admin ? ' · Main' : ' · Broker') + remove + '</p>';
+        }).join('');
+        body.querySelectorAll('[data-approve-member]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                button.disabled = true;
+                const approved = await fetch('/api/broker-teams/' + button.getAttribute('data-team') + '/members/' + button.getAttribute('data-approve-member') + '/allow', {
+                    method: 'POST', credentials: 'include',
+                });
+                if (approved.ok) { if (status) status.textContent = 'Approved. Their title is broker.'; loadMembers(); document.dispatchEvent(new Event('jet-team-changed')); }
+                else { button.disabled = false; if (status) status.textContent = 'Could not approve that person.'; }
+            });
+        });
+        body.querySelectorAll('[data-remove-member]').forEach(function (button) {
+            button.addEventListener('click', async function () {
+                if (!window.confirm('Remove this person from the brokerage?')) return;
+                button.disabled = true;
+                const removed = await fetch('/api/broker-teams/' + button.getAttribute('data-team') + '/members/' + button.getAttribute('data-remove-member'), {
+                    method: 'DELETE', credentials: 'include',
+                });
+                if (removed.ok) { if (status) status.textContent = 'Removed.'; loadMembers(); document.dispatchEvent(new Event('jet-team-changed')); }
+                else { button.disabled = false; if (status) status.textContent = 'Could not remove that person.'; }
+            });
+        });
+    }
+    window.jetLoadMembers = loadMembers;
+    if (addButton) {
+        addButton.addEventListener('click', async function () {
+            const email = document.getElementById('team-member-email').value.trim();
+            if (!email) { if (status) status.textContent = 'Enter their email.'; return; }
+            const response = await fetch('/api/broker-teams/' + addButton.getAttribute('data-team') + '/members', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email }),
+            });
+            const data = await response.json().catch(function () { return {}; });
+            if (status) status.textContent = response.ok ? 'Added. Their title is broker.' : (data.message || 'Could not add that person.');
+            if (response.ok) { loadMembers(); document.dispatchEvent(new Event('jet-team-changed')); }
+        });
+    }
+    loadMembers();
+    if (location.hash === '#members') {
+        body.hidden = false;
+        const toggle = document.getElementById('members-toggle');
+        if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    }
 })();
 </script>
 {% endblock %}

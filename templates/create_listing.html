@@ -597,7 +597,7 @@
                         <button type="button" class="btn btn-secondary me-3" id="delete-listing" hidden>
                             <i class="fas fa-trash me-2"></i>Delete listing
                         </button>
-                        <a href="https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01" class="btn btn-primary btn-lg" id="listing-submit" role="button">
+                        <a href="#" class="btn btn-primary btn-lg" id="listing-submit" role="button">
                             <i class="fas fa-check me-2"></i>Submit for approval
                         </a>
                     </div>
@@ -611,7 +611,6 @@
 <script>
     const LISTING_USER_IS_ADMIN = {{ 'true' if get_current_user_info() and get_current_user_info().is_admin else 'false' }};
     const LISTING_USER_ID = {{ (get_current_user_info().id if get_current_user_info() else 0)|int }};
-    const LISTING_PAYMENT_URL = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01';
     function syncOffMarketFields() {
         const picked = document.querySelector('[name="market"]:checked');
         const off = picked && picked.value === 'broker_only';
@@ -642,10 +641,7 @@
             }
         }
         const submitLink = document.getElementById('listing-submit');
-        if (submitLink) {
-            if (off || editing || window.LISTING_ALREADY_PAID) submitLink.removeAttribute('href');
-            else submitLink.href = LISTING_PAYMENT_URL;
-        }
+        if (submitLink && (off || editing || window.LISTING_ALREADY_PAID)) submitLink.removeAttribute('href');
     }
     document.querySelectorAll('[name="market"]').forEach(function (radio) {
         radio.addEventListener('change', syncOffMarketFields);
@@ -1145,12 +1141,13 @@
 
             if (payload.market !== 'broker_only' && savedListing && savedListing.payment_required && savedListing.payment_status !== 'paid') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
-                const payUrl = new URL(LISTING_PAYMENT_URL);
-                const serial = String(payload.serial_number || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
-                payUrl.searchParams.set('client_reference_id', 'listing-' + listingId + '-user-' + LISTING_USER_ID + (serial ? '-sn-' + serial : ''));
-                if (payload.email) payUrl.searchParams.set('prefilled_email', payload.email);
-                window.location.href = payUrl.toString();
-                return;
+                const pay = await fetch('/api/listings/' + listingId + '/checkout', { method: 'POST', credentials: 'include' });
+                const payData = await pay.json().catch(function () { return {}; });
+                if (pay.ok && payData.url) {
+                    window.location.href = payData.url;
+                    return;
+                }
+                return fail(payData.message || 'Checkout could not be started. The listing is saved as a draft.');
             }
             window.location.href = LISTING_USER_IS_ADMIN
                 ? ('/admin?highlight=' + listingId)
@@ -1686,7 +1683,10 @@
     function prefillListingFields(profile) {
         const listingNameField = document.getElementById('listingName');
         if (listingNameField) {
-            listingNameField.value = `${getProfileManufacturer(profile)} ${getProfileName(profile)}`.trim();
+            const yearValue = (document.getElementById('yearModel').value || profile.year || profile.model_year || '').toString().trim();
+            const modelValue = getProfileName(profile);
+            listingNameField.value = `${yearValue} ${modelValue}`.trim();
+            listingNameField.dataset.auto = '1';
         }
 
         const manufacturerField = document.getElementById('manufacturerInput');
@@ -1697,6 +1697,9 @@
         const yearField = document.getElementById('yearModel');
         if (yearField && (profile.year || profile.model_year)) {
             yearField.value = profile.year || profile.model_year;
+            if (listingNameField && listingNameField.dataset.auto === '1') {
+                listingNameField.value = `${yearField.value} ${getProfileName(profile)}`.trim();
+            }
         }
 
         const searchField = document.getElementById('profileSearchInput');
@@ -1738,6 +1741,20 @@
         prefillListingFields(selectedProfile);
         alert('Performance profile details applied to your listing.');
     }
+
+    (function () {
+        const nameField = document.getElementById('listingName');
+        const yearField = document.getElementById('yearModel');
+        if (nameField) {
+            nameField.addEventListener('input', function () { nameField.dataset.auto = ''; });
+        }
+        if (yearField) {
+            yearField.addEventListener('input', function () {
+                if (!nameField || nameField.dataset.auto !== '1' || !selectedProfile) return;
+                nameField.value = `${String(yearField.value || '').trim()} ${getProfileName(selectedProfile)}`.trim();
+            });
+        }
+    })();
 
     function clearSelectedProfile() {
         selectedProfile = null;

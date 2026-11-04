@@ -545,11 +545,53 @@ def _team_map_point(team):
     }
 
 
+def _brokerage_map_point(team_id):
+    """One pin for the brokerage. Every broker on it is listed under that pin."""
+    team = db_module.get_broker_team(team_id) or {}
+    members = db_module.list_team_members(team_id, status='active')
+    names = []
+    for member in members:
+        name = ' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) or 'Broker'
+        names.append(name)
+    place = team.get('location') or ', '.join(part for part in [team.get('city'), team.get('state')] if part)
+    geography = _point_geography(
+        place, team.get('latitude'), team.get('longitude'), team.get('city') or '', team.get('state') or '',
+    )
+    leader = next((name for name, member in zip(names, members) if member.get('is_admin')), names[0] if names else '')
+    return {
+        'kind': 'brokerage',
+        'pin_id': f'team-{team_id}',
+        'id': team_id,
+        'user_id': team.get('admin_user_id'),
+        'display_name': team.get('name') or 'Brokerage',
+        'place': place,
+        'logo': team.get('logo_url') or '',
+        'bio': '',
+        'specialties': '',
+        'years': None,
+        'team_name': team.get('name') or '',
+        'is_main': True,
+        'member_count': len(members) or 1,
+        'member_names': names,
+        'category': team.get('name') or 'Brokerage',
+        'leader': leader,
+        **geography,
+    }
+
+
 @app.route('/brokers')
 def brokers_page():
-    """Map of brokers. A number is how many brokers are in that area."""
+    """Map of brokerages. Everyone on a team is found under that one brokerage."""
     people = []
+    seen = set()
     for broker in db_module.list_directory_brokers():
+        team_id = broker.get('team_id')
+        if team_id:
+            if team_id in seen:
+                continue
+            seen.add(team_id)
+            people.append(_brokerage_map_point(team_id))
+            continue
         geography = _point_geography(broker.get('place') or '', broker.get('lat'), broker.get('lon'))
         people.append({
             'kind': 'broker',
@@ -563,8 +605,10 @@ def brokers_page():
             'specialties': broker.get('specialties') or '',
             'years': broker.get('years'),
             'team_name': broker.get('team_name') or '',
-            'is_main': bool(broker.get('is_main')),
-            'category': broker.get('team_name') or broker.get('company') or 'Broker',
+            'is_main': True,
+            'member_count': 1,
+            'member_names': [broker.get('name') or 'Broker'],
+            'category': broker.get('company') or 'Broker',
             'leader': broker.get('name') or '',
             **geography,
         })
@@ -590,7 +634,10 @@ def api_broker_team_detail(team_id):
             'years': member.get('broker_years'),
             'bio': member.get('broker_bio') or '',
             'is_admin': bool(member.get('is_admin')),
-            'listings': db_module.listings_for_user(member.get('user_id'), include_off_market=include_off_market),
+            'listings': [
+                dict(item, title=_listing_title(item.get('year'), item.get('model'), item.get('title'), item.get('manufacturer')))
+                for item in db_module.listings_for_user(member.get('user_id'), include_off_market=include_off_market)
+            ],
         })
     return jsonify({
         'id': team.get('id'),
@@ -622,8 +669,8 @@ def api_broker_team_join(team_id):
                 leader['id'],
                 'team',
                 'A broker wants to join your brokerage',
-                f'{applicant} asked to join {team.get("name") or "your brokerage"}.',
-                '/dashboard',
+                f'{applicant} asked to join {team.get("name") or "your brokerage"}. Approve them in Alerts or Manage members. They do not pay.',
+                '/dashboard#members',
                 leader.get('email'),
             )
     return jsonify({'ok': True, 'status': status}), 200
@@ -675,11 +722,72 @@ def api_broker_team_add(team_id):
     return jsonify({'ok': True, 'user_id': added}), 200
 
 
+@app.route('/api/broker-teams/<int:team_id>/members/<int:member_id>', methods=['DELETE'])
+@require_auth
+def api_broker_team_remove(team_id, member_id):
+    """The main account revokes a team seat or declines a request."""
+    user = request.current_user  # type: ignore[attr-defined]
+    person = get_user_by_id(member_id) or {}
+    if not db_module.remove_team_member(team_id, user['id'], member_id):
+        return jsonify({'error': 'forbidden'}), 403
+    _release_team_seat(member_id)
+    team = db_module.get_broker_team(team_id) or {}
+    if person:
+        db_module.notify_user(
+            member_id, 'team', 'You are no longer on the brokerage',
+            f'{team.get("name") or "The brokerage"} removed you.',
+            '/dashboard', person.get('email'),
+        )
+    return jsonify({'ok': True}), 200
+
+
+@app.route('/api/account/team')
+@require_auth
+def api_account_team():
+    """Pending requests and current brokers for the main brokerage account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    membership = db_module.team_membership(user['id'])
+    if not membership or not membership.get('is_admin') or membership.get('subscription_status') != 'active':
+        return jsonify({'team': None, 'pending': [], 'members': []}), 200
+
+    def pack(rows):
+        people = []
+        for member in rows:
+            name = ' '.join(part for part in [member.get('first_name'), member.get('last_name')] if part) or member.get('email') or 'Broker'
+            people.append({
+                'user_id': member.get('user_id'),
+                'name': name,
+                'email': member.get('email') or '',
+                'is_admin': bool(member.get('is_admin')),
+            })
+        return people
+
+    team_id = membership['id']
+    return jsonify({
+        'team': {'id': team_id, 'name': membership.get('name') or ''},
+        'pending': pack(db_module.list_team_members(team_id, status='pending')),
+        'members': pack(db_module.list_team_members(team_id, status='active')),
+    }), 200
+
+
 def _seat_broker_on_team(user_id):
     """A person added by a paid brokerage is a broker. They do not pay on their own."""
     db_module.update_user_profile(user_id, {'profile_role': 'broker'})
     db_module.set_broker_application(user_id, 'approved')
     _place_approved_broker(user_id)
+
+
+def _release_team_seat(user_id):
+    """A removed member is no longer a broker unless they pay for their own brokerage."""
+    if db_module.user_on_active_team(user_id):
+        return
+    if has_active_subscription(user_id, 'broker') or has_active_subscription(user_id, 'broker_team'):
+        return
+    person = get_user_by_id(user_id) or {}
+    if person.get('profile_role') == 'broker':
+        db_module.update_user_profile(user_id, {'profile_role': 'buyer'})
+    if person.get('broker_application_status') == 'approved':
+        db_module.set_broker_application(user_id, None)
 
 
 @app.route('/api/account/team-checkout', methods=['POST'])
@@ -1508,6 +1616,10 @@ def api_public_person_listings(user_id):
         listings = db_module.listings_for_team(team['id'], include_off_market=include_off_market)
     else:
         listings = db_module.listings_for_user(user_id, include_off_market=include_off_market)
+    for listing in listings:
+        listing['title'] = _listing_title(
+            listing.get('year'), listing.get('model'), listing.get('title'), listing.get('manufacturer'),
+        )
     return jsonify({'listings': listings})
 
 @app.route('/airplane-stock-market')
@@ -2810,16 +2922,7 @@ def login():
 
 
 def _register_page(**extra):
-    broker_open = request.args.get('broker') == '1' or extra.get('broker_open')
-    return render_template(
-        'auth/register.html',
-        teams=db_module.list_public_teams(),
-        broker_open=bool(broker_open),
-        broker_path=extra.get('broker_path') or '',
-        team_id=extra.get('team_id') or '',
-        broker_specialties=extra.get('broker_specialties') or '',
-        broker_years=extra.get('broker_years') or '',
-    )
+    return render_template('auth/register.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -2836,13 +2939,8 @@ def register():
         company = request.form.get('company')
         phone = request.form.get('phone')
         profile_role = request.form.get('profile_role')
-        wants_broker = (
-            (profile_role or '').strip().lower() == 'broker'
-            or request.form.get('broker_signup') == '1'
-        )
-        if wants_broker:
+        if (profile_role or '').strip().lower() == 'broker':
             profile_role = 'buyer'
-        broker_path = (request.form.get('broker_path') or 'main').strip().lower()
         profile_city = (request.form.get('profile_city') or '').strip()
         profile_state = (request.form.get('profile_state') or '').strip()
         profile_location = (request.form.get('profile_location') or '').strip()
@@ -2851,13 +2949,7 @@ def register():
 
         if not email or not password:
             flash('Email and password are required', 'error')
-            return _register_page(
-                broker_open=wants_broker,
-                broker_path=broker_path,
-                team_id=request.form.get('team_id') or '',
-                broker_specialties=request.form.get('broker_specialties') or '',
-                broker_years=request.form.get('broker_years') or '',
-            )
+            return _register_page()
         elif get_user_by_email(email):
             flash('Email already registered', 'error')
         else:
@@ -2865,36 +2957,11 @@ def register():
                 profile_role=profile_role, profile_location=profile_location)
             if user_id is not None:
                 user_id_int = cast(int, user_id)
-                if wants_broker:
-                    _save_broker_application_details(user_id_int, request.form)
-                    db_module.set_broker_application(user_id_int, 'pending')
                 session['user_id'] = user_id_int
                 token = _start_jet_session(user_id_int)
                 _maybe_promote_admin(user_id_int, email)
-                if wants_broker and broker_path == 'assign':
-                    try:
-                        team_id = int(request.form.get('team_id') or 0)
-                    except (TypeError, ValueError):
-                        team_id = 0
-                    if team_id:
-                        db_module.request_team_join(team_id, user_id_int)
-                    flash('Account created. Assigning to a team is free. The main company account has to approve you.', 'success')
-                    resp = redirect(url_for('dashboard'))
-                elif wants_broker:
-                    name = (company or '').strip() or ' '.join(part for part in (first_name, last_name) if part)
-                    if name and profile_city and profile_state:
-                        place = sections_module.resolve_place(f'{profile_city}, {profile_state}', country='US')
-                        db_module.create_broker_team(
-                            user_id_int, name, profile_city, profile_state,
-                            latitude=(place or {}).get('lat'),
-                            longitude=(place or {}).get('lon'),
-                            active=False,
-                        )
-                    flash('Account created. The main brokerage is the only account that pays.', 'success')
-                    resp = redirect(_broker_payment_link({'id': user_id_int, 'email': email}))
-                else:
-                    flash('Account created successfully!', 'success')
-                    resp = redirect(url_for('dashboard'))
+                flash('Account created successfully!', 'success')
+                resp = redirect(url_for('dashboard'))
                 _set_jet_session_cookie(resp, token)
                 return resp
             else:
@@ -3323,12 +3390,11 @@ def api_auth_signup():
         return jsonify({'error': 'email_in_use'}), 400
     try:
         requested_role = (data.get('profile_role') or '').strip().lower()
-        wants_broker = requested_role == 'broker'
         user_id = create_user(
             email, password,
             data.get('first_name'), data.get('last_name'),
             data.get('company'), data.get('phone'),
-            profile_role='buyer' if wants_broker else data.get('profile_role'),
+            profile_role='buyer' if requested_role == 'broker' else data.get('profile_role'),
             profile_location=data.get('profile_location'),
         )
     except Exception:
@@ -3337,9 +3403,7 @@ def api_auth_signup():
     if user_id is None:
         return jsonify({'error': 'server_error'}), 500
     user_id = cast(int, user_id)
-    if wants_broker:
-        db_module.set_broker_application(user_id, 'pending')
-        _save_broker_application_details(user_id, data)
+    _save_broker_application_details(user_id, data)
     session['user_id'] = user_id
     token = _start_jet_session(user_id)
     _maybe_promote_admin(user_id, email)
@@ -3347,7 +3411,7 @@ def api_auth_signup():
     resp = jsonify({
         'ok': True,
         'user': _user_public_dict(user),
-        'broker_checkout_required': wants_broker,
+        'broker_checkout_required': False,
     })
     _set_jet_session_cookie(resp, token)
     return resp, 201
@@ -3400,19 +3464,72 @@ def _subscription_id_from(value):
 
 
 def _cancel_listing_fee(row):
-    """Stop the Stripe subscription for this listing only.
+    """Stop this listing's Stripe subscription before the listing leaves the site.
 
-    The listing row does not always have the subscription id. The checkout
-    session still carries listing-{id}-user-{id}, including the serial number.
+    Returns (True, None) when there is nothing left to bill or Stripe confirmed
+    the cancel. Returns (False, message) when Stripe could not be reached or
+    refused the cancel. A failure does not archive the listing. Canceling does
+    not refund money already collected. Calling it again after a confirmed
+    cancel is a no-op.
     """
-    if not row or not _stripe_configured():
-        return False
+    if not row:
+        return False, 'Listing not found.'
+    listing_id = row.get('id')
+    stored = db_module.open_listing_subscription(listing_id) or db_module.listing_subscription_by_stripe_id(row.get('stripe_subscription_id'))
+    if stored and stored.get('status') == 'canceled':
+        return True, None
+    subscription_id = (stored or {}).get('stripe_subscription_id') or row.get('stripe_subscription_id')
+    paid = row.get('payment_status') in ('paid', 'past_due') or (stored and stored.get('status') in ('active', 'trialing', 'past_due', 'unpaid'))
+    if not subscription_id and paid and _stripe_configured():
+        subscription_id = _find_listing_subscription_id(row)
+    if not subscription_id:
+        if paid and _stripe_configured():
+            return False, 'This listing is paid, but its Stripe subscription was not found. It is still on the site.'
+        if paid and not _stripe_configured():
+            return False, 'Billing is not available, so this paid listing was left on the site.'
+        return True, None
+    if db_module.find_subscription_by_stripe_id(subscription_id):
+        return False, 'That Stripe subscription belongs to a broker account, not this listing. The listing was left up.'
+    if not _stripe_configured():
+        return False, 'Billing is not available, so this listing was left on the site.'
+    try:
+        remote = stripe.Subscription.retrieve(subscription_id)
+        remote_status = _stripe_field(remote, 'status')
+    except Exception as exc:
+        if getattr(exc, 'code', None) == 'resource_missing' or 'No such subscription' in str(exc):
+            db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+            return True, None
+        logger.exception('Could not read listing subscription %s', subscription_id)
+        return False, 'Stripe could not confirm this subscription. The listing is still up. Try again.'
+    if remote_status == 'canceled':
+        db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+        return True, None
+    try:
+        stripe.Subscription.delete(subscription_id, prorate=False, invoice_now=False)
+    except Exception as exc:
+        if getattr(exc, 'code', None) == 'resource_missing' or 'No such subscription' in str(exc):
+            db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+            return True, None
+        logger.exception('Could not cancel listing subscription %s', subscription_id)
+        db_module.save_listing_subscription(
+            user_id=row.get('user_id'),
+            listing_id=listing_id,
+            stripe_subscription_id=subscription_id,
+            stripe_customer_id=row.get('stripe_customer_id'),
+            cancellation_status='failed',
+            status=remote_status or 'active',
+        )
+        return False, 'Stripe could not cancel this subscription. The listing is still up and the card can still be charged. Try again.'
+    db_module.mark_listing_subscription_canceled(stripe_subscription_id=subscription_id, listing_id=listing_id)
+    return True, None
+
+
+def _find_listing_subscription_id(row):
+    """Last-resort lookup for a listing fee that was paid before the billing table existed."""
     listing_id = str(row.get('id') or '')
     user_id = str(row.get('user_id') or '')
-    found = []
-    if row.get('stripe_subscription_id'):
-        found.append(row['stripe_subscription_id'])
     customer_id = row.get('stripe_customer_id')
+    found = []
     try:
         if customer_id:
             sessions = stripe.checkout.Session.list(customer=customer_id, limit=20)
@@ -3431,22 +3548,17 @@ def _cancel_listing_fee(row):
             subscriptions = stripe.Subscription.list(customer=customer_id, status='all', limit=20)
             for subscription in subscriptions.data or []:
                 meta = _stripe_metadata(subscription)
-                if str(meta.get('listing_id') or '') == listing_id:
+                if str(meta.get('listing_id') or '') == listing_id and str(meta.get('user_id') or '') in ('', user_id):
                     subscription_id = _stripe_field(subscription, 'id')
                     if subscription_id:
                         found.append(subscription_id)
     except Exception:
         logger.exception('Could not find the Stripe subscription for listing %s', listing_id)
-    canceled = False
+        return None
     for subscription_id in dict.fromkeys(found):
-        if db_module.find_subscription_by_stripe_id(subscription_id):
-            continue
-        try:
-            stripe.Subscription.delete(subscription_id)
-            canceled = True
-        except Exception:
-            logger.exception('Could not cancel listing subscription %s', subscription_id)
-    return canceled
+        if not db_module.find_subscription_by_stripe_id(subscription_id):
+            return subscription_id
+    return None
 
 
 def _cancel_user_billing(user_id):
@@ -3654,8 +3766,45 @@ def _place_approved_broker(user_id):
         }, synchronize_session=False)
 
 
+def _notify_admins_brokerage(user_id):
+    """A paid checkout is waiting. The admin approves the brokerage."""
+    person = get_user_by_id(user_id) or {}
+    name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part) or person.get('email') or 'Account'
+    company = (person.get('company') or '').strip()
+    label = company or name
+    subject = f'Brokerage to approve: {label}'
+    text = f'{name} paid for a brokerage. Approve it in the admin portal. A team request is not this queue.'
+    link = '/admin'
+    try:
+        for admin_id in db_module.list_admin_user_ids():
+            db_module.create_notification(admin_id, 'broker_approval', subject, text, link)
+    except Exception:
+        logger.exception('Could not alert admins about brokerage %s', user_id)
+
+
+def _record_paid_brokerage(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
+    """Save the $19.99 payment. A new brokerage stays in the approval queue."""
+    update_user_subscription(
+        user_id,
+        subscription_type,
+        stripe_customer_id=customer_id,
+        stripe_subscription_id=subscription_id,
+        subscription_status='active',
+        activated_at=datetime.utcnow(),
+    )
+    person = get_user_by_id(user_id) or {}
+    if person.get('profile_role') == 'broker' and person.get('broker_application_status') == 'approved':
+        return 'live'
+    if person.get('broker_application_status') != 'pending':
+        db_module.set_broker_application(user_id, 'pending')
+        _notify_admins_brokerage(user_id)
+    else:
+        db_module.set_broker_application(user_id, 'pending')
+    return 'queued'
+
+
 def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
-    """Turn on broker access after approval or the $19.99 monthly checkout."""
+    """Turn on broker access after an admin approves a paid brokerage."""
     update_user_subscription(
         user_id,
         subscription_type,
@@ -3845,30 +3994,27 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
         return False
     if _stripe_field(sess, 'status') != 'complete':
         return False
+    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
+    subscription_id = _stripe_field(sess, 'subscription')
+    sub_type = 'broker_team' if purpose == 'broker_team' else 'broker'
+    db_module.set_user_stripe_customer(user_id, customer_id)
+    state = _record_paid_brokerage(
+        user_id,
+        customer_id=customer_id,
+        subscription_id=subscription_id,
+        subscription_type=sub_type,
+    )
+    if state != 'live':
+        return True
     if purpose == 'broker_team':
         try:
             team_id = int(meta.get('team_id') or 0)
         except (TypeError, ValueError):
-            return False
-        if not db_module.set_team_subscription(team_id, 'active'):
-            return False
-        customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
-        db_module.set_user_stripe_customer(user_id, customer_id)
-        _grant_broker_account(
-            user_id,
-            customer_id=customer_id,
-            subscription_id=_stripe_field(sess, 'subscription'),
-            subscription_type='broker_team',
-        )
-        return True
-    customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
-    db_module.set_user_stripe_customer(user_id, customer_id)
-    _grant_broker_account(
-        user_id,
-        customer_id=customer_id,
-        subscription_id=_stripe_field(sess, 'subscription'),
-    )
-    db_module.ensure_main_brokerage(user_id)
+            team_id = 0
+        if team_id:
+            db_module.set_team_subscription(team_id, 'active')
+    else:
+        db_module.ensure_main_brokerage(user_id)
     return True
 
 
@@ -3902,17 +4048,16 @@ def api_broker_application():
         status = db_module.request_team_join(team_id, user['id']) if team_id else None
         if not status:
             return jsonify({'error': 'not_found', 'message': 'Choose a brokerage.'}), 404
-        db_module.set_broker_application(user['id'], 'pending')
         team = db_module.get_broker_team(team_id) or {}
         leader = get_user_by_id(team.get('admin_user_id')) if team.get('admin_user_id') else None
         applicant = ' '.join(part for part in [user.get('first_name'), user.get('last_name')] if part) or user.get('email')
         if leader and status == 'pending':
             db_module.notify_user(
                 leader['id'], 'team', 'A broker wants to join your brokerage',
-                f'{applicant} asked to be assigned to {team.get("name") or "your brokerage"}.',
-                '/dashboard', leader.get('email'),
+                f'{applicant} asked to be assigned to {team.get("name") or "your brokerage"}. Approve them in Alerts or Manage members. They do not pay.',
+                '/dashboard#members', leader.get('email'),
             )
-        return jsonify({'ok': True, 'status': status, 'broker': False}), 200
+        return jsonify({'ok': True, 'status': status, 'broker': False, 'checkout': False}), 200
     name = (data.get('name') or user.get('company') or '').strip()
     city = (data.get('city') or '').strip()
     state = (data.get('state') or '').strip()
@@ -4001,6 +4146,87 @@ def api_billing_portal():
         logger.exception('Billing portal creation failed')
         return jsonify({'error': 'stripe_error', 'message': 'Billing could not be opened.'}), 500
     return jsonify({'url': portal.url}), 200
+
+
+def _money_label(cents, interval):
+    if cents is None:
+        return None
+    amount = f"${int(cents) / 100:.2f}"
+    name = {'month': 'month', 'year': 'year', 'week': 'week'}.get(interval or 'month', interval or 'month')
+    return f'{amount} per {name}'
+
+
+def _billing_record_view(row, invoices):
+    listing = db_module.get_listing_with_owner(row.get('listing_id')) if row.get('listing_id') else {}
+    person = get_user_by_id(row.get('user_id')) if row.get('user_id') else {}
+    person = person or {}
+    listing = listing or {}
+    history = [
+        item for item in invoices
+        if item.get('stripe_subscription_id') == row.get('stripe_subscription_id')
+        or item.get('listing_subscription_id') == row.get('id')
+    ]
+    name = ' '.join(part for part in (person.get('first_name'), person.get('last_name')) if part).strip()
+    return {
+        'id': row.get('id'),
+        'kind': 'listing',
+        'user_id': row.get('user_id'),
+        'customer_name': name,
+        'email': person.get('email') or listing.get('email') or '',
+        'listing_id': row.get('listing_id'),
+        'aircraft': listing.get('title') or '',
+        'listing_status': listing.get('status'),
+        'stripe_customer_id': row.get('stripe_customer_id'),
+        'stripe_subscription_id': row.get('stripe_subscription_id'),
+        'checkout_session_id': row.get('checkout_session_id'),
+        'status': row.get('status'),
+        'amount_cents': row.get('amount_cents'),
+        'price': _money_label(row.get('amount_cents'), row.get('billing_interval')),
+        'interval': row.get('billing_interval') or 'month',
+        'next_billing_date': row.get('current_period_end'),
+        'cancellation_status': row.get('cancellation_status'),
+        'match_status': row.get('match_status'),
+        'grace_until': row.get('grace_until'),
+        'past_due_since': row.get('past_due_since'),
+        'invoices': history,
+    }
+
+
+@app.route('/api/account/subscriptions', methods=['GET'])
+@require_auth
+def api_account_subscriptions():
+    """Subscriptions that belong to the signed-in account."""
+    user = request.current_user  # type: ignore[attr-defined]
+    db_module.enforce_listing_grace()
+    rows = db_module.list_listing_subscriptions(user_id=user['id'])
+    invoices = db_module.list_billing_invoices(user_id=user['id'])
+    return jsonify({'subscriptions': [_billing_record_view(row, invoices) for row in rows]}), 200
+
+
+@app.route('/api/account/subscriptions/<int:subscription_row_id>/cancel', methods=['POST'])
+@require_auth
+def api_account_subscription_cancel(subscription_row_id):
+    """Cancel one listing subscription. Does not refund charges already collected."""
+    user = request.current_user  # type: ignore[attr-defined]
+    row = db_module.listing_subscription_by_id(subscription_row_id)
+    if not row or row.get('user_id') != user['id']:
+        return jsonify({'error': 'not_found'}), 404
+    listing = db_module.get_listing_with_owner(row.get('listing_id')) if row.get('listing_id') else None
+    if listing and listing.get('user_id') != user['id']:
+        return jsonify({'error': 'forbidden'}), 403
+    target = listing or {
+        'id': row.get('listing_id'),
+        'user_id': user['id'],
+        'stripe_subscription_id': row.get('stripe_subscription_id'),
+        'stripe_customer_id': row.get('stripe_customer_id'),
+        'payment_status': 'paid',
+    }
+    canceled, message = _cancel_listing_fee(target)
+    if not canceled:
+        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
+    if listing and listing.get('status') not in ('archived', 'deleted'):
+        db_module.archive_user_listing(listing['id'])
+    return jsonify({'ok': True, 'message': 'The subscription is canceled. This does not refund a charge already collected.'}), 200
 
 
 @app.route('/api/brokers/directory')
@@ -6400,6 +6626,38 @@ def api_performance_profiles():
         print(f"Error loading performance profiles: {e}")
         return jsonify([]), 500
 
+def _listing_title(year, model, title, manufacturer=''):
+    """A listing title starts with the year and the model."""
+    year_text = str(year or '').strip()
+    if year_text.endswith('.0') and year_text[:-2].isdigit():
+        year_text = year_text[:-2]
+    model_text = ' '.join(str(model or '').split())
+    maker = ' '.join(str(manufacturer or '').split())
+    rest = ' '.join(str(title or '').split())
+    prefixes = [
+        piece for piece in (
+            f'{year_text} {maker} {model_text}'.strip(),
+            f'{year_text} {model_text}'.strip(),
+            f'{maker} {model_text}'.strip(),
+            year_text,
+            maker,
+            model_text,
+        ) if piece
+    ]
+    changed = True
+    while rest and changed:
+        changed = False
+        for piece in prefixes:
+            if rest.lower().startswith(piece.lower()):
+                rest = rest[len(piece):].lstrip(' -–—,:')
+                changed = True
+                break
+    head = ' '.join(part for part in (year_text, model_text) if part)
+    if not head:
+        return rest or 'Aircraft listing'
+    return f'{head} {rest}'.strip() if rest else head
+
+
 def _row_to_combined_listing(row, aircraft_map):
     """Build combined listing dict from db row and profile map."""
     listing_id = row['id']
@@ -6447,7 +6705,8 @@ def _row_to_combined_listing(row, aircraft_map):
     document_list = [doc.strip() for doc in (documents or '').split(',') if doc.strip()]
     resolved_manufacturer = listing_manufacturer or profile_copy.get('manufacturer') or 'Unknown'
     resolved_engine_type = engine_type or profile_copy.get('engine_type') or profile_copy.get('category') or 'Unknown'
-    listing_title = title or f"{resolved_manufacturer} {profile_copy.get('aircraft_name', profile_copy.get('name', 'Aircraft'))}".strip()
+    model_name = profile_copy.get('aircraft_name') or profile_copy.get('name') or ''
+    listing_title = _listing_title(year, model_name, title, resolved_manufacturer)
     hero_image = image_list[0] if image_list else profile_copy.get('image', '/static/images/aircraft_placeholder.jpg')
     return {
         **profile_copy,
@@ -6603,7 +6862,7 @@ def api_listings_me():
             cover = next((m['url'] for m in media if m.get('media_type') == 'photo'), None)
             base = {
                 'id': row.get('id'),
-                'title': row.get('title'),
+                'title': (combined or {}).get('title') or _listing_title(row.get('year'), '', row.get('title')),
                 'year': row.get('year'),
                 'price': row.get('price'),
                 'hours': row.get('hours', 0),
@@ -6810,9 +7069,9 @@ def _create_listing_for_user(user, data):
             'error': 'profile_not_found',
             'message': 'That aircraft could not be found. Pick one from the list and submit again.',
         }, 404)
-    title = (data.get('title') or f"{data.get('manufacturer') or profile.get('manufacturer', '')} {profile.get('aircraft_name', 'Aircraft')}").strip()
-    if not title:
-        title = profile.get('aircraft_name') or 'Aircraft listing'
+    model_name = profile.get('aircraft_name') or profile.get('name') or 'Aircraft'
+    maker = data.get('manufacturer') or profile.get('manufacturer') or ''
+    title = _listing_title(year_value, model_name, data.get('title'), maker)
     pricing_plan = data.get('pricing_plan') or 'monthly'
     if pricing_plan not in {'monthly', 'six_month'}:
         pricing_plan = 'monthly'
@@ -7265,14 +7524,110 @@ def _listing_needs_checkout(market) -> bool:
     return _payment_required()
 
 
+def _subscription_price_fields(obj):
+    """Amount and interval from a Subscription or Invoice, using the server price when absent."""
+    items = _stripe_field(obj, 'items') or {}
+    data = _stripe_field(items, 'data') or []
+    price = {}
+    if data:
+        first = data[0]
+        price = _stripe_field(first, 'price') or {}
+    recurring = _stripe_field(price, 'recurring') or {}
+    amount = _stripe_field(price, 'unit_amount')
+    if amount is None:
+        amount = _stripe_field(obj, 'amount_paid') or _stripe_field(obj, 'amount_due')
+    interval = _stripe_field(recurring, 'interval') or 'month'
+    period_end = _stripe_field(obj, 'current_period_end')
+    period = None
+    if period_end:
+        try:
+            period = datetime.utcfromtimestamp(int(period_end))
+        except (TypeError, ValueError, OSError):
+            period = None
+    return amount, interval, period
+
+
+def _start_listing_checkout(user, row):
+    """Open Checkout for this owner and this listing. The browser does not set the price."""
+    if not user or not row or not _stripe_configured():
+        return None
+    existing = db_module.open_listing_subscription(row.get('id'))
+    if existing and existing.get('status') in ('active', 'trialing', 'past_due', 'unpaid'):
+        return {'already': True}
+    if row.get('payment_status') == 'paid' and (row.get('stripe_subscription_id') or (existing and existing.get('stripe_subscription_id'))):
+        return {'already': True}
+    customer_id = _stripe_customer_for(user)
+    if not customer_id:
+        return None
+    amount = _listing_fee_cents()
+    meta = {
+        'purpose': 'listing_fee',
+        'user_id': str(row.get('user_id')),
+        'listing_id': str(row.get('id')),
+    }
+    serial = _stripe_serial(row.get('serial_number'))
+    if serial:
+        meta['serial_number'] = serial
+    reference = _listing_client_reference(row.get('id'), row.get('user_id'), serial)
+    base = _public_base()
+    checkout = stripe.checkout.Session.create(
+        mode='subscription',
+        customer=customer_id,
+        client_reference_id=reference,
+        metadata=meta,
+        subscription_data={'metadata': meta, 'description': f"JetSchool listing {row.get('id')}"},
+        line_items=[{
+            'quantity': 1,
+            'price_data': {
+                'currency': 'usd',
+                'unit_amount': int(amount),
+                'recurring': {'interval': 'month'},
+                'product_data': {
+                    'name': 'Aircraft listing',
+                    'description': str(row.get('title') or 'Aircraft listing')[:500],
+                },
+            },
+        }],
+        success_url=f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{base}/dashboard?listing={row.get('id')}&checkout=cancel",
+        allow_promotion_codes=True,
+        automatic_tax={'enabled': False},
+        payment_method_collection='always',
+        billing_address_collection='auto',
+        idempotency_key=_checkout_idempotency(f"listing-{row.get('id')}"),
+    )
+    session_id = _stripe_field(checkout, 'id')
+    db_module.save_listing_subscription(
+        user_id=row.get('user_id'),
+        listing_id=row.get('id'),
+        stripe_customer_id=customer_id,
+        checkout_session_id=session_id,
+        status='incomplete',
+        amount_cents=amount,
+        currency='usd',
+        billing_interval='month',
+        match_status='matched',
+        cancellation_status='none',
+    )
+    if session_id:
+        db_module.set_listing_payment_session(row.get('id'), session_id)
+    return {'url': _stripe_field(checkout, 'url')}
+
+
 def _listing_checkout_url(user, listing_id):
-    """Public listing Payment Link. None for off-market listings and listings that are already paid."""
+    """Checkout Session for this listing. None when the fee does not apply or it is already paid."""
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
         return None
     if not _listing_needs_checkout(row.get('market')):
         return None
-    return _listing_payment_link(user, listing_id)
+    owner = get_user_by_id(row.get('user_id')) or user
+    started = _start_listing_checkout(owner, row)
+    if not started:
+        return None
+    if started.get('already'):
+        return 'already'
+    return started.get('url')
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])
@@ -7291,7 +7646,12 @@ def api_listing_checkout(listing_id: int):
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if not _listing_needs_checkout(row.get('market')):
         return jsonify({'skip': True, 'message': 'Payment not required'}), 200
+    open_sub = db_module.open_listing_subscription(listing_id)
+    if open_sub and open_sub.get('status') in ('active', 'trialing', 'past_due', 'unpaid'):
+        return jsonify({'skip': True, 'message': 'This listing already has a subscription.'}), 200
     url = _listing_checkout_url(user, listing_id)
+    if url == 'already':
+        return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
     return jsonify({'url': url}), 200
@@ -7344,8 +7704,21 @@ def api_listing_confirm_payment(listing_id: int):
     customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
     was_waiting = row.get('status') in ('unpaid', 'draft')
     if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id):
-        return jsonify({'error': 'server_error'}), 500
+        return jsonify({'error': 'not_confirmed', 'message': 'Payment was not confirmed. The listing stays unpaid.'}), 400
     db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
+    amount, interval, period = _subscription_price_fields(subscription if isinstance(subscription, dict) else {})
+    db_module.save_listing_subscription(
+        user_id=row.get('user_id'),
+        listing_id=listing_id,
+        stripe_customer_id=customer_id,
+        stripe_subscription_id=subscription_id,
+        checkout_session_id=session_id,
+        status='active',
+        amount_cents=amount or _listing_fee_cents(),
+        billing_interval=interval or 'month',
+        current_period_end=period,
+        match_status='matched',
+    )
     if was_waiting:
         fresh = db_module.get_listing_with_owner(listing_id) or row
         _notify_admins_new_listing(
@@ -7418,10 +7791,14 @@ def api_stripe_webhook():
             logger.info('Stripe webhook: listing %s payment_status %s', listing_id, payment_status)
         if event_type == 'charge.refunded' and _stripe_field(obj, 'refunded') is True:
             _end_broker_charge(obj, 'canceled')
-    elif event_type in ('customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed'):
+    elif event_type in (
+        'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted',
+        'invoice.paid', 'invoice.payment_failed',
+    ):
         obj = event['data']['object'] if isinstance(event, dict) else event.data.object
+        event_created = event.get('created') if isinstance(event, dict) else getattr(event, 'created', None)
         _sync_broker_billing_event(event_type, obj)
-        _sync_listing_subscription_event(event_type, obj)
+        _sync_listing_subscription_event(event_type, obj, event_created=event_created)
         if event_type == 'invoice.paid':
             _activate_listing_from_invoice(obj)
             _match_invoice_checkout(obj)
@@ -7812,51 +8189,174 @@ def _record_listing_checkout(sess):
     paid = db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id)
     if paid:
         db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
+        amount, interval, period = _subscription_price_fields(subscription if isinstance(subscription, dict) else {})
+        db_module.save_listing_subscription(
+            user_id=row.get('user_id'),
+            listing_id=listing_id,
+            stripe_customer_id=customer_id,
+            stripe_subscription_id=subscription_id,
+            checkout_session_id=session_id,
+            status='active',
+            amount_cents=amount or _listing_fee_cents(),
+            billing_interval=interval or 'month',
+            current_period_end=period,
+            match_status='matched',
+            cancellation_status='none',
+        )
     return paid
 
 
 _reconcile_paid_checkouts()
 
 
-def _sync_listing_subscription_event(event_type, obj):
-    """Keep a listing on the site only while its monthly fee is current."""
-    if event_type == 'invoice.paid':
-        return
+def _listing_from_billing_metadata(metadata, subscription_id=None):
+    """Match a Stripe subscription to a listing by stored ids or metadata.
+
+    An email address is not enough to claim a listing.
+    """
+    metadata = metadata or {}
+    listing = db_module.find_listing_by_subscription(subscription_id) if subscription_id else None
+    if listing:
+        return listing, 'matched'
+    stored = db_module.listing_subscription_by_stripe_id(subscription_id) if subscription_id else None
+    if stored and stored.get('listing_id') and stored.get('match_status') != 'unmatched':
+        row = db_module.get_listing_with_owner(stored.get('listing_id'))
+        if row:
+            return row, 'matched'
+    try:
+        listing_id = int(metadata.get('listing_id') or 0)
+    except (TypeError, ValueError):
+        listing_id = 0
+    if not listing_id or metadata.get('purpose') not in (None, '', 'listing_fee'):
+        return None, 'unmatched'
+    row = db_module.get_listing_with_owner(listing_id)
+    if not row:
+        return None, 'unmatched'
+    meta_user = str(metadata.get('user_id') or '')
+    if meta_user and meta_user != str(row.get('user_id') or ''):
+        return None, 'unmatched'
+    if not meta_user and metadata.get('purpose') != 'listing_fee':
+        return None, 'unmatched'
+    return row, 'matched'
+
+
+def _sync_listing_subscription_event(event_type, obj, event_created=None):
+    """Keep the billing table aligned with Stripe. A failed renewal stays up for 7 days."""
     metadata = _stripe_metadata(obj)
-    if event_type in ('customer.subscription.deleted', 'customer.subscription.updated'):
+    amount = None
+    interval = None
+    period = None
+    if event_type in ('customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'):
         subscription_id = _stripe_ref(_stripe_field(obj, 'id'))
-        stripe_status = 'canceled' if event_type == 'customer.subscription.deleted' else _stripe_field(obj, 'status')
+        stripe_status = 'canceled' if event_type == 'customer.subscription.deleted' else (_stripe_field(obj, 'status') or 'incomplete')
+        amount, interval, period = _subscription_price_fields(obj)
+        customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
     elif event_type == 'invoice.payment_failed':
         subscription_id = _object_subscription_id(obj)
         stripe_status = 'past_due'
+        customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
+        amount = _stripe_field(obj, 'amount_due')
+    elif event_type == 'invoice.paid':
+        subscription_id = _object_subscription_id(obj)
+        stripe_status = 'active'
+        customer_id = _stripe_ref(_stripe_field(obj, 'customer'))
+        amount = _stripe_field(obj, 'amount_paid')
     else:
         return
     if not subscription_id:
         return
-    listing = db_module.find_listing_by_subscription(subscription_id)
-    if not listing and metadata.get('purpose') == 'listing_fee':
-        try:
-            listing_id = int(metadata.get('listing_id') or 0)
-        except (TypeError, ValueError):
-            listing_id = 0
-        listing = db_module.get_listing_with_owner(listing_id) if listing_id else None
-    if not listing:
+    if db_module.find_subscription_by_stripe_id(subscription_id) and metadata.get('purpose') != 'listing_fee':
         return
-    owner = get_user_by_id(listing.get('user_id')) or {}
-    if stripe_status in ('canceled', 'unpaid', 'incomplete_expired'):
+    listing, match_status = _listing_from_billing_metadata(metadata, subscription_id)
+    if listing is None and metadata.get('purpose') not in (None, '', 'listing_fee'):
+        return
+    user_id = (listing or {}).get('user_id')
+    listing_id = (listing or {}).get('id')
+    if event_type == 'invoice.paid':
+        saved = db_module.save_listing_subscription(
+            user_id=user_id,
+            listing_id=listing_id,
+            stripe_customer_id=customer_id,
+            stripe_subscription_id=subscription_id,
+            status='active',
+            amount_cents=amount,
+            match_status='matched' if listing_id else 'unmatched',
+            event_created=event_created,
+        )
+        if saved:
+            db_module.save_billing_invoice(
+                stripe_invoice_id=_stripe_field(obj, 'id'),
+                status='paid',
+                user_id=saved.get('user_id'),
+                listing_id=saved.get('listing_id'),
+                listing_subscription_id=saved.get('id'),
+                stripe_subscription_id=subscription_id,
+                stripe_customer_id=customer_id,
+                amount_cents=amount,
+                hosted_invoice_url=_stripe_field(obj, 'hosted_invoice_url'),
+                paid_at=datetime.utcnow(),
+            )
+        return
+    if event_type == 'invoice.payment_failed':
+        grace = datetime.utcnow() + timedelta(days=db_module.BILLING_GRACE_DAYS)
+        saved = db_module.save_listing_subscription(
+            user_id=user_id,
+            listing_id=listing_id,
+            stripe_customer_id=customer_id,
+            stripe_subscription_id=subscription_id,
+            status='past_due',
+            amount_cents=amount,
+            past_due_since=datetime.utcnow(),
+            grace_until=grace,
+            match_status='matched' if listing_id else 'unmatched',
+            event_created=event_created,
+        )
+        db_module.save_billing_invoice(
+            stripe_invoice_id=_stripe_field(obj, 'id'),
+            status='failed',
+            user_id=(saved or {}).get('user_id') or user_id,
+            listing_id=(saved or {}).get('listing_id') or listing_id,
+            listing_subscription_id=(saved or {}).get('id'),
+            stripe_subscription_id=subscription_id,
+            stripe_customer_id=customer_id,
+            amount_cents=amount,
+            hosted_invoice_url=_stripe_field(obj, 'hosted_invoice_url'),
+            failure_message='Payment failed',
+        )
+        if listing and saved and saved.get('status') == 'past_due':
+            owner = get_user_by_id(listing.get('user_id')) or {}
+            db_module.notify_user(
+                listing.get('user_id'), 'billing', 'Listing payment failed',
+                'The card for this listing was declined. The listing stays up for 7 days. Update the card in My subscriptions.',
+                '/dashboard#subscriptions', owner.get('email'),
+            )
+        return
+    saved = db_module.save_listing_subscription(
+        user_id=user_id,
+        listing_id=listing_id,
+        stripe_customer_id=customer_id,
+        stripe_subscription_id=subscription_id,
+        status=stripe_status,
+        amount_cents=amount,
+        billing_interval=interval,
+        current_period_end=period,
+        cancel_at_period_end=bool(_stripe_field(obj, 'cancel_at_period_end')),
+        canceled_at=datetime.utcnow() if stripe_status == 'canceled' else None,
+        cancellation_status='canceled' if stripe_status == 'canceled' else None,
+        match_status='matched' if listing_id else 'unmatched',
+        event_created=event_created,
+    )
+    if not listing or not saved:
+        return
+    if stripe_status in ('canceled', 'unpaid', 'incomplete_expired') and saved.get('status') == 'canceled':
         if db_module.end_listing_subscription(listing.get('id')):
             logger.info('Listing %s left the site because its fee ended', listing.get('id'))
+            owner = get_user_by_id(listing.get('user_id')) or {}
             db_module.notify_user(
                 listing.get('user_id'), 'billing', 'Listing fee ended',
                 'The monthly listing fee stopped, so the listing is off the site until it is paid again.',
-                '/dashboard', owner.get('email'),
+                '/dashboard#subscriptions', owner.get('email'),
             )
-    elif stripe_status == 'past_due':
-        db_module.notify_user(
-            listing.get('user_id'), 'billing', 'Listing payment failed',
-            'The card for the monthly listing fee was declined. Update it to keep the listing up.',
-            '/dashboard', owner.get('email'),
-        )
 
 
 def _activate_listing_from_invoice(obj):
@@ -8010,14 +8510,14 @@ def _apply_broker_subscription_state(subscription_id, local_status, customer_id=
     team_id = _team_id_for_broker(user_id, metadata) if sub_type == 'broker_team' else None
     should_grant = local_status == 'active' and previous not in ('active', 'past_due')
     if should_grant:
-        if team_id:
-            db_module.set_team_subscription(team_id, 'active')
-        _grant_broker_account(
+        state = _record_paid_brokerage(
             user_id,
             customer_id=customer_id,
             subscription_id=subscription_id,
             subscription_type=sub_type,
         )
+        if state == 'live' and team_id:
+            db_module.set_team_subscription(team_id, 'active')
     else:
         update_user_subscription(
             user_id,
@@ -8280,6 +8780,14 @@ def api_listing_mine(listing_id: int):
             if key not in ('id', 'user_id', 'status'):
                 out[key] = value
     out.pop('pending_changes', None)
+    profiles = {item.get('id'): item for item in get_unified_aircraft_data()}
+    profile = profiles.get(out.get('profile_id')) or {}
+    out['title'] = _listing_title(
+        out.get('year'),
+        profile.get('aircraft_name') or profile.get('name'),
+        out.get('title'),
+        profile.get('manufacturer') or out.get('manufacturer'),
+    )
     out['media'] = db_module.list_listing_media(listing_id, include_unpublished=True)
     out['media_order'] = (pending or {}).get('media_order') or []
     out['media_remove'] = (pending or {}).get('media_remove') or []
@@ -8550,9 +9058,11 @@ def api_listings_delete(listing_id: int):
         return jsonify({'error': 'not_found'}), 404
     if row.get('user_id') != user['id'] and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
-    _cancel_listing_fee(row)
+    canceled, message = _cancel_listing_fee(row)
+    if not canceled:
+        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
     if not db_module.archive_user_listing(listing_id):
-        return jsonify({'error': 'server_error'}), 500
+        return jsonify({'error': 'server_error', 'retry': True, 'message': 'The subscription was canceled. The listing could not be archived. Try again.'}), 500
     return jsonify({'ok': True}), 200
 
 
@@ -8605,7 +9115,12 @@ def api_get_user_listing(listing_id):
         listing = {
             'id': row['id'],
             'profile_id': row['profile_id'],
-            'title': row.get('title'),
+            'title': _listing_title(
+                row.get('year'),
+                profile.get('aircraft_name') or profile.get('name'),
+                row.get('title'),
+                profile.get('manufacturer') or row.get('manufacturer'),
+            ),
             'year': row.get('year'),
             'price': row.get('price'),
             'hours': row.get('hours', 0),
@@ -8739,7 +9254,7 @@ def api_admin_listings():
             owner = db_module.get_user_by_id(row.get('user_id')) if row.get('user_id') else None
             out.append({
                 'id': row.get('id'),
-                'title': row.get('title'),
+                'title': combined.get('title') or _listing_title(row.get('year'), '', row.get('title')),
                 'year': row.get('year'),
                 'price': row.get('price'),
                 'hours': row.get('hours'),
@@ -8880,15 +9395,21 @@ def api_admin_approvals():
     """Everything waiting on the site admin: brokers, brokerages, and team members."""
     brokers = []
     for person in db_module.list_broker_applications('pending'):
-        person['stripe_paid'] = bool(
+        paid = bool(
             has_active_subscription(person['id'], 'broker')
             or has_active_subscription(person['id'], 'broker_team')
         )
+        if not paid:
+            continue
+        membership = db_module.team_membership(person['id'])
+        if membership and not membership.get('is_admin') and membership.get('membership_status') == 'pending':
+            continue
+        person['stripe_paid'] = True
         brokers.append(person)
     return jsonify({
         'brokers': brokers,
-        'brokerages': [team for team in db_module.list_teams_for_admin() if team.get('subscription_status') != 'active'],
-        'members': db_module.list_pending_memberships(),
+        'brokerages': [],
+        'members': [],
         'categories': list(db_module.BROKERAGE_CATEGORIES),
     })
 
@@ -8923,9 +9444,10 @@ def api_admin_approve_broker(user_id):
     if not paid:
         return jsonify({
             'error': 'payment_required',
-            'message': 'A person is a broker when a main account has paid and adds them.',
+            'message': 'This person has not paid for a brokerage.',
         }), 402
     _grant_broker_account(user_id)
+    db_module.ensure_main_brokerage(user_id)
     db_module.notify_user(
         user_id, 'broker', 'Broker access is approved',
         'Your broker application is approved.', '/dashboard', person.get('email'),
@@ -9018,6 +9540,179 @@ def api_admin_approve_member(team_id, member_id):
     return jsonify({'ok': True})
 
 
+def _broker_billing_view(row):
+    person = get_user_by_id(row.get('user_id')) or {}
+    name = ' '.join(part for part in (person.get('first_name'), person.get('last_name')) if part).strip()
+    return {
+        'id': None,
+        'kind': row.get('subscription_type') or 'broker',
+        'user_id': row.get('user_id'),
+        'customer_name': name,
+        'email': person.get('email') or '',
+        'listing_id': None,
+        'aircraft': '',
+        'listing_status': None,
+        'stripe_customer_id': row.get('stripe_customer_id'),
+        'stripe_subscription_id': row.get('stripe_subscription_id'),
+        'checkout_session_id': None,
+        'status': row.get('subscription_status'),
+        'amount_cents': BROKER_FEE_CENTS,
+        'price': f'{BROKER_FEE_LABEL} per month',
+        'interval': 'month',
+        'next_billing_date': None,
+        'cancellation_status': 'canceled' if row.get('subscription_status') == 'canceled' else 'none',
+        'match_status': 'matched',
+        'grace_until': None,
+        'past_due_since': None,
+        'invoices': [],
+    }
+
+
+def _billing_matches_query(record, query):
+    if not query:
+        return True
+    haystack = ' '.join(str(record.get(key) or '') for key in (
+        'customer_name', 'email', 'aircraft', 'listing_id', 'stripe_subscription_id', 'stripe_customer_id',
+    )).lower()
+    return query.lower() in haystack
+
+
+@app.route('/api/admin/billing', methods=['GET'])
+@require_admin
+def api_admin_billing():
+    """Every stored subscription, plus invoices that failed."""
+    db_module.enforce_listing_grace()
+    query = (request.args.get('q') or '').strip()
+    status = (request.args.get('status') or '').strip()
+    invoices = db_module.list_billing_invoices()
+    records = [_billing_record_view(row, invoices) for row in db_module.list_listing_subscriptions()]
+    records.extend(_broker_billing_view(row) for row in db_module.list_broker_billing_rows())
+    if status:
+        records = [row for row in records if row.get('status') == status]
+    if query:
+        records = [row for row in records if _billing_matches_query(row, query)]
+    failed = [row for row in invoices if row.get('status') in ('failed', 'open', 'uncollectible')]
+    unmatched = [row for row in records if row.get('match_status') == 'unmatched']
+    return jsonify({
+        'subscriptions': records,
+        'unmatched': unmatched,
+        'failed_payments': failed,
+        'monthly_recurring_cents': db_module.monthly_recurring_cents(),
+        'grace_days': db_module.BILLING_GRACE_DAYS,
+    }), 200
+
+
+@app.route('/api/admin/billing/reconcile', methods=['POST'])
+@require_admin
+def api_admin_billing_reconcile():
+    """Pull Stripe subscriptions and match them by metadata or a stored listing id.
+
+    Nothing is canceled. A subscription is not matched from an email address.
+    """
+    if not _stripe_configured():
+        return jsonify({'error': 'stripe_not_configured', 'message': 'Stripe is not configured.'}), 503
+    matched = 0
+    unmatched = 0
+    starting_after = None
+    seen = 0
+    try:
+        while seen < 100:
+            params = {'status': 'all', 'limit': 100}
+            if starting_after:
+                params['starting_after'] = starting_after
+            page = stripe.Subscription.list(**params)
+            data = list(page.data or [])
+            if not data:
+                break
+            for subscription in data:
+                seen += 1
+                meta = _stripe_metadata(subscription)
+                subscription_id = _stripe_field(subscription, 'id')
+                listing, match_status = _listing_from_billing_metadata(meta, subscription_id)
+                if db_module.find_subscription_by_stripe_id(subscription_id) and meta.get('purpose') != 'listing_fee':
+                    continue
+                amount, interval, period = _subscription_price_fields(subscription)
+                db_module.save_listing_subscription(
+                    user_id=(listing or {}).get('user_id'),
+                    listing_id=(listing or {}).get('id'),
+                    stripe_customer_id=_stripe_ref(_stripe_field(subscription, 'customer')),
+                    stripe_subscription_id=subscription_id,
+                    status=_stripe_field(subscription, 'status') or 'incomplete',
+                    amount_cents=amount,
+                    billing_interval=interval,
+                    current_period_end=period,
+                    match_status='matched' if listing else 'unmatched',
+                )
+                if listing:
+                    matched += 1
+                else:
+                    unmatched += 1
+            if not getattr(page, 'has_more', False) or seen >= 100:
+                break
+            starting_after = _stripe_field(data[-1], 'id')
+    except Exception:
+        logger.exception('Stripe subscription reconcile failed')
+        return jsonify({'error': 'stripe_error', 'message': 'Stripe could not be read. Nothing was canceled.'}), 502
+    return jsonify({'ok': True, 'matched': matched, 'unmatched': unmatched, 'canceled': 0}), 200
+
+
+@app.route('/api/admin/billing/match', methods=['POST'])
+@require_admin
+def api_admin_billing_match():
+    """Attach an unmatched Stripe subscription to a listing. The admin chooses the listing."""
+    data = request.get_json(silent=True) or {}
+    subscription_id = str(data.get('stripe_subscription_id') or '').strip()
+    try:
+        listing_id = int(data.get('listing_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'missing_fields', 'message': 'Choose a listing.'}), 400
+    if not subscription_id:
+        return jsonify({'error': 'missing_fields', 'message': 'A Stripe subscription id is required.'}), 400
+    saved = db_module.match_listing_subscription_to_listing(subscription_id, listing_id)
+    if not saved:
+        return jsonify({'error': 'not_found', 'message': 'That listing was not found.'}), 404
+    return jsonify({'ok': True, 'subscription': saved}), 200
+
+
+@app.route('/api/admin/billing/<subscription_id>/cancel', methods=['POST'])
+@require_admin
+def api_admin_billing_cancel(subscription_id):
+    """Cancel one Stripe subscription. A failed cancel leaves the listing in place."""
+    row = db_module.listing_subscription_by_stripe_id(subscription_id)
+    if row and row.get('listing_id'):
+        listing = db_module.get_listing_with_owner(row.get('listing_id'))
+        canceled, message = _cancel_listing_fee(listing or {
+            'id': row.get('listing_id'),
+            'user_id': row.get('user_id'),
+            'stripe_subscription_id': subscription_id,
+            'stripe_customer_id': row.get('stripe_customer_id'),
+            'payment_status': 'paid',
+        })
+        if not canceled:
+            return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
+        if listing and listing.get('status') not in ('archived', 'deleted'):
+            db_module.archive_user_listing(listing['id'])
+        return jsonify({'ok': True}), 200
+    broker = db_module.find_subscription_by_stripe_id(subscription_id)
+    if not broker:
+        return jsonify({'error': 'not_found'}), 404
+    if not _stripe_configured():
+        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': 'Stripe is not configured.'}), 502
+    try:
+        stripe.Subscription.delete(subscription_id, prorate=False, invoice_now=False)
+    except Exception as exc:
+        if getattr(exc, 'code', None) != 'resource_missing' and 'No such subscription' not in str(exc):
+            logger.exception('Could not cancel broker subscription %s', subscription_id)
+            return jsonify({'error': 'cancel_failed', 'retry': True, 'message': 'Stripe could not cancel this subscription.'}), 502
+    update_user_subscription(
+        broker.get('user_id'),
+        broker.get('subscription_type') or 'broker',
+        stripe_subscription_id=subscription_id,
+        subscription_status='canceled',
+    )
+    return jsonify({'ok': True}), 200
+
+
 @app.route('/api/admin/listings/<int:listing_id>', methods=['DELETE'])
 @require_admin
 def admin_delete_listing(listing_id):
@@ -9025,7 +9720,9 @@ def admin_delete_listing(listing_id):
     existing = db_module.get_listing_with_owner(listing_id)
     if not existing:
         return jsonify({'error': 'not_found'}), 404
-    _cancel_listing_fee(existing)
+    canceled, message = _cancel_listing_fee(existing)
+    if not canceled:
+        return jsonify({'error': 'cancel_failed', 'retry': True, 'message': message}), 502
     if not db_module.delete_user_listing_soft(listing_id):
         return jsonify({'error': 'server_error'}), 500
     return jsonify({'ok': True, 'status': 'deleted'}), 200

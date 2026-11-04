@@ -72,6 +72,7 @@
             <button class="ap__tab" data-tab="brokers">Brokers</button>
             <button class="ap__tab" data-tab="users">Users</button>
             <button class="ap__tab" data-tab="alerts" id="alerts-tab">Alerts</button>
+            <button class="ap__tab" data-tab="billing" id="billing-tab">Billing</button>
         </div>
 
         <div id="tab-listings">
@@ -115,6 +116,24 @@
         <div id="tab-alerts" style="display:none;">
             <div id="alerts-list"></div>
         </div>
+        <div id="tab-billing" style="display:none;">
+            <div class="ap__filter">
+                <input id="billing-search" type="search" placeholder="Customer, aircraft, email, or subscription id" aria-label="Search billing">
+                <select id="billing-status" aria-label="Subscription status">
+                    <option value="">All statuses</option>
+                    <option value="active">Active</option>
+                    <option value="past_due">Past due</option>
+                    <option value="canceled">Canceled</option>
+                    <option value="unpaid">Unpaid</option>
+                    <option value="incomplete">Incomplete</option>
+                </select>
+                <button class="ap__btn ap__btn--secondary" id="billing-refresh" type="button">Refresh from Stripe</button>
+            </div>
+            <p id="billing-summary" style="color:#d0d0d0;"></p>
+            <div id="billing-unmatched"></div>
+            <div id="billing-failed"></div>
+            <div id="billing-list"></div>
+        </div>
     </div>
 </div>
 
@@ -128,6 +147,8 @@
         <label for="account-message">Message this person. It shows in their Messages.</label>
         <textarea id="account-message" maxlength="4000" placeholder="Write the message"></textarea>
         <div class="review__actions">
+            <button type="button" class="ap__btn ap__btn--approve" id="account-approve" hidden>Approve</button>
+            <button type="button" class="ap__btn ap__btn--reject" id="account-deny" hidden>Deny</button>
             <button type="button" class="ap__btn ap__btn--approve" id="account-send">Send message</button>
             <a class="ap__btn ap__btn--secondary" id="account-profile" href="/people/0">Open public profile</a>
             <button type="button" class="ap__btn ap__btn--reject" id="account-delete">Delete account</button>
@@ -433,11 +454,15 @@ async function openAccount(id, focusMessage) {
             return '<p>' + esc(listing.title || 'Listing') + ' · ' + esc(listing.status || '') + ' · ' + esc(price) + (listing.location ? ' · ' + esc(listing.location) : '') + '</p>';
         }).join('')
         : '<p>No listings.</p>';
+    const waiting = user.broker_application_status === 'pending';
+    document.getElementById('account-approve').hidden = !waiting;
+    document.getElementById('account-deny').hidden = !waiting;
     body.innerHTML = ''
         + accountLine('Email', user.email)
         + accountLine('Phone', user.phone)
         + accountLine('Company', user.company)
         + accountLine('Role', user.profile_role)
+        + accountLine('Brokerage', waiting ? 'Paid, waiting for approval' : (user.broker_application_status || ''))
         + accountLine('Location', user.profile_location)
         + accountLine('Specialty', user.broker_specialties)
         + accountLine('Years in business', user.broker_years)
@@ -461,6 +486,23 @@ async function deleteAccount(id) {
     loadAdminUsers();
 }
 
+document.getElementById('account-approve').addEventListener('click', async function () {
+    if (!accountId) return;
+    const status = document.getElementById('account-status');
+    if (!(await postAdmin('/api/admin/brokers/' + accountId + '/approve'))) return;
+    status.textContent = 'Approved. They are a brokerage.';
+    document.getElementById('account-approve').hidden = true;
+    document.getElementById('account-deny').hidden = true;
+    loadApprovals();
+    loadAdminBrokers();
+});
+document.getElementById('account-deny').addEventListener('click', async function () {
+    if (!accountId) return;
+    if (!(await postAdmin('/api/admin/brokers/' + accountId + '/deny'))) return;
+    document.getElementById('account-screen').hidden = true;
+    accountId = null;
+    loadApprovals();
+});
 document.getElementById('account-close').addEventListener('click', function () {
     document.getElementById('account-screen').hidden = true;
     accountId = null;
@@ -491,6 +533,93 @@ document.getElementById('account-delete').addEventListener('click', function () 
     if (accountId) deleteAccount(accountId);
 });
 
+async function loadAdminBilling() {
+    const list = document.getElementById('billing-list');
+    const summary = document.getElementById('billing-summary');
+    const unmatchedBox = document.getElementById('billing-unmatched');
+    const failedBox = document.getElementById('billing-failed');
+    const q = document.getElementById('billing-search').value.trim();
+    const status = document.getElementById('billing-status').value;
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (status) params.set('status', status);
+    const response = await fetch('/api/admin/billing?' + params.toString(), { credentials: 'include' });
+    const data = await response.json().catch(function () { return {}; });
+    if (!response.ok) {
+        list.innerHTML = '<div class="ap__empty">Billing could not be loaded.</div>';
+        return;
+    }
+    const dollars = ((data.monthly_recurring_cents || 0) / 100).toFixed(2);
+    summary.textContent = 'Monthly recurring revenue $' + dollars + '. A failed card keeps the listing up for ' + (data.grace_days || 7) + ' days, then it leaves the public site. Canceling does not refund a charge.';
+    const unmatched = data.unmatched || [];
+    unmatchedBox.innerHTML = unmatched.length ? '<h2>Unmatched subscriptions</h2>' + unmatched.map(function (row) {
+        return '<article class="ap__card"><p>' + esc(row.stripe_subscription_id || 'No subscription id') + ' · ' + esc(row.stripe_customer_id || '') + ' · ' + esc(row.status) + '</p>'
+            + '<form data-match="' + esc(row.stripe_subscription_id || '') + '" style="display:flex;gap:0.5rem;align-items:center;">'
+            + '<input name="listing_id" type="number" min="1" placeholder="Listing ID" required>'
+            + '<button class="ap__btn" type="submit">Match to listing</button></form></article>';
+    }).join('') : '';
+    const failed = data.failed_payments || [];
+    failedBox.innerHTML = failed.length ? '<h2>Failed payments</h2>' + failed.map(function (row) {
+        return '<p>Invoice ' + esc(row.stripe_invoice_id) + ' · listing ' + esc(row.listing_id || '—') + ' · ' + esc(row.failure_message || row.status) + '</p>';
+    }).join('') : '';
+    const rows = data.subscriptions || [];
+    list.innerHTML = rows.length ? rows.map(function (row) {
+        const listingLink = row.listing_id ? '<a href="/listing/' + row.listing_id + '">Open listing ' + esc(row.listing_id) + '</a>' : 'No listing';
+        const personLink = row.user_id ? '<button type="button" data-user="' + row.user_id + '">Open customer</button>' : 'No customer';
+        const cancel = row.stripe_subscription_id && row.status !== 'canceled'
+            ? '<button type="button" data-cancel-billing="' + esc(row.stripe_subscription_id) + '">Cancel subscription</button>'
+            : '';
+        return '<article class="ap__card"><strong>' + esc(row.aircraft || row.kind) + '</strong>'
+            + '<p>' + esc(row.customer_name || '') + ' · ' + esc(row.email || '') + '</p>'
+            + '<p>' + esc(row.price || '') + ' · ' + esc(row.status) + ' · next ' + esc(row.next_billing_date || '—') + '</p>'
+            + '<p>Customer ' + esc(row.stripe_customer_id || '—') + '<br>Subscription ' + esc(row.stripe_subscription_id || '—') + '</p>'
+            + '<p>' + listingLink + ' · ' + personLink + ' ' + cancel + '</p></article>';
+    }).join('') : '<div class="ap__empty">No subscriptions stored yet.</div>';
+    unmatchedBox.querySelectorAll('form[data-match]').forEach(function (form) {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const response = await fetch('/api/admin/billing/match', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stripe_subscription_id: form.getAttribute('data-match'),
+                    listing_id: Number(form.listing_id.value),
+                }),
+            });
+            const body = await response.json().catch(function () { return {}; });
+            if (!response.ok) { alert(body.message || 'Could not match that subscription.'); return; }
+            loadAdminBilling();
+        });
+    });
+    list.querySelectorAll('[data-cancel-billing]').forEach(function (button) {
+        button.addEventListener('click', async function () {
+            if (!window.confirm('Cancel this subscription? Future charges stop. A collected charge is not refunded.')) return;
+            const response = await fetch('/api/admin/billing/' + encodeURIComponent(button.getAttribute('data-cancel-billing')) + '/cancel', {
+                method: 'POST', credentials: 'include',
+            });
+            const body = await response.json().catch(function () { return {}; });
+            if (!response.ok) { alert(body.message || 'Stripe could not cancel this subscription. Try again.'); return; }
+            loadAdminBilling();
+        });
+    });
+    list.querySelectorAll('[data-user]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (typeof openAccount === 'function') openAccount(button.getAttribute('data-user'));
+        });
+    });
+}
+document.getElementById('billing-search').addEventListener('input', function () { loadAdminBilling(); });
+document.getElementById('billing-status').addEventListener('change', function () { loadAdminBilling(); });
+document.getElementById('billing-refresh').addEventListener('click', async function () {
+    const button = document.getElementById('billing-refresh');
+    button.disabled = true;
+    const response = await fetch('/api/admin/billing/reconcile', { method: 'POST', credentials: 'include' });
+    const body = await response.json().catch(function () { return {}; });
+    button.disabled = false;
+    if (!response.ok) { alert(body.message || 'Stripe could not be read. Nothing was canceled.'); return; }
+    loadAdminBilling();
+});
+
 document.querySelectorAll('.ap__tab').forEach(function (t) {
     t.addEventListener('click', function () {
         document.querySelectorAll('.ap__tab').forEach(function (x) { x.classList.remove('active'); });
@@ -501,10 +630,12 @@ document.querySelectorAll('.ap__tab').forEach(function (t) {
         document.getElementById('tab-brokers').style.display = (tab === 'brokers') ? '' : 'none';
         document.getElementById('tab-users').style.display = (tab === 'users') ? '' : 'none';
         document.getElementById('tab-alerts').style.display = (tab === 'alerts') ? '' : 'none';
+        document.getElementById('tab-billing').style.display = (tab === 'billing') ? '' : 'none';
         if (tab === 'users') loadAdminUsers();
         if (tab === 'approvals') loadApprovals();
         if (tab === 'brokers') loadAdminBrokers();
         if (tab === 'alerts') loadAdminAlerts();
+        if (tab === 'billing') loadAdminBilling();
     });
 });
 
@@ -682,21 +813,30 @@ async function loadApprovals() {
     const data = await response.json();
     const brokers = (data.brokers || []).map(function (person) {
         const name = ((person.first_name || '') + ' ' + (person.last_name || '')).trim() || person.email;
-        const paid = person.stripe_paid ? 'Paid' : 'Not a broker until a main account pays';
+        const company = person.company ? person.company + ' · ' : '';
         const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + esc(paid) + '</div>'
+        return '<div class="ap__card" data-user="' + person.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(company) + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>Paid. Waiting to become a brokerage.</div>'
             + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+            + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');
-    const members = (data.members || []).map(function (member) {
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(member.name) + '</strong><br>' + esc(member.email) + ' asked to join ' + esc(member.team_name) + '. The main account adds them.</div>'
-            + '<button class="ap__btn ap__btn--approve" data-user-message="' + member.user_id + '">Message</button></div></div>';
-    }).join('');
-    target.innerHTML = (brokers || members) ? (brokers + members) : '<div class="ap__empty">Nothing is waiting.</div>';
+    target.innerHTML = brokers || '<div class="ap__empty">Nothing is waiting. A paid brokerage checkout shows up here. A team request goes to that brokerage.</div>';
     bindAccountMessages(target);
+    target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
+        card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
+    });
+    target.querySelectorAll('[data-approve-broker]').forEach(function (btn) {
+        btn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-approve-broker') + '/approve')) loadApprovals();
+        });
+    });
     target.querySelectorAll('[data-deny-broker]').forEach(function (btn) {
-        btn.addEventListener('click', async function () { if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals(); });
+        btn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals();
+        });
     });
 }
 
@@ -710,15 +850,22 @@ async function loadAdminBrokers() {
     if (!brokers.length) { target.innerHTML = '<div class="ap__empty">No brokers yet. A person appears here after a main account pays and adds them.</div>'; return; }
     target.innerHTML = brokers.map(function (broker) {
         const place = [broker.team_name, broker.place].filter(Boolean).join(' · ');
-        return '<div class="ap__card"><div class="ap__row"><div class="ap__col" style="flex:1;">'
+        return '<div class="ap__card" data-user="' + broker.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">'
             + '<strong>' + esc(broker.name) + '</strong> ' + (broker.is_main ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">MAIN</span>' : '<span class="ap__badge">TEAM</span>')
             + '<br>' + esc(broker.email) + (place ? '<br>' + esc(place) : '')
+            + (broker.team_name ? '<br>' + esc(broker.team_name) : '')
             + '</div><div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + broker.id + '">Message</button>'
             + '<a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a>'
             + '</div></div></div>';
     }).join('');
     bindAccountMessages(target);
+    target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
+        card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
+    });
+    target.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function (event) { event.stopPropagation(); });
+    });
 }
 
 document.getElementById('status-filter').addEventListener('change', loadAdminListings);

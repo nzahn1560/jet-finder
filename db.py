@@ -533,6 +533,60 @@ class UserSubscription(Base):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
 
+class ListingSubscription(Base):
+    """One Stripe subscription for one aircraft listing. Rows are kept after cancel."""
+    __tablename__ = 'listing_subscriptions'
+    __table_args__ = (
+        UniqueConstraint('stripe_subscription_id', name='uq_listing_sub_stripe_subscription'),
+        UniqueConstraint('checkout_session_id', name='uq_listing_sub_checkout_session'),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    listing_id = Column(Integer, ForeignKey('user_listings.id'), index=True)
+    stripe_customer_id = Column(String(255), index=True)
+    stripe_subscription_id = Column(String(255), index=True)
+    checkout_session_id = Column(String(255), index=True)
+    status = Column(String(40), default='incomplete', nullable=False, index=True)
+    amount_cents = Column(Integer)
+    currency = Column(String(10), default='usd')
+    billing_interval = Column(String(20), default='month')
+    current_period_end = Column(DateTime)
+    cancel_at_period_end = Column(Boolean, default=False, nullable=False)
+    canceled_at = Column(DateTime)
+    cancellation_status = Column(String(40), default='none', nullable=False)
+    past_due_since = Column(DateTime)
+    grace_until = Column(DateTime)
+    match_status = Column(String(20), default='matched', nullable=False, index=True)
+    last_event_created = Column(Integer)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
+class BillingInvoice(Base):
+    """A paid or failed invoice. Kept after the listing or subscription ends."""
+    __tablename__ = 'billing_invoices'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    listing_subscription_id = Column(Integer, ForeignKey('listing_subscriptions.id'), index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), index=True)
+    listing_id = Column(Integer, ForeignKey('user_listings.id'), index=True)
+    stripe_invoice_id = Column(String(255), unique=True, nullable=False, index=True)
+    stripe_subscription_id = Column(String(255), index=True)
+    stripe_customer_id = Column(String(255))
+    amount_cents = Column(Integer)
+    currency = Column(String(10), default='usd')
+    status = Column(String(40), nullable=False)
+    hosted_invoice_url = Column(Text)
+    failure_message = Column(Text)
+    paid_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+
 class Airport(Base):
     __tablename__ = 'airports'
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -1506,7 +1560,12 @@ def _apply_listing_details(row, details):
 
 
 def get_active_user_listings():
-    """Approved public listings. Off-market aircraft stay off this list."""
+    """Approved public listings. Off-market aircraft stay off this list.
+
+    A listing whose fee is past the grace period is suspended before this list
+    is built, so it is not returned.
+    """
+    enforce_listing_grace()
     with get_session() as s:
         rows = (
             s.query(UserListing)
@@ -1576,6 +1635,10 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, s
     """Mark a listing fee paid and send an unpaid or draft listing to review."""
     if not listing_id:
         return None
+    if subscription_id:
+        existing = listing_subscription_by_stripe_id(subscription_id)
+        if existing and existing.get('status') == 'canceled':
+            return None
     with get_session() as s:
         row = s.query(UserListing).filter(UserListing.id == listing_id).first()
         if not row:
@@ -1681,6 +1744,330 @@ def listing_subscription_ids(user_id):
             .all()
         )
         return [row[0] for row in rows if row[0]]
+
+
+BILLING_GRACE_DAYS = 7
+OPEN_LISTING_SUBSCRIPTION_STATUSES = ('incomplete', 'active', 'trialing', 'past_due', 'unpaid')
+
+
+def _billing_value(row, key):
+    value = getattr(row, key, None)
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return value
+
+
+def listing_subscription_dict(row):
+    if not row:
+        return None
+    data = row.to_dict()
+    for key in ('current_period_end', 'canceled_at', 'past_due_since', 'grace_until', 'created_at', 'updated_at'):
+        data[key] = _billing_value(row, key)
+    return data
+
+
+def billing_invoice_dict(row):
+    if not row:
+        return None
+    data = row.to_dict()
+    for key in ('paid_at', 'created_at'):
+        data[key] = _billing_value(row, key)
+    return data
+
+
+def _find_listing_subscription(session, stripe_subscription_id=None, checkout_session_id=None, listing_id=None):
+    if stripe_subscription_id:
+        row = (
+            session.query(ListingSubscription)
+            .filter(ListingSubscription.stripe_subscription_id == str(stripe_subscription_id)[:255])
+            .first()
+        )
+        if row:
+            return row
+    if checkout_session_id:
+        row = (
+            session.query(ListingSubscription)
+            .filter(ListingSubscription.checkout_session_id == str(checkout_session_id)[:255])
+            .first()
+        )
+        if row:
+            return row
+    if listing_id:
+        return (
+            session.query(ListingSubscription)
+            .filter(
+                ListingSubscription.listing_id == int(listing_id),
+                ListingSubscription.status.in_(OPEN_LISTING_SUBSCRIPTION_STATUSES),
+            )
+            .order_by(ListingSubscription.id.desc())
+            .first()
+        )
+    return None
+
+
+def save_listing_subscription(
+    user_id=None, listing_id=None, stripe_customer_id=None, stripe_subscription_id=None,
+    checkout_session_id=None, status=None, amount_cents=None, currency=None, billing_interval=None,
+    current_period_end=None, cancel_at_period_end=None, canceled_at=None, cancellation_status=None,
+    past_due_since=None, grace_until=None, match_status=None, event_created=None,
+):
+    """Insert or update the billing row for one listing subscription.
+
+    An older Stripe event cannot move a newer status backwards. A canceled row
+    stays canceled unless a newer event says otherwise. The row is not deleted.
+    """
+    with get_session() as session:
+        row = _find_listing_subscription(
+            session,
+            stripe_subscription_id=stripe_subscription_id,
+            checkout_session_id=checkout_session_id,
+        )
+        if row is None and listing_id:
+            candidate = _find_listing_subscription(session, listing_id=listing_id)
+            if candidate and stripe_subscription_id and candidate.stripe_subscription_id and candidate.stripe_subscription_id != str(stripe_subscription_id)[:255]:
+                candidate = None
+            row = candidate
+        if row is None:
+            row = ListingSubscription(status=status or 'incomplete', cancellation_status='none', match_status=match_status or 'matched')
+            session.add(row)
+            session.flush()
+        incoming = int(event_created) if event_created else None
+        stale = bool(incoming and row.last_event_created and incoming < row.last_event_created)
+        if row.status == 'canceled' and status not in (None, 'canceled'):
+            status = None
+        if not stale:
+            if status:
+                row.status = str(status)[:40]
+            if cancellation_status:
+                row.cancellation_status = str(cancellation_status)[:40]
+            if current_period_end is not None:
+                row.current_period_end = current_period_end
+            if cancel_at_period_end is not None:
+                row.cancel_at_period_end = bool(cancel_at_period_end)
+            if canceled_at is not None:
+                row.canceled_at = canceled_at
+            if past_due_since is not None:
+                row.past_due_since = past_due_since
+            if grace_until is not None:
+                row.grace_until = grace_until
+            if status in ('active', 'trialing'):
+                row.past_due_since = None
+                row.grace_until = None
+        if user_id and not row.user_id:
+            row.user_id = int(user_id)
+        elif user_id and match_status == 'matched':
+            row.user_id = int(user_id)
+        if listing_id and (not row.listing_id or match_status == 'matched'):
+            row.listing_id = int(listing_id)
+        if stripe_customer_id and not stale:
+            row.stripe_customer_id = str(stripe_customer_id)[:255]
+        if stripe_subscription_id and not row.stripe_subscription_id:
+            row.stripe_subscription_id = str(stripe_subscription_id)[:255]
+        if checkout_session_id and not row.checkout_session_id:
+            row.checkout_session_id = str(checkout_session_id)[:255]
+        if amount_cents is not None and not stale:
+            row.amount_cents = int(amount_cents)
+        if currency and not stale:
+            row.currency = str(currency)[:10]
+        if billing_interval and not stale:
+            row.billing_interval = str(billing_interval)[:20]
+        if match_status and not stale:
+            row.match_status = str(match_status)[:20]
+        if incoming and (not row.last_event_created or incoming > row.last_event_created):
+            row.last_event_created = incoming
+        session.flush()
+        return listing_subscription_dict(row)
+
+
+def open_listing_subscription(listing_id):
+    """The subscription that is still billing, or waiting to bill, for this listing."""
+    if not listing_id:
+        return None
+    with get_session() as session:
+        row = _find_listing_subscription(session, listing_id=listing_id)
+        return listing_subscription_dict(row)
+
+
+def listing_subscription_by_id(subscription_row_id):
+    with get_session() as session:
+        row = session.query(ListingSubscription).filter(ListingSubscription.id == int(subscription_row_id)).first()
+        return listing_subscription_dict(row)
+
+
+def listing_subscription_by_stripe_id(stripe_subscription_id):
+    if not stripe_subscription_id:
+        return None
+    with get_session() as session:
+        row = _find_listing_subscription(session, stripe_subscription_id=stripe_subscription_id)
+        return listing_subscription_dict(row)
+
+
+def list_listing_subscriptions(user_id=None, status=None, match_status=None):
+    with get_session() as session:
+        query = session.query(ListingSubscription)
+        if user_id:
+            query = query.filter(ListingSubscription.user_id == int(user_id))
+        if status:
+            query = query.filter(ListingSubscription.status == status)
+        if match_status:
+            query = query.filter(ListingSubscription.match_status == match_status)
+        rows = query.order_by(ListingSubscription.id.desc()).limit(500).all()
+        return [listing_subscription_dict(row) for row in rows]
+
+
+def list_billing_invoices(user_id=None, listing_id=None, stripe_subscription_id=None, status=None):
+    with get_session() as session:
+        query = session.query(BillingInvoice)
+        if user_id:
+            query = query.filter(BillingInvoice.user_id == int(user_id))
+        if listing_id:
+            query = query.filter(BillingInvoice.listing_id == int(listing_id))
+        if stripe_subscription_id:
+            query = query.filter(BillingInvoice.stripe_subscription_id == str(stripe_subscription_id)[:255])
+        if status:
+            query = query.filter(BillingInvoice.status == status)
+        rows = query.order_by(BillingInvoice.id.desc()).limit(500).all()
+        return [billing_invoice_dict(row) for row in rows]
+
+
+def save_billing_invoice(
+    stripe_invoice_id, status, user_id=None, listing_id=None, listing_subscription_id=None,
+    stripe_subscription_id=None, stripe_customer_id=None, amount_cents=None, currency=None,
+    hosted_invoice_url=None, failure_message=None, paid_at=None,
+):
+    """One row per Stripe invoice. A repeated event updates the same row."""
+    if not stripe_invoice_id:
+        return None
+    with get_session() as session:
+        row = (
+            session.query(BillingInvoice)
+            .filter(BillingInvoice.stripe_invoice_id == str(stripe_invoice_id)[:255])
+            .first()
+        )
+        if row is None:
+            row = BillingInvoice(stripe_invoice_id=str(stripe_invoice_id)[:255], status=status or 'open')
+            session.add(row)
+        row.status = str(status or row.status)[:40]
+        if user_id:
+            row.user_id = int(user_id)
+        if listing_id:
+            row.listing_id = int(listing_id)
+        if listing_subscription_id:
+            row.listing_subscription_id = int(listing_subscription_id)
+        if stripe_subscription_id:
+            row.stripe_subscription_id = str(stripe_subscription_id)[:255]
+        if stripe_customer_id:
+            row.stripe_customer_id = str(stripe_customer_id)[:255]
+        if amount_cents is not None:
+            row.amount_cents = int(amount_cents)
+        if currency:
+            row.currency = str(currency)[:10]
+        if hosted_invoice_url:
+            row.hosted_invoice_url = str(hosted_invoice_url)[:2000]
+        if failure_message:
+            row.failure_message = str(failure_message)[:2000]
+        if paid_at is not None:
+            row.paid_at = paid_at
+        session.flush()
+        return billing_invoice_dict(row)
+
+
+def match_listing_subscription_to_listing(stripe_subscription_id, listing_id):
+    """Attach a Stripe subscription to a listing the admin chose. Email is not used."""
+    if not stripe_subscription_id or not listing_id:
+        return None
+    with get_session() as session:
+        listing = session.query(UserListing).filter(UserListing.id == int(listing_id)).first()
+        if not listing:
+            return None
+        row = _find_listing_subscription(session, stripe_subscription_id=stripe_subscription_id)
+        if row is None:
+            row = ListingSubscription(
+                stripe_subscription_id=str(stripe_subscription_id)[:255],
+                status='active',
+                cancellation_status='none',
+            )
+            session.add(row)
+            session.flush()
+        row.user_id = listing.user_id
+        row.listing_id = listing.id
+        row.match_status = 'matched'
+        if not listing.stripe_subscription_id:
+            listing.stripe_subscription_id = str(stripe_subscription_id)[:255]
+        session.flush()
+        return listing_subscription_dict(row)
+
+
+def mark_listing_subscription_canceled(stripe_subscription_id=None, listing_id=None, checkout_session_id=None):
+    """Record a confirmed cancellation. The row and its invoices stay."""
+    with get_session() as session:
+        row = _find_listing_subscription(
+            session,
+            stripe_subscription_id=stripe_subscription_id,
+            checkout_session_id=checkout_session_id,
+            listing_id=listing_id,
+        )
+        if not row:
+            return None
+        row.status = 'canceled'
+        row.cancellation_status = 'canceled'
+        row.canceled_at = row.canceled_at or datetime.utcnow()
+        session.flush()
+        return listing_subscription_dict(row)
+
+
+def enforce_listing_grace():
+    """After the grace period, a past-due listing leaves the public site. Billing rows stay."""
+    now = datetime.utcnow()
+    with get_session() as session:
+        rows = (
+            session.query(ListingSubscription)
+            .filter(
+                ListingSubscription.status == 'past_due',
+                ListingSubscription.grace_until.isnot(None),
+                ListingSubscription.grace_until < now,
+                ListingSubscription.listing_id.isnot(None),
+            )
+            .all()
+        )
+        for sub in rows:
+            listing = session.query(UserListing).filter(UserListing.id == sub.listing_id).first()
+            if listing and listing.status == 'active':
+                listing.status = 'suspended'
+                listing.payment_status = 'past_due'
+
+
+def monthly_recurring_cents():
+    """Active and past-due listing fees, normalized to a month. Canceled rows are excluded."""
+    total = 0
+    with get_session() as session:
+        rows = (
+            session.query(ListingSubscription)
+            .filter(ListingSubscription.status.in_(('active', 'trialing', 'past_due')))
+            .all()
+        )
+        for row in rows:
+            amount = int(row.amount_cents or 0)
+            interval = (row.billing_interval or 'month').lower()
+            if interval == 'year':
+                amount = amount // 12
+            elif interval == 'week':
+                amount = amount * 4
+            total += amount
+    return total
+
+
+def list_broker_billing_rows():
+    """Broker subscriptions already stored on the account. These are not listing fees."""
+    with get_session() as session:
+        rows = (
+            session.query(UserSubscription)
+            .filter(UserSubscription.stripe_subscription_id.isnot(None))
+            .order_by(UserSubscription.id.desc())
+            .limit(500)
+            .all()
+        )
+        return [row.to_dict() for row in rows]
 
 
 def end_listing_subscription(listing_id):
@@ -2395,6 +2782,25 @@ def admin_allow_team_member(team_id, member_user_id):
         return True
 
 
+def remove_team_member(team_id, admin_user_id, member_user_id):
+    """The main account takes someone off the brokerage, including a request that is still waiting."""
+    with get_session() as s:
+        team = s.query(BrokerTeam).filter(
+            BrokerTeam.id == team_id,
+            BrokerTeam.admin_user_id == admin_user_id,
+        ).first()
+        if not team or int(member_user_id) == int(admin_user_id):
+            return False
+        member = s.query(BrokerTeamMember).filter(
+            BrokerTeamMember.team_id == team_id,
+            BrokerTeamMember.user_id == member_user_id,
+        ).first()
+        if not member:
+            return False
+        s.delete(member)
+        return True
+
+
 def allow_team_member(team_id, admin_user_id, member_user_id):
     with get_session() as s:
         team = s.query(BrokerTeam).filter(BrokerTeam.id == team_id, BrokerTeam.admin_user_id == admin_user_id).first()
@@ -2920,9 +3326,12 @@ def listings_for_user(user_id, include_off_market=False):
             place = _team_place(city, state) or row.location or ''
             if place and len(place) <= 4 and place.isalpha():
                 place = _team_place(city, state)
+            profile = s.query(AircraftProfile).filter(AircraftProfile.id == row.profile_id).first() if row.profile_id else None
+            profile_data = profile.data if profile and isinstance(profile.data, dict) else {}
             out.append({
                 'id': row.id,
                 'title': row.title,
+                'model': profile_data.get('aircraft_name') or profile_data.get('name') or '',
                 'price': row.price,
                 'city': city,
                 'state': state,
