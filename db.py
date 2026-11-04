@@ -1828,9 +1828,8 @@ def set_user_stripe_customer(user_id, customer_id, replace=False):
                 return customer_id
             fresh = s.query(User).filter(User.id == int(user_id)).first()
             return fresh.stripe_customer_id if fresh and fresh.stripe_customer_id else None
-        if not row.stripe_customer_id:
-            row.stripe_customer_id = customer_id
-        return row.stripe_customer_id or customer_id
+        row.stripe_customer_id = customer_id
+        return customer_id
 
 
 def listing_stripe_customer(user_id):
@@ -2333,6 +2332,9 @@ def start_checkout_attempt(user_id, listing_id, amount_cents, idempotency_key):
             .first()
         )
         if row:
+            if not row.checkout_session_id:
+                row.idempotency_key = str(idempotency_key)[:255]
+                session.flush()
             return {c.name: getattr(row, c.name) for c in row.__table__.columns}
         row = CheckoutAttempt(
             user_id=int(user_id) if user_id else None,
