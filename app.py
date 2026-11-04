@@ -4721,6 +4721,22 @@ def internal_server_error(e):
     """Handle 500 errors"""
     return render_template('error.html', error_code=500, message="Internal server error"), 500
 
+
+@app.errorhandler(Exception)
+def api_unexpected_error(exc):
+    """Billing calls should see the failure instead of a generic HTML page."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(exc, HTTPException):
+        return exc
+    logger.exception('Unhandled error on %s', request.path)
+    if not (request.path or '').startswith('/api/'):
+        return render_template('error.html', error_code=500, message="Internal server error"), 500
+    text = _stripe_error_text(exc)
+    lowered = text.lower()
+    if 'sk_live_' in lowered or 'sk_test_' in lowered or 'rk_live_' in lowered or 'whsec_' in lowered:
+        text = 'Checkout could not be started.'
+    return jsonify({'error': 'server_error', 'message': text or 'Checkout could not be started.'}), 500
+
 @app.route('/api/market-insights')
 def api_market_insights():
     """Get market insights and trends"""
@@ -7847,9 +7863,14 @@ def _start_listing_checkout(user, row):
         'STRIPE_LISTING_PROMO_PRICE_ID' if amount == pricing_module.PROMO_LISTING_FEE_CENTS else 'STRIPE_LISTING_PRICE_ID',
         'STRIPE_LISTING_PRICE_ID',
     )
-    attempt = db_module.start_checkout_attempt(row.get('user_id'), row.get('id'), amount, f"listing-{row.get('id')}-{int(datetime.utcnow().timestamp())}")
     base = _public_base()
-    idempotency_key = attempt.get('idempotency_key') or _checkout_idempotency(f"listing-{row.get('id')}")
+    fresh_key = f"listing-{row.get('id')}-{int(datetime.utcnow().timestamp())}"
+    try:
+        attempt = db_module.start_checkout_attempt(row.get('user_id'), row.get('id'), amount, fresh_key)
+        idempotency_key = attempt.get('idempotency_key') or fresh_key
+    except Exception:
+        logger.exception('Could not store the checkout attempt')
+        idempotency_key = fresh_key
     checkout, err = _create_subscription_checkout(
         customer_id, meta, amount, 'Aircraft listing', str(row.get('title') or 'Aircraft listing'),
         f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
