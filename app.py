@@ -4095,30 +4095,10 @@ def _listing_payment_link(user, listing_id):
 
 
 def _broker_checkout_url(user):
-    """Checkout Session for the brokerage fee. None when Stripe is not configured."""
-    if not user or not _stripe_configured():
+    """Hosted broker Payment Link. It does not need a Checkout session on this server."""
+    if not user:
         return None
-    meta = {
-        'purpose': 'broker_account',
-        'user_id': str(user['id']),
-        'jetschool_user_id': str(user['id']),
-        'jetschool_billing_type': 'broker_account',
-        'platform': 'jetschoolusa',
-    }
-    base = _public_base()
-    hour = datetime.utcnow().strftime('%Y%m%d%H')
-    checkout = _open_paid_checkout(
-        user, meta, BROKER_FEE_CENTS,
-        'JetSchool brokerage',
-        'Broker access to the broker map and the off-market section. $19.99 per month.',
-        f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
-        f'{base}/dashboard?broker=0',
-        f"broker-{user['id']}-{hour}",
-        price_id=_configured_price_id('STRIPE_BROKER_PRICE_ID'),
-    )
-    if not checkout:
-        return None
-    return _stripe_field(checkout, 'url')
+    return _broker_payment_link(user)
 
 
 def _payment_link_identity(sess):
@@ -4212,8 +4192,6 @@ def api_broker_checkout():
     if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
         return jsonify({'already': True, 'message': 'Payment received.'}), 200
     db_module.set_broker_application(user['id'], 'pending')
-    if not _stripe_configured():
-        return jsonify({'error': 'payment_not_ready', 'message': 'Checkout is not configured.'}), 503
     url = _broker_checkout_url(user)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -4279,8 +4257,6 @@ def api_broker_application():
         return jsonify({'already': True, 'message': 'Payment received.', 'broker': False}), 200
     if not _billing_request_ok():
         return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
-    if not _stripe_configured():
-        return jsonify({'error': 'payment_not_ready', 'message': 'Checkout is not configured. The application is pending.', 'broker': False}), 503
     url = _broker_checkout_url(user)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.', 'broker': False}), 500
@@ -7933,21 +7909,13 @@ def _start_listing_checkout(user, row):
 
 
 def _listing_checkout_url(user, listing_id):
-    """Checkout Session for this listing. None when the fee does not apply or it is already paid."""
+    """Public listing Payment Link. None for off-market listings and listings that are already paid."""
     row = db_module.get_listing_with_owner(listing_id)
     if not row or row.get('payment_status') == 'paid':
         return None
     if not _listing_needs_checkout(row.get('market')):
         return None
-    owner = get_user_by_id(row.get('user_id')) or user
-    started = _start_listing_checkout(owner, row)
-    if not started:
-        return None
-    if started.get('error') and not started.get('url'):
-        return started
-    if started.get('already'):
-        return 'already'
-    return started.get('url')
+    return _listing_payment_link(user, listing_id)
 
 
 @app.route('/api/listings/<int:listing_id>/checkout', methods=['POST'])

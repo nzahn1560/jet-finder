@@ -112,37 +112,13 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertIn(b'Brokers only', allowed.data)
 
-    def test_broker_fee_opens_checkout_instead_of_a_payment_link(self):
-        previous_key = os.environ.get('STRIPE_SECRET_KEY')
-        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_brokercheckout'
+    def test_broker_fee_opens_the_payment_link(self):
         self._login('seller@example.com', 'seller-pass-1')
-        import app as app_module
-        created = []
-
-        def create_session(**kwargs):
-            created.append(kwargs)
-            return type('Session', (), {'id': 'cs_broker', 'url': 'https://checkout.stripe.com/c/pay/cs_broker', 'customer': 'cus_broker'})()
-
-        try:
-            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
-                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_broker'}), \
-                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_broker'}), \
-                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
-                pay = self.client.post('/api/account/broker-checkout')
-            self.assertEqual(pay.status_code, 200, pay.get_json())
-            self.assertTrue(pay.get_json().get('url', '').startswith('https://checkout.stripe.com/'))
-            self.assertEqual(created[0]['metadata']['purpose'], 'broker_account')
-            self.assertEqual(created[0]['metadata']['platform'], 'jetschoolusa')
-            self.assertEqual(created[0]['metadata']['user_id'], str(self.seller['id']))
-            self.assertEqual(created[0]['subscription_data']['metadata']['user_id'], str(self.seller['id']))
-            self.assertEqual(created[0]['line_items'][0]['price_data']['unit_amount'], 1999)
-            self.assertNotIn('ui_mode', created[0])
-            self.assertNotIn('payment_method_types', created[0])
-        finally:
-            if previous_key is None:
-                os.environ.pop('STRIPE_SECRET_KEY', None)
-            else:
-                os.environ['STRIPE_SECRET_KEY'] = previous_key
+        pay = self.client.post('/api/account/broker-checkout')
+        self.assertEqual(pay.status_code, 200, pay.get_json())
+        url = pay.get_json().get('url') or ''
+        self.assertTrue(url.startswith('https://buy.stripe.com/'))
+        self.assertIn(f"client_reference_id=broker-{self.seller['id']}", url)
 
     def test_signup_does_not_grant_a_free_broker_account(self):
         created = self.client.post('/api/auth/signup', json={
@@ -158,8 +134,8 @@ class ProductTests(unittest.TestCase):
         blocked = self.client.get('/off-market')
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
-        self.assertEqual(checkout.status_code, 503, checkout.get_json())
-        self.assertNotIn('buy.stripe.com', checkout.get_json().get('url') or '')
+        self.assertEqual(checkout.status_code, 200, checkout.get_json())
+        self.assertIn('buy.stripe.com', checkout.get_json().get('url') or '')
         portal = self.client.get('/dashboard')
         self.assertNotIn(b'buy.stripe.com', portal.data)
         self.assertIn(b'Pay $19.99 a month', portal.data)
@@ -372,42 +348,23 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(public.status_code, 201, public.get_json())
             self.assertTrue(public.get_json()['payment_required'])
             self.assertEqual(public.get_json()['status'], 'unpaid')
-            import app as app_module
-            created_sessions = []
-
-            def create_session(**kwargs):
-                created_sessions.append(kwargs)
-                return type('Session', (), {'id': 'cs_paywall', 'url': 'https://checkout.stripe.com/c/pay/cs_paywall'})()
-
             page = self.client.get('/create-listing')
             token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
-            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
-                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_paywall'}), \
-                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_paywall'}), \
-                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
-                blocked = self.client.post(
-                    f"/api/listings/{public.get_json()['id']}/checkout",
-                    headers={'Origin': 'http://localhost'},
-                )
-                self.assertEqual(blocked.status_code, 403, blocked.get_json())
-                pay = self.client.post(
-                    f"/api/listings/{public.get_json()['id']}/checkout",
-                    json={'amount_cents': 1},
-                    headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
-                )
+            blocked = self.client.post(
+                f"/api/listings/{public.get_json()['id']}/checkout",
+                headers={'Origin': 'http://localhost'},
+            )
+            self.assertEqual(blocked.status_code, 403, blocked.get_json())
+            pay = self.client.post(
+                f"/api/listings/{public.get_json()['id']}/checkout",
+                json={'amount_cents': 1},
+                headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
+            )
             self.assertEqual(pay.status_code, 200, pay.get_json())
-            self.assertEqual(pay.get_json().get('url'), 'https://checkout.stripe.com/c/pay/cs_paywall')
-            self.assertEqual(created_sessions[0]['line_items'][0]['price_data']['unit_amount'], pricing.listing_price_cents())
-            self.assertEqual(created_sessions[0]['metadata']['listing_id'], str(public.get_json()['id']))
-            self.assertEqual(created_sessions[0]['metadata']['jetschool_listing_id'], str(public.get_json()['id']))
-            self.assertEqual(created_sessions[0]['metadata']['jetschool_billing_type'], 'aircraft_listing')
-            self.assertEqual(created_sessions[0]['metadata']['user_id'], str(self.seller['id']))
-            self.assertEqual(created_sessions[0]['subscription_data']['metadata']['listing_id'], str(public.get_json()['id']))
-            self.assertEqual(created_sessions[0]['subscription_data']['metadata']['jetschool_user_id'], str(self.seller['id']))
-            self.assertEqual(created_sessions[0]['metadata']['serial_number'], '5501')
-            self.assertEqual(created_sessions[0]['metadata']['platform'], 'jetschoolusa')
-            self.assertNotIn('payment_method_types', created_sessions[0])
-            self.assertNotIn('ui_mode', created_sessions[0])
+            url = pay.get_json().get('url') or ''
+            self.assertTrue(url.startswith('https://buy.stripe.com/'))
+            self.assertIn(f"listing-{public.get_json()['id']}-user-{self.seller['id']}-sn-5501", url)
+            self.assertNotIn('amount_cents=1', url)
             page = self.client.get('/create-listing')
             self.assertIn(b'opens checkout', page.data)
             self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
@@ -471,8 +428,8 @@ class ProductTests(unittest.TestCase):
                     f"/api/listings/{public.get_json()['id']}/checkout",
                     headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
                 )
-            self.assertEqual(pay.status_code, 500, pay.get_json())
-            self.assertIn('cannot currently make live charges', pay.get_json().get('message') or '')
+            self.assertEqual(pay.status_code, 200, pay.get_json())
+            self.assertTrue((pay.get_json().get('url') or '').startswith('https://buy.stripe.com/'))
         finally:
             if previous_flag is None:
                 os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
@@ -1819,26 +1776,13 @@ class ProductTests(unittest.TestCase):
             second = self.client.post('/api/listings', json=self._payload('Second Customer Jet', 'public'))
             first_id = first.get_json()['id']
             second_id = second.get_json()['id']
-            import app as app_module
-            created_sessions = []
-
-            def create_session(**kwargs):
-                created_sessions.append(kwargs)
-                suffix = kwargs['metadata']['listing_id']
-                return type('Session', (), {'id': 'cs_' + suffix, 'url': 'https://checkout.stripe.com/c/pay/cs_' + suffix})()
-
-            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
-                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_one'}), \
-                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_one'}), \
-                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
-                pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
-                pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
+            pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
+            pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
             self.assertEqual(pay1.status_code, 200, pay1.get_json())
             self.assertEqual(pay2.status_code, 200, pay2.get_json())
-            self.assertEqual(created_sessions[0]['metadata']['listing_id'], str(first_id))
-            self.assertEqual(created_sessions[1]['metadata']['listing_id'], str(second_id))
-            self.assertEqual(created_sessions[0]['customer'], created_sessions[1]['customer'])
-            self.assertEqual(created_sessions[0]['subscription_data']['metadata']['user_id'], str(person['id']))
+            self.assertIn(f'listing-{first_id}-user-{person["id"]}', pay1.get_json().get('url') or '')
+            self.assertIn(f'listing-{second_id}-user-{person["id"]}', pay2.get_json().get('url') or '')
+            self.assertNotEqual(pay1.get_json().get('url'), pay2.get_json().get('url'))
             sent = []
             original = db_module._send_notice_email
             db_module._send_notice_email = lambda email, title, body: sent.append((email, title, body)) or True
