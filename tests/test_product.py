@@ -445,6 +445,44 @@ class ProductTests(unittest.TestCase):
             else:
                 os.environ['STRIPE_SECRET_KEY'] = previous_key
 
+    def test_listing_checkout_shows_the_stripe_reason(self):
+        previous_flag = os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS')
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallreason'
+        try:
+            self._login('seller@example.com', 'seller-pass-1')
+            public = self.client.post('/api/listings', json=self._payload('Reason Jet', 'public'))
+            self.assertEqual(public.status_code, 201, public.get_json())
+            import app as app_module
+
+            def refuse(**kwargs):
+                raise app_module.stripe.error.InvalidRequestError(
+                    'Your account cannot currently make live charges.', 'mode',
+                )
+
+            page = self.client.get('/create-listing')
+            token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
+                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_reason'}), \
+                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_reason'}), \
+                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=refuse):
+                pay = self.client.post(
+                    f"/api/listings/{public.get_json()['id']}/checkout",
+                    headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
+                )
+            self.assertEqual(pay.status_code, 500, pay.get_json())
+            self.assertIn('cannot currently make live charges', pay.get_json().get('message') or '')
+        finally:
+            if previous_flag is None:
+                os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
+            else:
+                os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = previous_flag
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
+
     def test_off_market_listing_needs_only_name_profile_and_year(self):
         self._login('broker@example.com', 'broker-pass-1')
         created = self.client.post('/api/listings', json={

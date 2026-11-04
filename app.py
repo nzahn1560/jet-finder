@@ -3727,13 +3727,13 @@ def _customer_missing(exc) -> bool:
     return 'No such customer' in str(exc)
 
 
-def _stripe_customer_for(user):
+def _stripe_customer_for(user, force_new=False):
     """One Stripe customer per account. A new listing reuses it instead of opening another."""
     if not user or not user.get('id'):
         return None
     email = (user.get('email') or '').strip()
     name = ' '.join(part for part in (user.get('first_name'), user.get('last_name')) if part).strip()
-    existing = _saved_stripe_customer(user['id'])
+    existing = None if force_new else _saved_stripe_customer(user['id'])
     if existing and _stripe_configured():
         try:
             fields = {'metadata': {'user_id': str(user['id'])}}
@@ -3778,7 +3778,17 @@ def _stripe_customer_for(user):
         params['email'] = email
     if name:
         params['name'] = name
-    created = stripe.Customer.create(idempotency_key=f"jetschool-customer-{user['id']}", **params)
+    idempotency_key = None if force_new else f"jetschool-customer-{user['id']}"
+    try:
+        if idempotency_key:
+            created = stripe.Customer.create(idempotency_key=idempotency_key, **params)
+        else:
+            created = stripe.Customer.create(**params)
+    except Exception as exc:
+        if idempotency_key and 'idempoten' in str(exc).lower():
+            created = stripe.Customer.create(**params)
+        else:
+            raise
     customer_id = _stripe_ref(created)
     return db_module.set_user_stripe_customer(user['id'], customer_id, replace=True)
 
@@ -3792,11 +3802,15 @@ def _stripe_buyer(user):
 
 
 def _public_base() -> str:
-    """Site URL Stripe should send the buyer back to."""
+    """Site URL Stripe should send the buyer back to. Live Checkout requires https."""
     configured = (os.environ.get('PUBLIC_BASE_URL') or '').strip().strip('"').strip("'").rstrip('/')
     if configured.startswith('https://') or configured.startswith('http://'):
-        return configured
-    return request.host_url.rstrip('/')
+        base = configured
+    else:
+        base = request.host_url.rstrip('/')
+    if _stripe_secret().startswith('sk_live_') and base.startswith('http://'):
+        base = 'https://' + base[len('http://'):]
+    return base.rstrip('/')
 
 
 def _checkout_idempotency(prefix):
@@ -3942,6 +3956,74 @@ def _subscription_line(amount_cents, name, description, price_id=None):
     }
 
 
+def _stripe_error_text(exc) -> str:
+    """A short Stripe reason safe to show on the page. The secret key is never included."""
+    message = getattr(exc, 'user_message', None) or str(exc or '')
+    text = ' '.join(str(message).split())
+    secret = _stripe_secret()
+    if secret and secret in text:
+        text = text.replace(secret, '')
+    return text[:220] or 'Checkout could not be started.'
+
+
+def _https_checkout_url(url):
+    text = str(url or '')
+    if _stripe_secret().startswith('sk_live_') and text.startswith('http://'):
+        return 'https://' + text[len('http://'):]
+    return text
+
+
+def _create_subscription_checkout(customer_id, meta, amount_cents, product_name, product_description, success_url, cancel_url, idempotency_key, reference=None, price_id=None):
+    """Open one hosted subscription Checkout Session. Returns (session, error)."""
+    clean = {}
+    for key, value in dict(meta or {}).items():
+        if value in (None, ''):
+            continue
+        clean[str(key)[:40]] = str(value)[:500]
+    clean.setdefault('platform', 'jetschoolusa')
+    params = {
+        'mode': 'subscription',
+        'customer': customer_id,
+        'metadata': clean,
+        'subscription_data': {'metadata': clean},
+        'line_items': [_subscription_line(amount_cents, product_name, product_description, price_id)],
+        'success_url': _https_checkout_url(success_url),
+        'cancel_url': _https_checkout_url(cancel_url),
+        'allow_promotion_codes': True,
+        'automatic_tax': {'enabled': False},
+        'payment_method_collection': 'always',
+        'billing_address_collection': 'auto',
+        'idempotency_key': idempotency_key,
+    }
+    if reference:
+        params['client_reference_id'] = reference
+    last = None
+    for attempt in range(3):
+        try:
+            return stripe.checkout.Session.create(**params), None
+        except Exception as exc:
+            last = exc
+            logger.exception('Checkout creation failed')
+            text = _stripe_error_text(exc).lower()
+            params['idempotency_key'] = f"{idempotency_key}-r{attempt + 1}"
+            if 'no such customer' in text:
+                return None, 'missing_customer'
+            if 'no such price' in text:
+                price_id = None
+                params['line_items'] = [_subscription_line(amount_cents, product_name, product_description, None)]
+                continue
+            if 'unknown parameter' in text:
+                for key in ('automatic_tax', 'payment_method_collection', 'billing_address_collection', 'allow_promotion_codes'):
+                    params.pop(key, None)
+                continue
+            if 'idempoten' in text or 'https' in text or 'url must' in text:
+                params['success_url'] = _https_checkout_url(params.get('success_url'))
+                params['cancel_url'] = _https_checkout_url(params.get('cancel_url'))
+                continue
+            break
+    return None, _stripe_error_text(last) if last else 'Checkout could not be started.'
+
+
 def _open_paid_checkout(user, meta, amount_cents, product_name, product_description, success_url, cancel_url, idem_prefix, price_id=None):
     """Hosted subscription Checkout on the account's one Stripe customer.
 
@@ -3950,29 +4032,35 @@ def _open_paid_checkout(user, meta, amount_cents, product_name, product_descript
     """
     if not _stripe_configured():
         return None
-    customer_id = _stripe_customer_for(user)
+    try:
+        customer_id = _stripe_customer_for(user)
+    except Exception:
+        logger.exception('Checkout customer creation failed')
+        return None
     if not customer_id:
         return None
     meta = dict(meta or {})
     meta.setdefault('platform', 'jetschoolusa')
-    try:
-        checkout = stripe.checkout.Session.create(
-            mode='subscription',
-            customer=customer_id,
-            client_reference_id=_checkout_reference(meta) or None,
-            metadata=meta,
-            subscription_data={'metadata': meta},
-            line_items=[_subscription_line(amount_cents, product_name, product_description, price_id)],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            allow_promotion_codes=True,
-            automatic_tax={'enabled': False},
-            payment_method_collection='always',
-            billing_address_collection='auto',
-            idempotency_key=idem_prefix,
+    checkout, err = _create_subscription_checkout(
+        customer_id, meta, amount_cents, product_name, product_description,
+        success_url, cancel_url, idem_prefix,
+        reference=_checkout_reference(meta) or None,
+        price_id=price_id,
+    )
+    if err == 'missing_customer':
+        try:
+            customer_id = _stripe_customer_for(user, force_new=True)
+        except Exception:
+            logger.exception('Checkout customer creation failed')
+            return None
+        checkout, err = _create_subscription_checkout(
+            customer_id, meta, amount_cents, product_name, product_description,
+            success_url, cancel_url, f'{idem_prefix}-cus',
+            reference=_checkout_reference(meta) or None,
+            price_id=price_id,
         )
-    except Exception:
-        logger.exception('Checkout creation failed')
+    if not checkout:
+        logger.error('Checkout creation failed: %s', err)
         return None
     saved_customer = _stripe_ref(_stripe_field(checkout, 'customer')) or customer_id
     if saved_customer:
@@ -7732,8 +7820,10 @@ def _reuse_open_listing_checkout(existing):
 
 def _start_listing_checkout(user, row):
     """Open Checkout for this owner and this listing. The browser does not set the price."""
-    if not user or not row or not _stripe_configured():
+    if not user or not row:
         return None
+    if not _stripe_configured():
+        return {'error': 'Stripe is not connected. The secret key is missing.'}
     existing = db_module.open_listing_subscription(row.get('id'))
     if existing and existing.get('status') in ('active', 'trialing', 'past_due', 'unpaid'):
         return {'already': True}
@@ -7741,11 +7831,15 @@ def _start_listing_checkout(user, row):
         return {'already': True}
     if existing and existing.get('status') == 'incomplete':
         reused = _reuse_open_listing_checkout(existing)
-        if reused:
+        if reused and (reused.get('url') or reused.get('already')):
             return reused
-    customer_id = _stripe_customer_for(user)
+    try:
+        customer_id = _stripe_customer_for(user)
+    except Exception as exc:
+        logger.exception('Listing checkout customer creation failed')
+        return {'error': _stripe_error_text(exc)}
     if not customer_id:
-        return None
+        return {'error': 'Checkout could not be started.'}
     amount = _listing_fee_cents()
     meta = _listing_checkout_metadata(row)
     reference = _listing_client_reference(row.get('id'), row.get('user_id'), meta.get('serial_number'))
@@ -7755,48 +7849,57 @@ def _start_listing_checkout(user, row):
     )
     attempt = db_module.start_checkout_attempt(row.get('user_id'), row.get('id'), amount, f"listing-{row.get('id')}-{int(datetime.utcnow().timestamp())}")
     base = _public_base()
-    try:
-        checkout = stripe.checkout.Session.create(
-        mode='subscription',
-        customer=customer_id,
-        client_reference_id=reference,
-        metadata=meta,
-        subscription_data={'metadata': meta},
-        line_items=[_subscription_line(
-            amount, 'Aircraft listing', str(row.get('title') or 'Aircraft listing'), price_id,
-        )],
-        success_url=f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{base}/dashboard?listing={row.get('id')}&checkout=cancel",
-        allow_promotion_codes=True,
-        automatic_tax={'enabled': False},
-        payment_method_collection='always',
-        billing_address_collection='auto',
-        idempotency_key=attempt.get('idempotency_key') or _checkout_idempotency(f"listing-{row.get('id')}"),
+    idempotency_key = attempt.get('idempotency_key') or _checkout_idempotency(f"listing-{row.get('id')}")
+    checkout, err = _create_subscription_checkout(
+        customer_id, meta, amount, 'Aircraft listing', str(row.get('title') or 'Aircraft listing'),
+        f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
+        f"{base}/dashboard?listing={row.get('id')}&checkout=cancel",
+        idempotency_key,
+        reference=reference,
+        price_id=price_id,
     )
-    except Exception:
-        logger.exception('Listing checkout creation failed')
-        return None
+    if err == 'missing_customer':
+        try:
+            customer_id = _stripe_customer_for(user, force_new=True)
+        except Exception as exc:
+            logger.exception('Listing checkout customer creation failed')
+            return {'error': _stripe_error_text(exc)}
+        checkout, err = _create_subscription_checkout(
+            customer_id, meta, amount, 'Aircraft listing', str(row.get('title') or 'Aircraft listing'),
+            f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
+            f"{base}/dashboard?listing={row.get('id')}&checkout=cancel",
+            f"{idempotency_key}-cus",
+            reference=reference,
+            price_id=price_id,
+        )
+    if not checkout:
+        return {'error': err or 'Checkout could not be started.'}
     session_id = _stripe_field(checkout, 'id')
     checkout_url = _stripe_field(checkout, 'url')
-    db_module.save_listing_subscription(
-        user_id=row.get('user_id'),
-        listing_id=row.get('id'),
-        stripe_customer_id=customer_id,
-        checkout_session_id=session_id,
-        status='incomplete',
-        amount_cents=amount,
-        agreed_amount_cents=amount,
-        currency='usd',
-        billing_interval='month',
-        match_status='matched',
-        cancellation_status='none',
-        checkout_url=checkout_url,
-        billing_status='incomplete',
-        stripe_price_id=price_id,
-    )
-    db_module.finish_checkout_attempt(row.get('id'), 'open', session_id)
-    if session_id:
-        db_module.set_listing_payment_session(row.get('id'), session_id)
+    if not checkout_url:
+        return {'error': 'Stripe did not return a payment page.'}
+    try:
+        db_module.save_listing_subscription(
+            user_id=row.get('user_id'),
+            listing_id=row.get('id'),
+            stripe_customer_id=customer_id,
+            checkout_session_id=session_id,
+            status='incomplete',
+            amount_cents=amount,
+            agreed_amount_cents=amount,
+            currency='usd',
+            billing_interval='month',
+            match_status='matched',
+            cancellation_status='none',
+            checkout_url=checkout_url,
+            billing_status='incomplete',
+            stripe_price_id=price_id,
+        )
+        db_module.finish_checkout_attempt(row.get('id'), 'open', session_id)
+        if session_id:
+            db_module.set_listing_payment_session(row.get('id'), session_id)
+    except Exception:
+        logger.exception('Could not store the listing checkout')
     return {'url': checkout_url}
 
 
@@ -7811,6 +7914,8 @@ def _listing_checkout_url(user, listing_id):
     started = _start_listing_checkout(owner, row)
     if not started:
         return None
+    if started.get('error') and not started.get('url'):
+        return started
     if started.get('already'):
         return 'already'
     return started.get('url')
@@ -7838,6 +7943,8 @@ def api_listing_checkout(listing_id: int):
     if open_sub and open_sub.get('status') in ('active', 'trialing', 'past_due', 'unpaid'):
         return jsonify({'skip': True, 'message': 'This listing already has a subscription.'}), 200
     url = _listing_checkout_url(user, listing_id)
+    if isinstance(url, dict):
+        return jsonify({'error': 'stripe_error', 'message': url.get('error') or 'Checkout could not be started.'}), 500
     if url == 'already':
         return jsonify({'skip': True, 'message': 'Already paid'}), 200
     if not url:
