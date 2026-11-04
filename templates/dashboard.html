@@ -311,8 +311,7 @@
                 const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include', headers: billingHeaders(false) });
                 const data = await response.json().catch(function () { return {}; });
                 if (data.url) { window.location = data.url; return; }
-                button.disabled = false;
-                button.insertAdjacentText('afterend', ' ' + (data.message || 'Billing is unavailable.'));
+                window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
             });
         })();
         </script>
@@ -330,8 +329,7 @@
                 const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include', headers: billingHeaders(false) });
                 const data = await response.json().catch(function () { return {}; });
                 if (data.url) { window.location = data.url; return; }
-                button.disabled = false;
-                button.insertAdjacentText('afterend', ' ' + (data.message || 'Billing is unavailable.'));
+                window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
             });
         })();
         </script>
@@ -341,12 +339,12 @@
         <section class="fold" id="members">
             <button type="button" class="fold__toggle" id="members-toggle" aria-expanded="false">Manage members</button>
             <div class="fold__body" id="members-body" hidden>
-                <p style="color:#d0d0d0; margin:0 0 0.8rem;">People who ask to join {{ membership.name or 'this brokerage' }} show up here and in Alerts. Approving them makes them a broker on this team. They do not pay.</p>
+                <p style="color:#d0d0d0; margin:0 0 0.8rem;">You are the brokerage. Approving someone makes them a broker here, with the same access you have. They do not pay.</p>
                 <div id="member-requests"></div>
                 <div id="member-roster" style="margin-top:0.8rem;"></div>
                 <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:1rem;">
                     <input class="form-control" id="team-member-email" type="email" placeholder="Email of the person to add" style="max-width:280px;">
-                    <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add to the team</button>
+                    <button type="button" class="dash__btn dash__btn--primary" id="add-team-member" data-team="{{ membership.id }}" style="border:0; cursor:pointer;">Add a broker</button>
                 </div>
                 <p id="members-status" style="color:#c8c8c8; margin:0.6rem 0 0;"></p>
             </div>
@@ -356,7 +354,7 @@
         <section class="fold" id="subscriptions">
             <button type="button" class="fold__toggle" id="subscriptions-toggle" aria-expanded="false">My billing</button>
             <div class="fold__body" id="subscriptions-body" hidden>
-                <p style="color:#d0d0d0; margin:0 0 0.8rem;">My subscriptions are listed here, one monthly fee per aircraft. Canceling or deleting stops future charges for that aircraft only. It does not refund a charge already collected. Hiding a listing does not stop the fee.</p>
+                <p style="color:#d0d0d0; margin:0 0 0.8rem;">My subscriptions are listed here, one monthly fee per aircraft. Open Manage payment on that aircraft to update the card or cancel the subscription. The listing stays until that subscription is canceled there. A charge already collected is not refunded. Hiding a listing does not stop the fee.</p>
                 <div id="subscription-list"></div>
                 <p id="subscription-status" style="color:#c8c8c8; margin:0.6rem 0 0;"></p>
             </div>
@@ -464,6 +462,7 @@
 </div>
 
 <script>
+const MANAGE_PAYMENT_URL = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
 function billingHeaders(json) {
     const meta = document.querySelector('meta[name="csrf-token"]');
     const headers = { 'X-CSRF-Token': meta ? meta.getAttribute('content') : '' };
@@ -519,7 +518,9 @@ function billingHeaders(json) {
             const paidFee = l.payment_status === 'paid';
             const feeWaiting = paidFee && (l.status === 'pending' || l.status === 'unpaid' || l.status === 'draft');
             const feeDraft = !offMarket && !paidFee && l.status !== 'active' && l.status !== 'suspended';
-            const copy = feeWaiting
+            const copy = l.resubmitted
+                ? 'Resubmitted. Already paid.'
+                : (feeWaiting
                 ? 'Payment received, awaiting approval.'
                 : (feeDraft
                 ? 'This listing has not been paid for. It is only saved as a draft.'
@@ -529,12 +530,13 @@ function billingHeaders(json) {
                 ? 'Live on the off-market page. Not on the public marketplace.'
                 : (offMarket && l.status === 'pending'
                     ? 'Waiting for approval. It will go to the off-market page, not the public marketplace.'
-                    : (statusCopy[l.status] || 'Saved.'))));
+                    : (statusCopy[l.status] || 'Saved.')))));
             const searchBlob = [l.title, l.name, l.manufacturer, l.category, l.location, l.year].join(' ');
             const openHref = l.status === 'active'
                 ? (offMarket ? '/off-market' : '/listing/' + l.id)
                 : ('/create-listing?edit=' + l.id);
             return '\n<div class="dash__card" data-search="' + escapeHtml(searchBlob) + '" data-price="' + (Number(l.price) || 0) + '" data-year="' + (Number(l.year) || 0) + '" data-title="' + escapeHtml(l.title || '') + '" data-created="' + escapeHtml(l.created_at || '') + '">\n'
+                + '  <p style="margin:0 0 0.2rem;color:#9a9a9a;font-size:0.72rem;letter-spacing:0.04em;">' + escapeHtml(l.id) + '</p>\n'
                 + '  <h3 class="dash__card-title"><a href="' + openHref + '">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</a></h3>\n'
                 + '  <p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + ' &middot; ' + escapeHtml(l.category || '') + '<br>'
                 + '  ' + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + (l.location ? ' &middot; ' + escapeHtml(l.location) : '') + '</p>\n'
@@ -549,6 +551,7 @@ function billingHeaders(json) {
                 + ((paidFee || offMarket) && (l.status === 'changes_requested' || l.status === 'rejected' || l.status === 'draft' || l.status === 'suspended' || (l.status === 'pending' && l.review_message)) ? '<button class="dash__card-link" data-resubmit="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#fff;">Resubmit for review</button>' : '')
                 + (isAdmin && l.status !== 'active' && l.status !== 'deleted' ? '<button class="dash__card-link" data-approve="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#22c55e;">Approve</button>' : '')
                 + (canEdit ? '<a class="dash__card-link" href="/create-listing?edit=' + l.id + '">Edit</a>' : '')
+                + '<a class="dash__card-link" href="' + MANAGE_PAYMENT_URL + '" target="_blank" rel="noopener">Manage payment</a>'
                 + (canDelete ? '<button class="dash__card-link" data-delete="' + l.id + '" style="background:none;border:0;cursor:pointer;color:#ef4444;">Delete</button>' : '')
                 + '  </div>\n'
                 + '</div>';
@@ -591,7 +594,7 @@ function billingHeaders(json) {
         });
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Delete this listing? It leaves the site and its monthly subscription is canceled. A charge already collected is not refunded. Other aircraft are not affected.')) return;
+                if (!confirm('Remove this listing? Cancel its subscription in Manage payment first. Removing the listing does not cancel the subscription.')) return;
                 const id = btn.getAttribute('data-delete');
                 const resp = await fetch('/api/listings/' + id, { method: 'DELETE', credentials: 'include', headers: billingHeaders(false) });
                 const body = await resp.json().catch(function () { return {}; });
@@ -609,7 +612,7 @@ function billingHeaders(json) {
         });
         listEl.querySelectorAll('[data-sold]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Mark this aircraft sold? The listing leaves the site and only this subscription is canceled. A charge already collected is not refunded.')) return;
+                if (!confirm('Mark this aircraft sold? Cancel its subscription in Manage payment first. This does not cancel the subscription.')) return;
                 const resp = await fetch('/api/listings/' + btn.getAttribute('data-sold') + '/sold', { method: 'POST', credentials: 'include', headers: billingHeaders(true), body: '{}' });
                 const soldBody = await resp.json().catch(function () { return {}; });
                 alert(soldBody.message || (resp.ok ? 'Marked sold.' : 'Could not mark this sold.'));
@@ -633,13 +636,6 @@ function billingHeaders(json) {
                 const resp = await fetch('/api/listings/' + id + '/resubmit', { method: 'POST', credentials: 'include' });
                 const data = await resp.json().catch(function () { return {}; });
                 if (resp.ok) { window.location.href = '/dashboard'; return; }
-                if (data.payment_required) {
-                    const pay = await fetch('/api/listings/' + id + '/checkout', { method: 'POST', credentials: 'include', headers: billingHeaders(false) });
-                    const payData = await pay.json().catch(function () { return {}; });
-                    if (pay.ok && payData.url) { window.location.href = payData.url; return; }
-                    alert(payData.message || 'This listing still needs the listing fee before review.');
-                    return;
-                }
                 alert(data.message || data.error || 'Could not send it back.');
             });
         });
@@ -796,7 +792,6 @@ function billingHeaders(json) {
                 const link = invoice.hosted_invoice_url ? ' · <a href="' + esc(invoice.hosted_invoice_url) + '">Receipt</a>' : '';
                 return '<li>' + esc(invoice.status) + ' · ' + esc(invoice.amount_cents != null ? ('$' + (invoice.amount_cents / 100).toFixed(2)) : '') + link + '</li>';
             }).join('');
-            const canCancel = row.billing_status !== 'canceled' && row.billing_status !== 'cancellation_pending' && row.status && row.status !== 'canceled' && row.status !== 'incomplete_expired';
             const listingLink = row.listing_id ? '<a href="/listing/' + row.listing_id + '" style="color:#fff;">View listing</a>' : '';
             return '<article style="border-bottom:1px solid rgba(255,255,255,0.12);padding:0.8rem 0;">'
                 + '<strong>' + esc(row.aircraft || 'Listing') + '</strong>'
@@ -806,33 +801,9 @@ function billingHeaders(json) {
                 + (history ? '<p style="margin:0.45rem 0 0;">Billing history</p><ul style="margin:0.2rem 0 0;color:#d0d0d0;">' + history + '</ul>' : '')
                 + '<div style="display:flex;gap:0.6rem;margin-top:0.5rem;flex-wrap:wrap;">'
                 + listingLink
-                + (canCancel ? '<button type="button" data-cancel-sub="' + row.id + '" style="background:none;border:0;color:#ef4444;cursor:pointer;">Cancel subscription</button>' : '')
-                + '<button type="button" data-update-card="1" style="background:none;border:0;color:#fff;cursor:pointer;">Update payment method</button>'
+                + '<a href="' + MANAGE_PAYMENT_URL + '" target="_blank" rel="noopener" style="color:#fff;">Manage payment</a>'
                 + '</div></article>';
         }).join('');
-        list.querySelectorAll('[data-cancel-sub]').forEach(function (button) {
-            button.addEventListener('click', async function () {
-                if (!window.confirm('Cancel this subscription? Future charges stop. A charge already collected is not refunded. The listing comes off the site.')) return;
-                button.disabled = true;
-                const response = await fetch('/api/account/subscriptions/' + button.getAttribute('data-cancel-sub') + '/cancel', { method: 'POST', credentials: 'include', headers: billingHeaders(true), body: '{}' });
-                const body = await response.json().catch(function () { return {}; });
-                if (!response.ok) {
-                    button.disabled = false;
-                    if (status) status.textContent = body.message || 'Stripe could not cancel this subscription. Try again.';
-                    return;
-                }
-                if (status) status.textContent = body.message || 'Canceled.';
-                loadSubscriptions();
-            });
-        });
-        list.querySelectorAll('[data-update-card]').forEach(function (button) {
-            button.addEventListener('click', async function () {
-                const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include', headers: billingHeaders(false) });
-                const body = await response.json().catch(function () { return {}; });
-                if (body.url) { window.location = body.url; return; }
-                if (status) status.textContent = body.message || 'The card update page could not be opened.';
-            });
-        });
     }
     if (location.hash === '#subscriptions') openFold();
     loadSubscriptions();

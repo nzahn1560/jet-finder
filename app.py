@@ -1600,10 +1600,19 @@ def api_public_person_listings(user_id):
         listings = db_module.listings_for_team(team['id'], include_off_market=include_off_market)
     else:
         listings = db_module.listings_for_user(user_id, include_off_market=include_off_market)
+    media = db_module.list_media_for_listings([row['id'] for row in listings if row.get('id')])
     for listing in listings:
         listing['title'] = _listing_title(
             listing.get('year'), listing.get('model'), listing.get('title'), listing.get('manufacturer'),
         )
+        photos = []
+        for item in media.get(int(listing['id']), []):
+            if item.get('media_type') not in (None, '', 'photo'):
+                continue
+            url = item.get('url') or item.get('thumbnail_url')
+            if url:
+                photos.append(url)
+        listing['photos'] = photos
     return jsonify({'listings': listings})
 
 @app.route('/airplane-stock-market')
@@ -3538,6 +3547,11 @@ def _apply_listing_cancellation(row, hide_status, reason, actor_id=None):
     listing_id = row.get('id')
     if listing_id and hide_status:
         db_module.hide_listing_for_billing(listing_id, hide_status)
+    if hide_status in ('deleted', 'sold'):
+        _notify_admins_new_listing(
+            listing_id, row.get('title'), row.get('email'),
+            market=row.get('market'), kind=hide_status,
+        )
     ok, message = _cancel_listing_fee(row)
     stored = db_module.open_listing_subscription(listing_id) or db_module.listing_subscription_by_stripe_id(row.get('stripe_subscription_id'))
     subscription_id = (stored or {}).get('stripe_subscription_id') or row.get('stripe_subscription_id')
@@ -3618,14 +3632,12 @@ def _find_listing_subscription_id(row):
 
 
 def _cancel_user_billing(user_id):
-    """Stop Stripe subscriptions for an account before it is deleted."""
+    """Stop a broker subscription before the account is deleted.
+
+    A listing fee is canceled in the Customer Portal. This does not cancel it.
+    """
     if not _stripe_configured():
         return
-    for subscription_id in db_module.listing_subscription_ids(user_id):
-        try:
-            stripe.Subscription.delete(subscription_id)
-        except Exception:
-            logger.exception('Could not cancel listing subscription %s', subscription_id)
     for subscription in db_module.get_user_subscriptions(user_id):
         subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
@@ -3641,6 +3653,17 @@ def _cancel_user_billing(user_id):
 def api_account_delete():
     """Delete the signed-in account, its listings, and its session."""
     user = request.current_user  # type: ignore[attr-defined]
+    open_listing_fee = any(
+        item.get('status') in db_module.OPEN_LISTING_SUBSCRIPTION_STATUSES
+        and not _subscription_canceled_in_portal(item)
+        for item in db_module.list_listing_subscriptions(user_id=user['id'])
+    )
+    if open_listing_fee:
+        return jsonify({
+            'error': 'cancel_in_portal',
+            'message': PORTAL_CANCEL_MESSAGE,
+            'portal_url': STRIPE_CUSTOMER_PORTAL_URL,
+        }), 409
     _cancel_user_billing(user['id'])
     if not db_module.delete_user_account(user['id']):
         return jsonify({'error': 'not_found'}), 404
@@ -3707,6 +3730,79 @@ BROKER_FEE_CENTS = 1999
 BROKER_FEE_LABEL = '$19.99'
 BROKER_PAYMENT_LINK = 'https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00'
 LISTING_PAYMENT_LINK = 'https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01'
+STRIPE_CUSTOMER_PORTAL_ID = 'bpc_1UXqlP4JhcdqEzFV4F3f4LQq'
+STRIPE_CUSTOMER_PORTAL_URL = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00'
+PORTAL_CANCEL_MESSAGE = 'Cancel this subscription in Manage payment first. Then you can remove the listing.'
+
+
+def _portal_configuration_id():
+    """The Customer Portal configuration. An env value wins when it is a real portal id."""
+    configured = (os.environ.get('STRIPE_PORTAL_CONFIGURATION_ID') or '').strip()
+    if configured.startswith('bpc_'):
+        return configured
+    return STRIPE_CUSTOMER_PORTAL_ID
+
+
+def _subscription_canceled_in_portal(stored):
+    """True after the customer cancels that subscription in the Stripe Customer Portal."""
+    if not stored:
+        return False
+    if stored.get('cancel_at_period_end'):
+        return True
+    if stored.get('status') == 'canceled' or stored.get('cancellation_status') == 'canceled':
+        return True
+    return stored.get('billing_status') in ('canceled', 'cancel_at_period_end')
+
+
+def _listing_billing_row(row):
+    """The billing row for this listing, including one that is already canceled."""
+    if not row:
+        return None
+    stored = db_module.open_listing_subscription(row.get('id'))
+    if stored:
+        return stored
+    if row.get('stripe_subscription_id'):
+        found = db_module.listing_subscription_by_stripe_id(row.get('stripe_subscription_id'))
+        if found:
+            return found
+    matches = [
+        item for item in db_module.list_listing_subscriptions(user_id=row.get('user_id'))
+        if item.get('listing_id') == row.get('id')
+    ]
+    return matches[0] if matches else None
+
+
+def _portal_cancel_required(row):
+    """The customer has to cancel in the portal before this listing can come off the site."""
+    if not row:
+        return None
+    stored = _listing_billing_row(row)
+    if stored and _subscription_canceled_in_portal(stored):
+        return None
+    if stored and stored.get('status') in db_module.OPEN_LISTING_SUBSCRIPTION_STATUSES:
+        return PORTAL_CANCEL_MESSAGE
+    if row.get('payment_status') in ('paid', 'past_due'):
+        return PORTAL_CANCEL_MESSAGE
+    return None
+
+
+def _take_listing_off_site(row, hide_status):
+    """Hide the listing. This does not cancel a Stripe subscription."""
+    listing_id = row.get('id')
+    if listing_id and hide_status:
+        db_module.hide_listing_for_billing(listing_id, hide_status)
+    if listing_id and row.get('payment_status') in ('paid', 'past_due', 'pending', 'unpaid', None, ''):
+        db_module.mark_listing_payment_stopped(listing_id)
+    if hide_status in ('deleted', 'sold'):
+        _notify_admins_new_listing(
+            listing_id, row.get('title'), row.get('email'),
+            market=row.get('market'), kind=hide_status,
+        )
+    return {
+        'ok': True,
+        'billing': 'portal',
+        'message': 'The listing is off the site.',
+    }
 
 
 def _saved_stripe_customer(user_id):
@@ -4309,9 +4405,7 @@ def api_billing_portal():
         'customer': row['stripe_customer_id'],
         'return_url': f'{base}/dashboard',
     }
-    configuration = (os.environ.get('STRIPE_PORTAL_CONFIGURATION_ID') or '').strip()
-    if configuration:
-        params['configuration'] = configuration
+    params['configuration'] = _portal_configuration_id()
     try:
         portal = stripe.billing_portal.Session.create(**params)
     except Exception:
@@ -4394,7 +4488,7 @@ def api_account_subscriptions():
 @app.route('/api/account/subscriptions/<int:subscription_row_id>/cancel', methods=['POST'])
 @require_auth
 def api_account_subscription_cancel(subscription_row_id):
-    """Cancel one listing subscription. Does not refund charges already collected."""
+    """Listing fees are canceled in the Customer Portal, not from this site."""
     user = request.current_user  # type: ignore[attr-defined]
     row = db_module.listing_subscription_by_id(subscription_row_id)
     if not row or row.get('user_id') != user['id']:
@@ -4404,17 +4498,11 @@ def api_account_subscription_cancel(subscription_row_id):
         return jsonify({'error': 'forbidden'}), 403
     if not _billing_request_ok():
         return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
-    target = listing or {
-        'id': row.get('listing_id'),
-        'user_id': user['id'],
-        'stripe_subscription_id': row.get('stripe_subscription_id'),
-        'stripe_customer_id': row.get('stripe_customer_id'),
-        'payment_status': 'paid',
-    }
-    result = _apply_listing_cancellation(target, 'archived', 'customer_cancel', user['id'])
-    if not result.get('ok'):
-        return jsonify(result), 502
-    return jsonify(result), 200
+    return jsonify({
+        'error': 'cancel_in_portal',
+        'message': PORTAL_CANCEL_MESSAGE,
+        'portal_url': STRIPE_CUSTOMER_PORTAL_URL,
+    }), 409
 
 
 @app.route('/api/brokers/directory')
@@ -6773,8 +6861,26 @@ def _notify_admins_new_listing(listing_id, title, seller_email, market='public',
     import email_service as email_mod
     addresses = _admin_addresses()
     link = '/admin?highlight=' + str(listing_id)
+    if kind in ('deleted', 'sold'):
+        link = '/admin?status=' + kind + '&highlight=' + str(listing_id)
     where = 'off market' if market in ('off_market', 'broker_only') else 'the public marketplace'
-    if kind == 'update':
+    if kind == 'sold':
+        subject = f'Sold aircraft to approve: {title or ("#" + str(listing_id))}'
+        text = (
+            f'A seller marked an aircraft sold.\n\n'
+            f'{title or "Listing"} #{listing_id}\n'
+            f'Seller: {seller_email or "unknown"}\n'
+            f'It is off the site and waiting for your approval.\n'
+        )
+    elif kind == 'deleted':
+        subject = f'Deleted aircraft to approve: {title or ("#" + str(listing_id))}'
+        text = (
+            f'A listing was deleted.\n\n'
+            f'{title or "Listing"} #{listing_id}\n'
+            f'Seller: {seller_email or "unknown"}\n'
+            f'It is off the site and waiting for your approval.\n'
+        )
+    elif kind == 'update':
         subject = f'Listing update to approve: {title or ("#" + str(listing_id))}'
         text = (
             f'An update is waiting for your approval on JetSchool.\n\n'
@@ -7015,6 +7121,7 @@ def api_create_user_listing():
             market=sections_module.normalize_market(data.get('market')),
             details=data,
         )
+        description = _store_listing_number(listing_id, data.get('description', ''))
         
         new_listing = {
             'id': listing_id,
@@ -7025,7 +7132,7 @@ def api_create_user_listing():
             'hours': data.get('hours', 0),
             'location': data['location'],
             'email': data['email'],
-            'description': data.get('description', ''),
+            'description': description,
             'images': data.get('images', []),
             'documents': data.get('documents', []),
             'engine_type': data.get('engine_type', profile.get('category', 'Unknown')),
@@ -7064,6 +7171,7 @@ def api_listings_me():
         aircraft_map = {a.get('id'): a for a in aircraft_data}
         listing_ids: list[int] = [int(r['id']) for r in rows if r.get('id') is not None]
         media_by_listing = db_module.list_media_for_listings(listing_ids)
+        resent = db_module.resubmitted_listing_ids(listing_ids)
         out = []
         for row in rows:
             if row.get('status') in ('archived', 'deleted'):
@@ -7089,6 +7197,7 @@ def api_listings_me():
                 'amendment_note': row.get('amendment_note'),
                 'review_message': row.get('review_message'),
                 'pending_review': bool(db_module.parse_listing_pending(row.get('pending_changes'))),
+                'resubmitted': row.get('status') in ('pending', 'unpaid') and int(row.get('id') or 0) in resent,
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'updated_at': str(row.get('updated_at')) if row.get('updated_at') else None,
                 'photo_count': sum(1 for m in media if m.get('media_type') == 'photo'),
@@ -7107,6 +7216,25 @@ def api_listings_me():
     except Exception:
         logger.exception('api_listings_me failed')
         return jsonify({'error': 'server_error'}), 500
+
+
+def _notes_with_listing_number(description, listing_id):
+    """Put the generated listing id in the seller notes so both numbers are the same."""
+    kept = []
+    for line in (description or '').splitlines():
+        if line.strip().lower().startswith('listing number:'):
+            continue
+        kept.append(line)
+    body = '\n'.join(kept).strip()
+    line = f'Listing number: {listing_id}'
+    return f'{body}\n\n{line}'.strip() if body else line
+
+
+def _store_listing_number(listing_id, description):
+    stamped = _notes_with_listing_number(description, listing_id)
+    if stamped != (description or '').strip():
+        db_module.update_user_listing_fields(listing_id, {'description': stamped})
+    return stamped
 
 
 def _listing_data_from_form(form, user):
@@ -7310,6 +7438,7 @@ def _create_listing_for_user(user, data):
             market=market,
             details=data,
         )
+        _store_listing_number(listing_id, data.get('description') or '')
         if not needs_payment:
             _notify_admins_new_listing(
                 listing_id, title, data.get('email') or user.get('email'),
@@ -7358,8 +7487,6 @@ def api_listings_resubmit(listing_id: int):
     )
     if not sent_back:
         return jsonify({'error': 'cannot_resubmit', 'message': 'This listing is not waiting to be sent back.'}), 409
-    if _listing_needs_checkout(row.get('market')) and row.get('payment_status') != 'paid':
-        return jsonify({'error': 'payment_required', 'payment_required': True}), 402
     previous = row.get('status')
     if not db_module.resubmit_listing_for_review(listing_id):
         return jsonify({'error': 'server_error'}), 500
@@ -7513,6 +7640,8 @@ def api_listings_patch(listing_id: int):
     if not is_owner and not user.get('is_admin'):
         return jsonify({'error': 'forbidden'}), 403
     data = request.get_json(silent=True) or {}
+    if 'description' in data:
+        data['description'] = _notes_with_listing_number(data.get('description') or '', listing_id)
     if 'market' in data:
         market, market_err = _listing_market_choice(user, data.get('market'))
         if market_err:
@@ -9448,9 +9577,14 @@ def api_listings_delete(listing_id: int):
         return jsonify({'error': 'forbidden'}), 403
     if not _billing_request_ok():
         return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
-    result = _apply_listing_cancellation(row, 'deleted', 'delete_listing', user['id'])
-    status = 200 if result.get('ok') else 502
-    return jsonify(result), status
+    required = _portal_cancel_required(row)
+    if required:
+        return jsonify({
+            'error': 'cancel_in_portal',
+            'message': required,
+            'portal_url': STRIPE_CUSTOMER_PORTAL_URL,
+        }), 409
+    return jsonify(_take_listing_off_site(row, 'deleted')), 200
 
 
 @app.route('/api/listings/<int:listing_id>/sold', methods=['POST'])
@@ -9465,8 +9599,14 @@ def api_listing_sold(listing_id: int):
         return jsonify({'error': 'forbidden'}), 403
     if not _billing_request_ok():
         return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
-    result = _apply_listing_cancellation(row, 'sold', 'mark_sold', user['id'])
-    return jsonify(result), (200 if result.get('ok') else 502)
+    required = _portal_cancel_required(row)
+    if required:
+        return jsonify({
+            'error': 'cancel_in_portal',
+            'message': required,
+            'portal_url': STRIPE_CUSTOMER_PORTAL_URL,
+        }), 409
+    return jsonify(_take_listing_off_site(row, 'sold')), 200
 
 
 @app.route('/api/listings/<int:listing_id>/pause', methods=['POST'])
@@ -9691,6 +9831,7 @@ def api_admin_listings():
             [int(row['id']) for row in rows if row.get('id')],
             include_unpublished=True,
         )
+        resent = db_module.resubmitted_listing_ids([row.get('id') for row in rows])
         out = []
         for row in rows:
             combined = _row_to_combined_listing(row, aircraft_map) or {}
@@ -9716,6 +9857,7 @@ def api_admin_listings():
                 'amendment_note': row.get('amendment_note'),
                 'review_message': row.get('review_message'),
                 'pending_review': bool(db_module.parse_listing_pending(row.get('pending_changes'))),
+                'resubmitted': row.get('status') in ('pending', 'unpaid') and int(row.get('id') or 0) in resent,
                 'created_at': str(row.get('created_at')) if row.get('created_at') else None,
                 'name': combined.get('name'),
                 'manufacturer': combined.get('manufacturer'),
@@ -10302,6 +10444,10 @@ def admin_delete_listing(listing_id):
             'Removed listing still has billing',
             f'Listing {listing_id} was removed and its subscription was kept.',
         )
+        _notify_admins_new_listing(
+            listing_id, existing.get('title'), existing.get('email'),
+            market=existing.get('market'), kind='deleted',
+        )
         return jsonify({
             'ok': True,
             'status': 'deleted',
@@ -10451,6 +10597,7 @@ def _admin_listing_review(row):
             'amendment_note': row.get('amendment_note'),
             'review_message': row.get('review_message'),
             'pending_review': bool(pending),
+            'resubmitted': row.get('status') in ('pending', 'unpaid') and int(row.get('id') or 0) in db_module.resubmitted_listing_ids([row.get('id')]),
             'payment_status': row.get('payment_status'),
             'stripe_customer_id': row.get('stripe_customer_id'),
             'stripe_reference': (

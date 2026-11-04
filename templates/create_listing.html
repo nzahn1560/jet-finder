@@ -590,7 +590,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">Submit for approval opens checkout for $49.99 per month. After payment, the listing goes to an admin for approval.</p>
+                        <p id="listing-next-step" class="text-white mb-3">A purchase bought with a discount does not expire. No price change will come. Wait 1-5 business days for approval.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -637,7 +637,7 @@
             } else {
                 next.textContent = off
                     ? 'Off-market listings go to an admin for approval. There is no listing fee.'
-                    : 'Submit for approval saves the listing as a draft and opens checkout for $49.99 per month. After payment it says payment received and waits for approval. A listing that is already paid is not charged again.';
+                    : 'A purchase bought with a discount does not expire. No price change will come. Wait 1-5 business days for approval.';
             }
         }
         const submitLink = document.getElementById('listing-submit');
@@ -656,10 +656,12 @@
         box.innerHTML = price.promotional
             ? '<span style="text-decoration:line-through;color:#888;font-size:1.2rem;">' + regular + '</span> <strong style="font-size:2rem;margin-left:0.5rem;">' + current + '</strong>'
             : '<strong style="font-size:2rem;">' + current + '</strong>';
-        if (note) note.textContent = price.label || '';
+        if (note) note.textContent = '';
         const next = document.getElementById('listing-next-step');
-        if (next && !next.hidden && next.textContent.indexOf('checkout') !== -1) {
-            next.textContent = 'Submit for approval saves the listing as a draft and opens checkout for ' + current + '. ' + (price.label || '');
+        const picked = document.querySelector('[name="market"]:checked');
+        const editingNow = !!new URLSearchParams(window.location.search).get('edit');
+        if (next && !editingNow && picked && picked.value !== 'broker_only') {
+            next.textContent = price.label || '';
         }
     }).catch(function () {});
     let currentListingType = 'aircraft';
@@ -1132,12 +1134,6 @@
                 if (window.LISTING_NEEDS_RESUBMIT) {
                     const again = await fetch(`/api/listings/${listingId}/resubmit`, { method: 'POST', credentials: 'include' });
                     const againData = await again.json().catch(() => ({}));
-                    if (again.status === 402 && againData.payment_required) {
-                        const pay = await fetch('/api/listings/' + listingId + '/checkout', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' } });
-                        const payData = await pay.json().catch(function () { return {}; });
-                        if (pay.ok && payData.url) { window.location.href = payData.url; return; }
-                        return fail(payData.message || againData.message || 'This listing still needs the listing fee before review.');
-                    }
                     if (!again.ok && again.status !== 409) {
                         return fail(againData.message || 'The changes were saved, but it could not be sent back for review.');
                     }
@@ -1246,7 +1242,7 @@
             if (deleteBtn) {
                 deleteBtn.hidden = false;
                 deleteBtn.addEventListener('click', async function () {
-                    if (!confirm('Delete this listing? It leaves the site. A monthly fee for this aircraft stops.')) return;
+                    if (!confirm('Remove this listing? Cancel its subscription in Manage payment first. Removing the listing does not cancel the subscription.')) return;
                     const resp = await fetch('/api/listings/' + EDIT_LISTING_ID, { method: 'DELETE', credentials: 'include' });
                     if (resp.ok) {
                         window.location.href = '/dashboard';
