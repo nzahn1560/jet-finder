@@ -2301,6 +2301,15 @@ def set_listing_paused(listing_id, paused):
         return True
 
 
+def list_billing_audits(action=None, limit=30):
+    """Recent billing changes. Used to show webhook failures that still need a look."""
+    with get_session() as session:
+        query = session.query(BillingAudit).order_by(BillingAudit.id.desc())
+        if action:
+            query = query.filter(BillingAudit.action == str(action)[:60])
+        return [row.to_dict() for row in query.limit(int(limit or 30)).all()]
+
+
 def record_billing_audit(actor_user_id, action, stripe_subscription_id=None, listing_id=None, target_user_id=None, detail=None):
     with get_session() as session:
         session.add(BillingAudit(
@@ -2445,6 +2454,48 @@ def billing_problem_rows():
                 'user_id': listing.user_id,
                 'status': listing.payment_status,
                 'listing_status': listing.status,
+            })
+        paid_open = (
+            session.query(UserListing)
+            .filter(
+                UserListing.payment_status == 'paid',
+                UserListing.status.in_(('active', 'pending')),
+            )
+            .limit(200)
+            .all()
+        )
+        covered = {row.listing_id for row in rows if row.listing_id and row.stripe_subscription_id}
+        for listing in paid_open:
+            if listing.id in covered or listing.stripe_subscription_id:
+                continue
+            problems.append({
+                'match_class': 'LISTING_WITHOUT_SUBSCRIPTION',
+                'stripe_subscription_id': None,
+                'listing_id': listing.id,
+                'user_id': listing.user_id,
+                'status': listing.payment_status,
+                'listing_status': listing.status,
+            })
+        customers = (
+            session.query(User.stripe_customer_id, User.id)
+            .filter(User.stripe_customer_id.isnot(None))
+            .all()
+        )
+        seen = {}
+        for customer_id, user_id in customers:
+            seen.setdefault(customer_id, set()).add(user_id)
+        for customer_id, user_ids in seen.items():
+            if len(user_ids) < 2:
+                continue
+            problems.append({
+                'match_class': 'DUPLICATE_CUSTOMER',
+                'stripe_customer_id': customer_id,
+                'stripe_subscription_id': None,
+                'listing_id': None,
+                'user_id': None,
+                'status': 'review',
+                'listing_status': None,
+                'detail': 'Accounts ' + ', '.join(str(item) for item in sorted(user_ids)),
             })
     return problems
 

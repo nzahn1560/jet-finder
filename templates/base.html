@@ -34,7 +34,8 @@
             border-bottom: 2px solid #F05545;
             position: sticky;
             top: 0;
-            z-index: 1000;
+            z-index: 2000;
+            overflow: visible;
         }
 
         .header-container {
@@ -99,8 +100,23 @@
             justify-self: end;
         }
 
+        .header-container,
+        .hamburger-menu,
+        .hamburger-menu .dropdown,
+        .login-container,
+        .user-menu {
+            overflow: visible;
+        }
+
         .hamburger-menu {
             justify-self: start;
+            position: relative;
+            z-index: 2001;
+        }
+
+        .main-header .dropdown-menu {
+            z-index: 2002;
+            max-height: calc(100dvh - 5rem);
         }
 
         .login-btn {
@@ -467,6 +483,15 @@
     <script>
         // Prevent "db is not defined" if any script or console references db (e.g. debug)
         window.db = window.db || {};
+        document.querySelectorAll('.main-header [data-bs-toggle="dropdown"]').forEach(function (toggle) {
+            bootstrap.Dropdown.getOrCreateInstance(toggle, {
+                popperConfig: function (config) {
+                    config.strategy = 'fixed';
+                    return config;
+                }
+            });
+        });
+
         // Close dropdowns when clicking outside
         document.addEventListener('click', function (event) {
             const dropdowns = document.querySelectorAll('.dropdown-menu.show');

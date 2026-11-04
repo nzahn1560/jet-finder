@@ -1133,7 +1133,10 @@
                     const again = await fetch(`/api/listings/${listingId}/resubmit`, { method: 'POST', credentials: 'include' });
                     const againData = await again.json().catch(() => ({}));
                     if (again.status === 402 && againData.payment_required) {
-                        return fail(againData.message || 'This listing still needs the listing fee before review.');
+                        const pay = await fetch('/api/listings/' + listingId + '/checkout', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' } });
+                        const payData = await pay.json().catch(function () { return {}; });
+                        if (pay.ok && payData.url) { window.location.href = payData.url; return; }
+                        return fail(payData.message || againData.message || 'This listing still needs the listing fee before review.');
                     }
                     if (!again.ok && again.status !== 409) {
                         return fail(againData.message || 'The changes were saved, but it could not be sent back for review.');
@@ -1145,7 +1148,7 @@
 
             if (payload.market !== 'broker_only' && savedListing && savedListing.payment_required && savedListing.payment_status !== 'paid') {
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Opening payment...';
-                const pay = await fetch('/api/listings/' + listingId + '/checkout', { method: 'POST', credentials: 'include' });
+                const pay = await fetch('/api/listings/' + listingId + '/checkout', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' } });
                 const payData = await pay.json().catch(function () { return {}; });
                 if (pay.ok && payData.url) {
                     window.location.href = payData.url;
