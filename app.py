@@ -4718,7 +4718,15 @@ def page_not_found(e):
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    """Handle 500 errors"""
+    """API callers get the underlying reason. Pages still get the public error screen."""
+    original = getattr(e, 'original_exception', None) or e
+    if (request.path or '').startswith('/api/'):
+        logger.exception('API error on %s', request.path)
+        text = _stripe_error_text(original)
+        lowered = text.lower()
+        if any(marker in lowered for marker in ('sk_live_', 'sk_test_', 'rk_live_', 'whsec_')):
+            text = 'Checkout could not be started.'
+        return jsonify({'error': 'server_error', 'message': text or 'Checkout could not be started.'}), 500
     return render_template('error.html', error_code=500, message="Internal server error"), 500
 
 
