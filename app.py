@@ -3799,9 +3799,8 @@ def api_broker_checkout():
     user = request.current_user  # type: ignore[attr-defined]
     if db_module.user_on_active_team(user['id']):
         return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
-    import authz
-    if authz.has_role(user, 'broker') and has_active_subscription(user['id'], 'broker'):
-        return jsonify({'already': True}), 200
+    if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
+        return jsonify({'already': True, 'message': 'Payment received.'}), 200
     db_module.set_broker_application(user['id'], 'pending')
     return jsonify({'url': _broker_payment_link(user)}), 200
 
@@ -3862,6 +3861,8 @@ def api_broker_application():
     if fields:
         db_module.update_user_profile(user['id'], fields)
     db_module.set_broker_application(user['id'], 'pending')
+    if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
+        return jsonify({'already': True, 'message': 'Payment received.', 'broker': False}), 200
     return jsonify({'url': _broker_checkout_url(user), 'broker': False}), 200
 
 
@@ -6750,15 +6751,17 @@ def _create_listing_for_user(user, data):
             market=market,
             details=data,
         )
-        _notify_admins_new_listing(
-            listing_id, title, data.get('email') or user.get('email'),
-            market=market,
-        )
+        if not needs_payment:
+            _notify_admins_new_listing(
+                listing_id, title, data.get('email') or user.get('email'),
+                market=market,
+            )
         return {
             'ok': True,
             'id': listing_id,
             'status': initial_status,
             'payment_required': needs_payment,
+            'payment_status': 'pending',
         }, None
     except Exception:
         logger.exception('create listing failed')

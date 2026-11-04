@@ -1070,6 +1070,28 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(unmatched.status_code, 200)
         self.assertEqual(unmatched.get_json(), {'received': True})
 
+    def test_a_paid_listing_or_broker_is_not_asked_to_pay_again(self):
+        person = self._paid_broker('already-paid@example.com', 'sub_already_paid')
+        self._login(person['email'], 'broker-pass-1')
+        again = self.client.post('/api/account/broker-checkout')
+        self.assertEqual(again.status_code, 200, again.get_json())
+        self.assertTrue(again.get_json().get('already'))
+        self.assertNotIn('url', again.get_json())
+        account = self.client.get('/dashboard')
+        self.assertIn(b'Subscription is active.', account.data)
+        self.assertNotIn(b'Pay $19.99 a month', account.data)
+        self.assertIn(b'Payment received, awaiting approval.', account.data)
+        self.assertIn(b'only saved as a draft.', account.data)
+        created = self.client.post('/api/listings', json=self._payload('Already Paid Jet', 'public'))
+        listing_id = created.get_json()['id']
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'payment_status': 'paid', 'status': 'pending'}, synchronize_session=False,
+            )
+        pay = self.client.post(f'/api/listings/{listing_id}/checkout')
+        self.assertEqual(pay.status_code, 200, pay.get_json())
+        self.assertTrue(pay.get_json().get('skip'))
+
     def test_refund_shows_on_the_listing_it_paid_for(self):
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Refunded Fee Jet', 'public'))

@@ -8311,10 +8311,14 @@
                     fd.append('files', item.file);
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
-                const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
-                payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}');
-                if (email) payUrl.searchParams.set('prefilled_email', email);
-                window.location.href = payUrl.toString();
+                if (data.payment_required && data.payment_status !== 'paid') {
+                    const payUrl = new URL('https://buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01');
+                    payUrl.searchParams.set('client_reference_id', 'listing-' + data.id + '-user-{{ (get_current_user_info().id if get_current_user_info() else 0)|int }}');
+                    if (email) payUrl.searchParams.set('prefilled_email', email);
+                    window.location.href = payUrl.toString();
+                    return;
+                }
+                window.location.href = '/dashboard?submitted=' + data.id + (data.payment_status === 'paid' ? '&paid=confirmed' : '');
             } catch (err) {
                 alert('Could not create the listing. Please try again.');
             } finally {
