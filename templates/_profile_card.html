@@ -284,7 +284,7 @@
                 <p class="identity__line">Payment received. This brokerage is waiting for approval.</p>
                 {% elif membership and membership.is_admin %}
                 <p class="identity__line">Pay $19.99 a month to activate this account. A team seat is free until you approve it.</p>
-                <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none;">Pay $19.99 a month</a>
+                <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer;">Pay $19.99 a month</button>
                 {% elif membership and membership.membership_status == 'pending' %}
                 <p class="identity__line">Waiting for {{ membership.name }} to approve you.</p>
                 {% else %}
@@ -295,7 +295,7 @@
                     <input class="form-control" id="brokerage-name" placeholder="Brokerage name" value="{{ user.company or '' }}">
                     <input class="form-control" id="brokerage-city" placeholder="City" value="{{ user.profile_city or '' }}">
                     <input class="form-control" id="brokerage-state" placeholder="State" value="{{ user.profile_state or '' }}">
-                    <a class="dash__btn dash__btn--primary" id="become-broker" href="https://buy.stripe.com/7sYbIUgyoesqejI9AVgbm00?client_reference_id=broker-{{ user.id }}&amp;prefilled_email={{ (user.email or '')|urlencode }}" style="border:0; cursor:pointer; display:inline-block; text-decoration:none; width:max-content;">Pay $19.99 a month</a>
+                    <button type="button" class="dash__btn dash__btn--primary" id="become-broker" style="border:0; cursor:pointer; width:max-content;">Pay $19.99 a month</button>
                 </div>
                 <div id="broker-assign-fields" hidden>
                     {% if teams %}
@@ -366,14 +366,16 @@
             document.getElementById('company-banner').style.backgroundImage = "url('" + dataUrl + "')";
         });
     }
+    function billingHeaders() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return { 'Content-Type': 'application/json', 'X-CSRF-Token': meta ? meta.getAttribute('content') : '' };
+    }
     async function startBrokerCheckout(status) {
         if (status) status.textContent = 'Opening checkout...';
-        const pay = await fetch('/api/account/broker-checkout', { method: 'POST', credentials: 'include' });
+        const pay = await fetch('/api/account/broker-checkout', { method: 'POST', credentials: 'include', headers: billingHeaders(), body: '{}' });
         const payData = await pay.json().catch(function () { return {}; });
         if (payData.url) { window.location = payData.url; return; }
         if (payData.already) { window.location.reload(); return; }
-        const link = document.getElementById('become-broker');
-        if (link && link.href) { window.location = link.href; return; }
         if (status) status.textContent = payData.message || 'Checkout is unavailable.';
     }
     if (edit) {
@@ -436,7 +438,7 @@
         const response = await fetch('/api/account/broker-application', {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
+            headers: billingHeaders(),
             body: JSON.stringify({
                 kind: 'main',
                 name: (document.getElementById('brokerage-name') || {}).value || '',

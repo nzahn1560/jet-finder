@@ -8336,7 +8336,7 @@
                     await fetch('/api/listings/' + data.id + '/media', { method: 'POST', credentials: 'include', body: fd });
                 }
                 if (data.payment_required && data.payment_status !== 'paid') {
-                    const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include' });
+                    const pay = await fetch('/api/listings/' + data.id + '/checkout', { method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '' } });
                     const payData = await pay.json().catch(function () { return {}; });
                     if (pay.ok && payData.url) {
                         window.location.href = payData.url;

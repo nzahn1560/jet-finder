@@ -118,7 +118,7 @@
         </div>
         <div id="tab-billing" style="display:none;">
             <div class="ap__filter">
-                <input id="billing-search" type="search" placeholder="Customer, aircraft, email, or subscription id" aria-label="Search billing">
+                <input id="billing-search" type="search" placeholder="Name, email, phone, aircraft, registration, listing, or Stripe id" aria-label="Search billing">
                 <select id="billing-status" aria-label="Subscription status">
                     <option value="">All statuses</option>
                     <option value="active">Active</option>
@@ -131,6 +131,7 @@
             </div>
             <p id="billing-summary" style="color:#d0d0d0;"></p>
             <div id="billing-problems"></div>
+            <div id="billing-webhook-errors"></div>
             <h2 style="color:#fff;font-size:1.1rem;">Reconciliation</h2>
             <div id="billing-unmatched"></div>
             <div id="billing-failed"></div>
@@ -554,7 +555,15 @@ async function loadAdminBilling() {
     const dollars = ((data.monthly_recurring_cents || 0) / 100).toFixed(2);
     const month = ((data.collected_month_cents || 0) / 100).toFixed(2);
     const year = ((data.collected_year_cents || 0) / 100).toFixed(2);
-    summary.textContent = 'Monthly recurring estimate $' + dollars + '. Collected this month $' + month + '. Collected this year $' + year + '. A failed card keeps the listing up for ' + (data.grace_days || 7) + ' days, then it leaves the public site. Canceling does not refund a charge. Last sync ' + (data.last_sync || 'not run') + '.';
+    const overview = data.overview || {};
+    summary.textContent = 'Monthly recurring $' + dollars + ' from ' + (overview.active_subscriptions || 0) + ' active subscription' + ((overview.active_subscriptions || 0) === 1 ? '' : 's') + ' and ' + (overview.paying_customers || 0) + ' paying customer' + ((overview.paying_customers || 0) === 1 ? '' : 's') + '. Collected this month $' + month + '. Collected this year $' + year + '. Pending cancellation ' + (overview.pending_cancellation || 0) + '. Scheduled to end ' + (overview.scheduled_cancellation || 0) + '. Unmatched ' + (overview.unmatched || 0) + '. Failed payments ' + (overview.failed_payments || 0) + '. A failed card keeps the listing up for ' + (data.grace_days || 7) + ' days, then it leaves the public site. Canceling does not refund a charge. Last sync ' + (data.last_sync || 'not run') + '.';
+    const webhookErrors = data.webhook_errors || [];
+    const webhookBox = document.getElementById('billing-webhook-errors');
+    if (webhookBox) {
+        webhookBox.innerHTML = webhookErrors.length ? '<h2>Webhook errors</h2>' + webhookErrors.map(function (row) {
+            return '<p>' + esc(row.created_at || '') + ' · ' + esc(row.detail || row.action) + '</p>';
+        }).join('') : '';
+    }
     const problems = data.problems || [];
     const problemBox = document.getElementById('billing-problems');
     if (problemBox) {
@@ -581,11 +590,16 @@ async function loadAdminBilling() {
         const cancel = row.stripe_subscription_id && row.status !== 'canceled'
             ? '<button type="button" data-cancel-billing="' + esc(row.stripe_subscription_id) + '" data-who="' + esc((row.customer_name || '') + ' · ' + (row.aircraft || '') + ' · ' + (row.stripe_subscription_id || '')) + '">Cancel subscription</button>'
             : '';
-        const stripeLink = row.stripe_dashboard_url ? '<a href="' + esc(row.stripe_dashboard_url) + '" target="_blank" rel="noopener">Stripe</a>' : '';
+        const stripeLink = row.stripe_dashboard_url ? '<a href="' + esc(row.stripe_dashboard_url) + '" target="_blank" rel="noopener">Stripe subscription</a>' : '';
+        const invoices = (row.invoices || []).map(function (invoice) {
+            const receipt = invoice.hosted_invoice_url ? ' · <a href="' + esc(invoice.hosted_invoice_url) + '" target="_blank" rel="noopener">Receipt</a>' : '';
+            return '<li>Invoice ' + esc(invoice.stripe_invoice_id || '') + ' · ' + esc(invoice.status) + ' · ' + esc(invoice.amount_cents != null ? ('$' + (invoice.amount_cents / 100).toFixed(2)) : '') + receipt + '</li>';
+        }).join('');
         return '<article class="ap__card"><strong>' + esc(row.aircraft || row.kind) + '</strong>'
-            + '<p>' + esc(row.customer_name || '') + ' · ' + esc(row.email || '') + '</p>'
-            + '<p>Listing ' + esc(row.listing_id || '—') + ' · ' + esc(row.price || '') + ' · ' + esc(row.billing_status || row.status) + ' · next ' + esc(row.next_billing_date || '—') + '</p>'
+            + '<p>' + esc(row.customer_name || '') + ' · ' + esc(row.email || '') + (row.phone ? ' · ' + esc(row.phone) : '') + '</p>'
+            + '<p>Listing ' + esc(row.listing_id || '—') + (row.registration ? ' · ' + esc(row.registration) : '') + (row.manufacturer ? ' · ' + esc(row.manufacturer) : '') + ' · ' + esc(row.price || '') + ' · ' + esc(row.billing_status || row.status) + ' · next ' + esc(row.next_billing_date || '—') + '</p>'
             + '<p>Customer ' + esc(row.stripe_customer_id || '—') + '<br>Subscription ' + esc(row.stripe_subscription_id || '—') + '</p>'
+            + (invoices ? '<ul>' + invoices + '</ul>' : '')
             + '<p>' + listingLink + ' · ' + personLink + ' ' + cancel + ' ' + stripeLink + '</p></article>';
     }).join('') : '<div class="ap__empty">No subscriptions stored yet.</div>';
     unmatchedBox.querySelectorAll('form[data-match]').forEach(function (form) {

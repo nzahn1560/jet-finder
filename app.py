@@ -833,34 +833,18 @@ def api_team_checkout():
             'purpose': 'broker_team',
             'team_id': str(team_id),
         }
-        checkout = stripe.checkout.Session.create(
-            ui_mode='hosted',
-            mode='subscription',
-            billing_address_collection='auto',
-            phone_number_collection={'enabled': False},
-            automatic_tax={'enabled': False},
-            allow_promotion_codes=True,
-            payment_method_collection='always',
-            submit_type='auto',
-            saved_payment_method_options={'payment_method_save': 'enabled'},
-            integration_identifier='hosted_web_0003',
-            origin_context='web',
-            line_items=[{
-                'price_data': {
-                    'currency': 'usd',
-                    'unit_amount': BROKER_FEE_CENTS,
-                    'recurring': {'interval': 'month'},
-                    'product_data': {
-                        'name': f'JetSchool broker team — {name} — {BROKER_FEE_LABEL} per month',
-                        'description': 'Broker access to the broker map and the off-market section. $19.99 per month.',
-                    },
-                },
-                'quantity': 1,
-            }],
-            success_url=f'{base}/dashboard?team=1&session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{base}/dashboard?team=0',
+        checkout = _open_paid_checkout(
+            user, team_meta, BROKER_FEE_CENTS,
+            f'JetSchool broker team — {name} — {BROKER_FEE_LABEL} per month',
+            'Broker access to the broker map and the off-market section. $19.99 per month.',
+            f'{base}/dashboard?team=1&session_id={{CHECKOUT_SESSION_ID}}',
+            f'{base}/dashboard?team=0',
+            f"broker-team-{user['id']}-{team_id}",
+            price_id=_configured_price_id('STRIPE_BROKER_PRICE_ID'),
         )
-        return jsonify({'url': checkout.url, 'team_id': team_id}), 200
+        if not checkout:
+            return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+        return jsonify({'url': _stripe_field(checkout, 'url'), 'team_id': team_id}), 200
     except Exception:
         logger.exception('Team checkout creation failed')
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -3931,48 +3915,68 @@ def _checkout_reference(meta):
     return ''
 
 
-def _open_paid_checkout(user, meta, amount_cents, product_name, product_description, success_url, cancel_url, idem_prefix):
-    """Subscription Checkout on the account's one Stripe customer.
+def _configured_price_id(*names):
+    """A Dashboard price id from the environment. A blank or placeholder is ignored."""
+    for name in names:
+        value = (os.environ.get(name) or '').strip().strip('"').strip("'")
+        if value.startswith('price_') and '...' not in value:
+            return value
+    return None
 
-    The session and the subscription both carry the account and listing, so a paid
-    invoice is the transaction for that account. Stripe emails its own receipt when
-    the customer has an email. JetSchool also emails the receipt on each paid invoice.
+
+def _subscription_line(amount_cents, name, description, price_id=None):
+    """One monthly subscription item. A configured Price ID is used when it is set."""
+    if price_id:
+        return {'quantity': 1, 'price': price_id}
+    return {
+        'quantity': 1,
+        'price_data': {
+            'currency': 'usd',
+            'unit_amount': int(amount_cents),
+            'recurring': {'interval': 'month'},
+            'product_data': {
+                'name': name,
+                'description': (description or name)[:500],
+            },
+        },
+    }
+
+
+def _open_paid_checkout(user, meta, amount_cents, product_name, product_description, success_url, cancel_url, idem_prefix, price_id=None):
+    """Hosted subscription Checkout on the account's one Stripe customer.
+
+    The browser does not set the price, the customer, or the listing. Payment Links
+    are not used for a new purchase.
     """
     if not _stripe_configured():
         return None
     customer_id = _stripe_customer_for(user)
     if not customer_id:
         return None
-    checkout = stripe.checkout.Session.create(
-        ui_mode='hosted',
-        mode='subscription',
-        billing_address_collection='auto',
-        phone_number_collection={'enabled': False},
-        automatic_tax={'enabled': False},
-        allow_promotion_codes=True,
-        payment_method_collection='always',
-        submit_type='auto',
-        saved_payment_method_options={'payment_method_save': 'enabled'},
-        integration_identifier='hosted_web_0003',
-        origin_context='web',
-        line_items=[{
-            'price_data': {
-                'currency': 'usd',
-                'unit_amount': int(amount_cents),
-                'recurring': {'interval': 'month'},
-                'product_data': {
-                    'name': product_name,
-                    'description': product_description,
-                },
-            },
-            'quantity': 1,
-        }],
-        success_url=success_url,
-        cancel_url=cancel_url,
-    )
-    customer_id = _stripe_ref(_stripe_field(checkout, 'customer'))
-    if customer_id:
-        db_module.set_user_stripe_customer(user['id'], customer_id)
+    meta = dict(meta or {})
+    meta.setdefault('platform', 'jetschoolusa')
+    try:
+        checkout = stripe.checkout.Session.create(
+            mode='subscription',
+            customer=customer_id,
+            client_reference_id=_checkout_reference(meta) or None,
+            metadata=meta,
+            subscription_data={'metadata': meta},
+            line_items=[_subscription_line(amount_cents, product_name, product_description, price_id)],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            allow_promotion_codes=True,
+            automatic_tax={'enabled': False},
+            payment_method_collection='always',
+            billing_address_collection='auto',
+            idempotency_key=idem_prefix,
+        )
+    except Exception:
+        logger.exception('Checkout creation failed')
+        return None
+    saved_customer = _stripe_ref(_stripe_field(checkout, 'customer')) or customer_id
+    if saved_customer:
+        db_module.set_user_stripe_customer(user['id'], saved_customer)
     return checkout
 
 
@@ -4003,10 +4007,30 @@ def _listing_payment_link(user, listing_id):
 
 
 def _broker_checkout_url(user):
-    """Hosted broker Payment Link. It does not need a Checkout session on this server."""
-    if not user:
+    """Checkout Session for the brokerage fee. None when Stripe is not configured."""
+    if not user or not _stripe_configured():
         return None
-    return _broker_payment_link(user)
+    meta = {
+        'purpose': 'broker_account',
+        'user_id': str(user['id']),
+        'jetschool_user_id': str(user['id']),
+        'jetschool_billing_type': 'broker_account',
+        'platform': 'jetschoolusa',
+    }
+    base = _public_base()
+    hour = datetime.utcnow().strftime('%Y%m%d%H')
+    checkout = _open_paid_checkout(
+        user, meta, BROKER_FEE_CENTS,
+        'JetSchool brokerage',
+        'Broker access to the broker map and the off-market section. $19.99 per month.',
+        f'{base}/dashboard?broker=1&session_id={{CHECKOUT_SESSION_ID}}',
+        f'{base}/dashboard?broker=0',
+        f"broker-{user['id']}-{hour}",
+        price_id=_configured_price_id('STRIPE_BROKER_PRICE_ID'),
+    )
+    if not checkout:
+        return None
+    return _stripe_field(checkout, 'url')
 
 
 def _payment_link_identity(sess):
@@ -4093,12 +4117,19 @@ def _broker_paid_from_checkout(sess, expected_user_id=None):
 def api_broker_checkout():
     """Start the $19.99/month broker subscription. It opens the broker map and off-market listings."""
     user = request.current_user  # type: ignore[attr-defined]
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
     if db_module.user_on_active_team(user['id']):
         return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
     if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
         return jsonify({'already': True, 'message': 'Payment received.'}), 200
     db_module.set_broker_application(user['id'], 'pending')
-    return jsonify({'url': _broker_payment_link(user)}), 200
+    if not _stripe_configured():
+        return jsonify({'error': 'payment_not_ready', 'message': 'Checkout is not configured.'}), 503
+    url = _broker_checkout_url(user)
+    if not url:
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
+    return jsonify({'url': url}), 200
 
 
 @app.route('/api/account/broker-application', methods=['POST'])
@@ -4158,7 +4189,14 @@ def api_broker_application():
     db_module.set_broker_application(user['id'], 'pending')
     if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
         return jsonify({'already': True, 'message': 'Payment received.', 'broker': False}), 200
-    return jsonify({'url': _broker_checkout_url(user), 'broker': False}), 200
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden', 'message': 'The billing form expired. Reload the page and try again.'}), 403
+    if not _stripe_configured():
+        return jsonify({'error': 'payment_not_ready', 'message': 'Checkout is not configured. The application is pending.', 'broker': False}), 503
+    url = _broker_checkout_url(user)
+    if not url:
+        return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.', 'broker': False}), 500
+    return jsonify({'url': url, 'broker': False}), 200
 
 
 @app.route('/api/account/broker-confirm', methods=['POST'])
@@ -4243,8 +4281,11 @@ def _billing_record_view(row, invoices):
         'user_id': row.get('user_id'),
         'customer_name': name,
         'email': person.get('email') or listing.get('email') or '',
+        'phone': person.get('phone') or '',
         'listing_id': row.get('listing_id'),
         'aircraft': listing.get('title') or '',
+        'manufacturer': listing.get('manufacturer') or '',
+        'registration': listing.get('registration') or listing.get('serial_number') or '',
         'listing_status': listing.get('status'),
         'stripe_customer_id': row.get('stripe_customer_id'),
         'stripe_subscription_id': row.get('stripe_subscription_id'),
@@ -4536,7 +4577,7 @@ def create_listing():
         listing_id = result['id']
         if result.get('payment_required'):
             checkout_url = _listing_checkout_url(user, listing_id)
-            if checkout_url:
+            if checkout_url and checkout_url != 'already':
                 return redirect(checkout_url)
             return redirect(url_for('dashboard', submitted=listing_id, paid='0'))
         if user and user.get('is_admin'):
@@ -7517,43 +7558,16 @@ _refunds_reconciled = False
 
 
 def _restore_payment_links():
-    """Undo the startup rewrite, and charge the first invoice when someone pays.
+    """Payment Links are no longer a purchase path. Startup does not rewrite them.
 
-    A link that was not changed is left as it is in Stripe.
+    Existing subscriptions created from those links stay in Stripe. New listing
+    and brokerage purchases use Checkout Sessions. Deactivate the old links in
+    the Stripe Dashboard after this checkout is live so a buyer cannot start a
+    subscription that bypasses the listing id.
     """
     global _payment_links_restored
-    if _payment_links_restored or not _stripe_configured():
-        return
-    tokens = ('7sYbIUgyoesqejI9AVgbm00', 'eVqdR20zqbge6Rg6oJgbm01')
-    try:
-        page = stripe.PaymentLink.list(limit=100)
-        for link in page.data or []:
-            url = _stripe_field(link, 'url') or ''
-            if not any(token in url for token in tokens):
-                continue
-            after = _stripe_field(link, 'after_completion') or {}
-            redirect = _stripe_field(after, 'redirect') or {}
-            redirect_url = str(_stripe_field(redirect, 'url') or '').rstrip('/')
-            forced_redirect = _stripe_field(after, 'type') == 'redirect' and redirect_url.endswith('/dashboard')
-            inactive = _stripe_field(link, 'active') is False
-            subscription = _stripe_field(link, 'subscription_data') or {}
-            trial_days = _stripe_field(subscription, 'trial_period_days')
-            collects_later = _stripe_field(link, 'payment_method_collection') == 'if_required'
-            if not forced_redirect and not inactive and not trial_days and not collects_later:
-                continue
-            changes = {}
-            if inactive:
-                changes['active'] = True
-            if forced_redirect:
-                changes['after_completion'] = {'type': 'hosted_confirmation'}
-            if trial_days or collects_later:
-                changes['payment_method_collection'] = 'always'
-            if trial_days:
-                changes['subscription_data'] = {'trial_period_days': ''}
-            stripe.PaymentLink.modify(link.id, **changes)
-        _payment_links_restored = True
-    except Exception:
-        logger.exception('Could not restore the payment links')
+    _payment_links_restored = True
+    return
 
 
 def _log_stripe_setup() -> None:
@@ -7562,7 +7576,6 @@ def _log_stripe_setup() -> None:
     if key:
         mode = 'live' if key.startswith('sk_live_') else 'test'
         logger.info('Stripe checkout is on (%s mode).', mode)
-        _restore_payment_links()
         if not (os.environ.get('STRIPE_WEBHOOK_SECRET') or '').strip():
             logger.warning(
                 'STRIPE_WEBHOOK_SECRET is not set. A finished Checkout updates the listing when the buyer returns. '
@@ -7655,12 +7668,22 @@ def _subscription_price_fields(obj):
 def _listing_checkout_metadata(row):
     meta = {
         'purpose': 'listing_fee',
+        'platform': 'jetschoolusa',
         'user_id': str(row.get('user_id') or ''),
         'listing_id': str(row.get('id') or ''),
         'jetschool_user_id': str(row.get('user_id') or ''),
         'jetschool_listing_id': str(row.get('id') or ''),
         'jetschool_billing_type': 'aircraft_listing',
     }
+    manufacturer = str(row.get('manufacturer') or '').strip()
+    model = str(row.get('model') or row.get('title') or '').strip()
+    registration = str(row.get('registration') or '').strip()
+    if manufacturer:
+        meta['aircraft_manufacturer'] = manufacturer[:200]
+    if model:
+        meta['aircraft_model'] = model[:200]
+    if registration:
+        meta['aircraft_registration'] = registration[:40]
     serial = _stripe_serial(row.get('serial_number'))
     if serial:
         meta['serial_number'] = serial
@@ -7726,26 +7749,22 @@ def _start_listing_checkout(user, row):
     amount = _listing_fee_cents()
     meta = _listing_checkout_metadata(row)
     reference = _listing_client_reference(row.get('id'), row.get('user_id'), meta.get('serial_number'))
+    price_id = _configured_price_id(
+        'STRIPE_LISTING_PROMO_PRICE_ID' if amount == pricing_module.PROMO_LISTING_FEE_CENTS else 'STRIPE_LISTING_PRICE_ID',
+        'STRIPE_LISTING_PRICE_ID',
+    )
     attempt = db_module.start_checkout_attempt(row.get('user_id'), row.get('id'), amount, f"listing-{row.get('id')}-{int(datetime.utcnow().timestamp())}")
     base = _public_base()
-    checkout = stripe.checkout.Session.create(
+    try:
+        checkout = stripe.checkout.Session.create(
         mode='subscription',
         customer=customer_id,
         client_reference_id=reference,
         metadata=meta,
-        subscription_data={'metadata': meta, 'description': f"JetSchool listing {row.get('id')}"},
-        line_items=[{
-            'quantity': 1,
-            'price_data': {
-                'currency': 'usd',
-                'unit_amount': int(amount),
-                'recurring': {'interval': 'month'},
-                'product_data': {
-                    'name': 'Aircraft listing',
-                    'description': str(row.get('title') or 'Aircraft listing')[:500],
-                },
-            },
-        }],
+        subscription_data={'metadata': meta},
+        line_items=[_subscription_line(
+            amount, 'Aircraft listing', str(row.get('title') or 'Aircraft listing'), price_id,
+        )],
         success_url=f"{base}/dashboard?listing={row.get('id')}&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{base}/dashboard?listing={row.get('id')}&checkout=cancel",
         allow_promotion_codes=True,
@@ -7754,6 +7773,9 @@ def _start_listing_checkout(user, row):
         billing_address_collection='auto',
         idempotency_key=attempt.get('idempotency_key') or _checkout_idempotency(f"listing-{row.get('id')}"),
     )
+    except Exception:
+        logger.exception('Listing checkout creation failed')
+        return None
     session_id = _stripe_field(checkout, 'id')
     checkout_url = _stripe_field(checkout, 'url')
     db_module.save_listing_subscription(
@@ -7770,6 +7792,7 @@ def _start_listing_checkout(user, row):
         cancellation_status='none',
         checkout_url=checkout_url,
         billing_status='incomplete',
+        stripe_price_id=price_id,
     )
     db_module.finish_checkout_attempt(row.get('id'), 'open', session_id)
     if session_id:
@@ -7930,6 +7953,11 @@ def api_stripe_webhook():
         logger.exception('Stripe webhook was not stored')
         if event_id:
             db_module.release_stripe_event(str(event_id))
+        try:
+            failed_type = event.get('type') if isinstance(event, dict) else getattr(event, 'type', '')
+            db_module.record_billing_audit(None, 'webhook_failed', detail=str(failed_type or 'unknown')[:200])
+        except Exception:
+            logger.exception('Could not record the webhook failure')
         return jsonify({'error': 'processing_failed'}), 500
 
 
@@ -9860,8 +9888,11 @@ def _broker_billing_view(row):
         'user_id': row.get('user_id'),
         'customer_name': name,
         'email': person.get('email') or '',
+        'phone': person.get('phone') or '',
         'listing_id': None,
-        'aircraft': '',
+        'aircraft': 'Brokerage',
+        'manufacturer': '',
+        'registration': '',
         'listing_status': None,
         'stripe_customer_id': row.get('stripe_customer_id'),
         'stripe_subscription_id': row.get('stripe_subscription_id'),
@@ -9883,7 +9914,8 @@ def _billing_matches_query(record, query):
     if not query:
         return True
     haystack = ' '.join(str(record.get(key) or '') for key in (
-        'customer_name', 'email', 'aircraft', 'listing_id', 'stripe_subscription_id', 'stripe_customer_id',
+        'customer_name', 'email', 'phone', 'aircraft', 'manufacturer', 'registration',
+        'listing_id', 'stripe_subscription_id', 'stripe_customer_id',
     )).lower()
     return query.lower() in haystack
 
@@ -9913,16 +9945,33 @@ def api_admin_billing():
     for row in records:
         key = row.get('billing_status') or row.get('status') or 'unknown'
         counts[key] = counts.get(key, 0) + 1
+    listing_mrr = db_module.monthly_recurring_cents()
+    broker_mrr = sum(
+        int(row.get('amount_cents') or 0)
+        for row in records
+        if row.get('kind') in ('broker', 'broker_team') and row.get('status') in ('active', 'trialing', 'past_due')
+    )
+    active_rows = [row for row in records if row.get('status') in ('active', 'trialing', 'past_due')]
+    paying_customers = len({row.get('user_id') for row in active_rows if row.get('user_id')})
     return jsonify({
         'subscriptions': records,
         'unmatched': unmatched,
         'failed_payments': failed,
         'refunds': db_module.list_refunded_listings(),
         'problems': db_module.billing_problem_rows(),
-        'monthly_recurring_cents': db_module.monthly_recurring_cents(),
+        'webhook_errors': db_module.list_billing_audits('webhook_failed', limit=20),
+        'monthly_recurring_cents': listing_mrr + broker_mrr,
         'collected_month_cents': db_module.collected_revenue_cents(month_start),
         'collected_year_cents': db_module.collected_revenue_cents(year_start),
         'counts': counts,
+        'overview': {
+            'active_subscriptions': len(active_rows),
+            'paying_customers': paying_customers,
+            'pending_cancellation': sum(1 for row in records if row.get('billing_status') == 'cancellation_pending' or row.get('cancellation_status') == 'cancellation_pending'),
+            'scheduled_cancellation': sum(1 for row in records if row.get('status') in ('active', 'trialing') and row.get('cancellation_effective_at')),
+            'failed_payments': len(failed),
+            'unmatched': len(unmatched),
+        },
         'grace_days': db_module.BILLING_GRACE_DAYS,
         'last_sync': _billing_sync_stamp(),
     }), 200

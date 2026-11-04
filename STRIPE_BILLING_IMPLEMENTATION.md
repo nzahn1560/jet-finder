@@ -45,6 +45,14 @@ New subscriptions are $14.99 per month through December 31, 2026, 11:59:59 p.m. 
 
 The Stripe customer stored on the user is reused. A second customer is not chosen from a shared email address. An open checkout for that listing is reused. An expired session is marked expired so another checkout can start. The listing stays unpaid until Stripe reports a paid session or an active subscription.
 
+New brokerage fees use the same Checkout Session path (`POST /api/account/broker-checkout`). Payment Link URLs are not shown on purchase buttons, and startup does not rewrite or reactivate Payment Links. A subscription that was already created from a Payment Link still fulfills from its `client_reference_id`. After this code is live, deactivate the old listing and brokerage Payment Links in the Stripe Dashboard so a buyer cannot start a subscription that skips the listing id. Do not delete the products, customers, or subscriptions.
+
+Optional price ids, used when set and otherwise replaced by the server amount:
+
+- `STRIPE_LISTING_PROMO_PRICE_ID` for the $14.99 listing price
+- `STRIPE_LISTING_PRICE_ID` for the $49.99 listing price
+- `STRIPE_BROKER_PRICE_ID` for the $19.99 brokerage price
+
 ## Cancellation
 
 Delete, Mark sold, and Cancel subscription hide that listing and cancel only its Stripe subscription (`prorate=false`, `invoice_now=false`). No refund is created.

@@ -800,10 +800,10 @@ function billingHeaders(json) {
             const listingLink = row.listing_id ? '<a href="/listing/' + row.listing_id + '" style="color:#fff;">View listing</a>' : '';
             return '<article style="border-bottom:1px solid rgba(255,255,255,0.12);padding:0.8rem 0;">'
                 + '<strong>' + esc(row.aircraft || 'Listing') + '</strong>'
-                + '<p style="margin:0.3rem 0;color:#d0d0d0;">Listing ' + esc(row.listing_status || '') + ' ' + esc(row.listing_id) + ' · ' + esc(row.price || '') + ' · ' + esc(row.billing_status || row.status) + '</p>'
-                + '<p style="margin:0;color:#d0d0d0;">Next renewal ' + esc(row.next_billing_date || '—') + (row.cancellation_effective_at ? ' · charges stop ' + esc(row.cancellation_effective_at) : '') + '</p>'
+                + '<p style="margin:0.3rem 0;color:#d0d0d0;">Listing ' + esc(row.listing_status || '') + ' ' + esc(row.listing_id) + ' · Subscription ' + esc(row.billing_status || row.status) + ' · ' + esc(row.price || '') + '</p>'
+                + '<p style="margin:0;color:#d0d0d0;">Payment status ' + esc(row.status === 'active' || row.status === 'trialing' ? 'Paid' : (row.billing_status || row.status || 'Unpaid')) + ' · Next renewal ' + esc(row.next_billing_date || '—') + (row.cancellation_effective_at ? ' · charges stop ' + esc(row.cancellation_effective_at) : '') + '</p>'
                 + problem
-                + (history ? '<ul style="margin:0.4rem 0 0;color:#d0d0d0;">' + history + '</ul>' : '')
+                + (history ? '<p style="margin:0.45rem 0 0;">Billing history</p><ul style="margin:0.2rem 0 0;color:#d0d0d0;">' + history + '</ul>' : '')
                 + '<div style="display:flex;gap:0.6rem;margin-top:0.5rem;flex-wrap:wrap;">'
                 + listingLink
                 + (canCancel ? '<button type="button" data-cancel-sub="' + row.id + '" style="background:none;border:0;color:#ef4444;cursor:pointer;">Cancel subscription</button>' : '')
@@ -906,7 +906,7 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
         const action = deleted
             ? '<button type="button" class="dash__btn" data-restore-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0; flex:none;">Put back</button>'
             : '<button type="button" class="dash__btn" data-delete-message="' + row.id + '" style="border:0; background:transparent; color:#F05545; cursor:pointer; padding:0.35rem 0; flex:none;">Delete</button>';
-        return '<article class="alert-item">'
+        return '<article class="alert-item" style="cursor:pointer;">'
             + '<div style="display:flex; justify-content:space-between; gap:0.75rem; align-items:flex-start;">'
             + '<button type="button" data-expand-message aria-expanded="false" style="display:block; flex:1; text-align:left; background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0;">'
             + '<strong>' + (mine ? 'To ' : 'From ') + esc(row.person_name) + '</strong> · ' + esc(row.aircraft_name || row.kind)
@@ -920,9 +920,12 @@ document.querySelectorAll('.fold__toggle').forEach(function (button) {
             + '</div></article>';
     }
     function wireMessages(root) {
-        root.querySelectorAll('[data-expand-message]').forEach(function (button) {
-            button.addEventListener('click', function () {
-                const body = button.parentElement.querySelector('[data-message-body]');
+        root.querySelectorAll('article').forEach(function (article) {
+            article.addEventListener('click', function (event) {
+                if (event.target.closest('a, [data-delete-message], [data-restore-message]')) return;
+                const body = article.querySelector('[data-message-body]');
+                const button = article.querySelector('[data-expand-message]');
+                if (!body || !button) return;
                 const open = body.hidden;
                 body.hidden = !open;
                 button.setAttribute('aria-expanded', open ? 'true' : 'false');

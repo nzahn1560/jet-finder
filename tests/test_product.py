@@ -112,6 +112,38 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         self.assertIn(b'Brokers only', allowed.data)
 
+    def test_broker_fee_opens_checkout_instead_of_a_payment_link(self):
+        previous_key = os.environ.get('STRIPE_SECRET_KEY')
+        os.environ['STRIPE_SECRET_KEY'] = 'sk_test_brokercheckout'
+        self._login('seller@example.com', 'seller-pass-1')
+        import app as app_module
+        created = []
+
+        def create_session(**kwargs):
+            created.append(kwargs)
+            return type('Session', (), {'id': 'cs_broker', 'url': 'https://checkout.stripe.com/c/pay/cs_broker', 'customer': 'cus_broker'})()
+
+        try:
+            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
+                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_broker'}), \
+                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_broker'}), \
+                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
+                pay = self.client.post('/api/account/broker-checkout')
+            self.assertEqual(pay.status_code, 200, pay.get_json())
+            self.assertTrue(pay.get_json().get('url', '').startswith('https://checkout.stripe.com/'))
+            self.assertEqual(created[0]['metadata']['purpose'], 'broker_account')
+            self.assertEqual(created[0]['metadata']['platform'], 'jetschoolusa')
+            self.assertEqual(created[0]['metadata']['user_id'], str(self.seller['id']))
+            self.assertEqual(created[0]['subscription_data']['metadata']['user_id'], str(self.seller['id']))
+            self.assertEqual(created[0]['line_items'][0]['price_data']['unit_amount'], 1999)
+            self.assertNotIn('ui_mode', created[0])
+            self.assertNotIn('payment_method_types', created[0])
+        finally:
+            if previous_key is None:
+                os.environ.pop('STRIPE_SECRET_KEY', None)
+            else:
+                os.environ['STRIPE_SECRET_KEY'] = previous_key
+
     def test_signup_does_not_grant_a_free_broker_account(self):
         created = self.client.post('/api/auth/signup', json={
             'email': 'new-broker@example.com',
@@ -126,10 +158,11 @@ class ProductTests(unittest.TestCase):
         blocked = self.client.get('/off-market')
         self.assertEqual(blocked.status_code, 403)
         checkout = self.client.post('/api/account/broker-checkout')
-        self.assertEqual(checkout.status_code, 200, checkout.get_json())
-        self.assertIn('buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', checkout.get_json().get('url') or '')
+        self.assertEqual(checkout.status_code, 503, checkout.get_json())
+        self.assertNotIn('buy.stripe.com', checkout.get_json().get('url') or '')
         portal = self.client.get('/dashboard')
-        self.assertIn(b'buy.stripe.com/7sYbIUgyoesqejI9AVgbm00', portal.data)
+        self.assertNotIn(b'buy.stripe.com', portal.data)
+        self.assertIn(b'Pay $19.99 a month', portal.data)
         self.assertIn(b'href="/settings"', portal.data)
 
     def test_broker_application_keeps_specialty_and_years(self):
@@ -346,11 +379,22 @@ class ProductTests(unittest.TestCase):
                 created_sessions.append(kwargs)
                 return type('Session', (), {'id': 'cs_paywall', 'url': 'https://checkout.stripe.com/c/pay/cs_paywall'})()
 
+            page = self.client.get('/create-listing')
+            token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
             with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
                  patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_paywall'}), \
                  patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_paywall'}), \
                  patch.object(app_module.stripe.checkout.Session, 'create', side_effect=create_session):
-                pay = self.client.post(f"/api/listings/{public.get_json()['id']}/checkout", json={'amount_cents': 1})
+                blocked = self.client.post(
+                    f"/api/listings/{public.get_json()['id']}/checkout",
+                    headers={'Origin': 'http://localhost'},
+                )
+                self.assertEqual(blocked.status_code, 403, blocked.get_json())
+                pay = self.client.post(
+                    f"/api/listings/{public.get_json()['id']}/checkout",
+                    json={'amount_cents': 1},
+                    headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
+                )
             self.assertEqual(pay.status_code, 200, pay.get_json())
             self.assertEqual(pay.get_json().get('url'), 'https://checkout.stripe.com/c/pay/cs_paywall')
             self.assertEqual(created_sessions[0]['line_items'][0]['price_data']['unit_amount'], pricing.listing_price_cents())
@@ -361,10 +405,16 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(created_sessions[0]['subscription_data']['metadata']['listing_id'], str(public.get_json()['id']))
             self.assertEqual(created_sessions[0]['subscription_data']['metadata']['jetschool_user_id'], str(self.seller['id']))
             self.assertEqual(created_sessions[0]['metadata']['serial_number'], '5501')
+            self.assertEqual(created_sessions[0]['metadata']['platform'], 'jetschoolusa')
             self.assertNotIn('payment_method_types', created_sessions[0])
+            self.assertNotIn('ui_mode', created_sessions[0])
             page = self.client.get('/create-listing')
             self.assertIn(b'opens checkout', page.data)
             self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
+            self.assertIn(b'X-CSRF-Token', page.data)
+            home = self.client.get('/')
+            self.assertIn(b"X-CSRF-Token", home.data)
+            self.assertIn(b"/api/listings/' + data.id + '/checkout'", home.data)
             self.assertNotIn(b'buy.stripe.com/eVqdR20zqbge6Rg6oJgbm01', page.data)
             self.assertIn(b'There is no listing fee', page.data)
             self._login('broker@example.com', 'broker-pass-1')
@@ -1442,6 +1492,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'id="clear-alerts"', portal.data)
         self.assertIn(b'Deleted messages', portal.data)
         self.assertIn(b'data-expand-message', portal.data)
+        self.assertIn(b"article.querySelector('[data-message-body]')", portal.data)
         self.assertIn(b'mailto:', portal.data)
         self.assertIn(b'tel:', portal.data)
         self._login('buyer@example.com', 'buyer-pass-1')
@@ -1544,11 +1595,7 @@ class ProductTests(unittest.TestCase):
             with patch.object(app_module.stripe.PaymentLink, 'list', return_value=page), \
                  patch.object(app_module.stripe.PaymentLink, 'modify', side_effect=lambda *args, **kwargs: calls.append(kwargs)):
                 app_module._restore_payment_links()
-            self.assertEqual(calls[0]['active'], True)
-            self.assertEqual(calls[0]['after_completion']['type'], 'hosted_confirmation')
-            self.assertNotIn('redirect', calls[0]['after_completion'])
-            self.assertEqual(calls[0]['payment_method_collection'], 'always')
-            self.assertEqual(calls[0]['subscription_data']['trial_period_days'], '')
+            self.assertEqual(calls, [])
             home = self.client.get('/')
             self.assertIn(b'aspect-ratio: 16 / 9', home.data)
             self.assertIn(b'repeat(3, minmax(0, 1fr))', home.data)
