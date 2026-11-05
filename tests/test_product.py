@@ -543,7 +543,7 @@ class ProductTests(unittest.TestCase):
         listing_id = created.get_json()['id']
         db_module.admin_approve_listing_any(listing_id, self.admin['id'])
         page = self.client.get('/dashboard')
-        self.assertIn(b"l.status !== 'archived'", page.data)
+        self.assertIn(b'id="trash-toggle"', page.data)
         removed = self.client.delete(f'/api/listings/{listing_id}')
         self.assertEqual(removed.status_code, 200, removed.get_json())
         row = db_module.get_listing_with_owner(listing_id)
@@ -552,6 +552,12 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(hidden.status_code, 404)
         mine = self.client.get('/api/listings/me')
         self.assertNotIn(listing_id, [item['id'] for item in mine.get_json()['listings']])
+        self.assertIn(listing_id, [item['id'] for item in mine.get_json()['trash']])
+        self.assertIn(b'id="trash-toggle"', page.data)
+        self._login('admin@example.com', 'admin-pass-1')
+        trashed = self.client.get('/api/admin/listings?status=trash')
+        self.assertIn(listing_id, [item['id'] for item in trashed.get_json()['listings']])
+        self.assertIn(b'id="trash-listings"', self.client.get('/admin').data)
         legacy = self.client.get('/api/my-listings')
         self.assertNotIn(listing_id, [item['id'] for item in legacy.get_json()])
 
@@ -669,13 +675,44 @@ class ProductTests(unittest.TestCase):
         })
         applicant_id = created.get_json()['user']['id']
         self.assertNotEqual(created.get_json()['user'].get('broker_application_status'), 'pending')
+        self._login('apply-broker@example.com', 'broker-pass-1')
+        asked = self.client.post('/api/account/broker-application', json={
+            'kind': 'main', 'name': 'Apply Desk', 'city': 'Dallas', 'state': 'TX',
+        })
+        self.assertEqual(asked.status_code, 200, asked.get_json())
+        self.assertFalse(asked.get_json().get('broker'))
+        self.assertNotEqual(db_module.get_user_by_id(applicant_id)['profile_role'], 'broker')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
         self._login('buyer@example.com', 'buyer-pass-1')
         self.assertEqual(self.client.post(f'/api/admin/brokers/{applicant_id}/approve').status_code, 403)
         self._login('admin@example.com', 'admin-pass-1')
+        waiting = self.client.get('/api/admin/approvals').get_json()['brokers']
+        submitted = next(row for row in waiting if row['id'] == applicant_id)
+        self.assertFalse(submitted.get('stripe_paid'))
+        self.assertIsNone(submitted.get('subscription_number'))
+        titles = [note.get('title') or '' for note in self.client.get('/api/notifications').get_json()['notifications']]
+        self.assertTrue(any(title.startswith('Broker submission to approve') for title in titles))
         approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
         self.assertEqual(approved.status_code, 402, approved.get_json())
-        db_module.update_user_subscription(applicant_id, 'broker', subscription_status='active', stripe_subscription_id='sub_queue_broker')
+        self.assertNotEqual(db_module.get_user_by_id(applicant_id)['profile_role'], 'broker')
+        subscription_number = db_module.update_user_subscription(
+            applicant_id, 'broker', subscription_status='active', stripe_subscription_id='sub_queue_broker',
+        )
         db_module.set_broker_application(applicant_id, 'pending')
+        self._login('apply-broker@example.com', 'broker-pass-1')
+        labeled = self.client.patch('/api/profile', json={'profile_role': 'broker'})
+        self.assertNotEqual(labeled.get_json()['user']['profile_role'], 'broker')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        paid_queue = self.client.get('/api/admin/approvals').get_json()['brokers']
+        paid_row = next(row for row in paid_queue if row['id'] == applicant_id)
+        self.assertTrue(paid_row.get('stripe_paid'))
+        self.assertEqual(paid_row.get('subscription_number'), subscription_number)
+        account = self.client.get(f'/api/admin/users/{applicant_id}')
+        self.assertEqual(account.get_json()['subscription_number'], subscription_number)
+        page = self.client.get('/admin')
+        self.assertIn(b'subscription_number', page.data)
+        self.assertIn(b'ap__listing-no', page.data)
         approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
         self.assertEqual(approved.status_code, 200, approved.get_json())
         person = db_module.get_user_by_id(applicant_id)
@@ -983,7 +1020,8 @@ class ProductTests(unittest.TestCase):
             self.assertEqual(row.get('payment_status'), 'paid')
             self.assertEqual(row.get('status'), 'pending')
             page = self.client.get(f'/dashboard?submitted={listing_id}&paid=confirmed')
-            self.assertIn(b'Payment received', page.data)
+            self.assertIn(b'Waiting for approval.', page.data)
+            self.assertNotIn(b'This listing has not been paid for. It is only saved as a draft.', page.data.split(b'loadMyListings')[0])
         finally:
             stripe.checkout.Session.retrieve = original
             if previous_key is None:
@@ -1181,7 +1219,7 @@ class ProductTests(unittest.TestCase):
         account = self.client.get('/dashboard')
         self.assertIn(b'Subscription is active.', account.data)
         self.assertNotIn(b'Pay $19.99 a month', account.data)
-        self.assertIn(b'Payment received, awaiting approval.', account.data)
+        self.assertIn(b'Waiting for approval.', account.data)
         self.assertIn(b'only saved as a draft.', account.data)
         created = self.client.post('/api/listings', json=self._payload('Already Paid Jet', 'public'))
         listing_id = created.get_json()['id']
@@ -1451,6 +1489,8 @@ class ProductTests(unittest.TestCase):
         page = self.client.get(f'/listing/{listing_id}')
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Range (seats full)', page.data)
+        self.assertIn(b'Best Speed/$', page.data)
+        self.assertIn(b'Best All-Around/$', page.data)
         self.assertIn(b'showroom', page.data)
         self.assertIn(b'Seller notes', page.data)
         self.assertIn(b'showroom-prev', page.data)

@@ -407,10 +407,10 @@
             <div class="fold__body" id="selling-body">
         {% if request.args.get('submitted') %}
         <div style="background:#1a2740; color:#f4f4f4; border:1px solid #3d6cb5; padding:1rem 1.1rem; margin-bottom:1rem; font-family:'Rajdhani', sans-serif;">
-            {% if request.args.get('paid') == '0' %}
+            {% if request.args.get('paid') == '0' and not submitted_paid %}
             This listing has not been paid for. It is only saved as a draft.
-            {% elif request.args.get('paid') == '1' or request.args.get('paid') == 'confirmed' %}
-            Payment received, awaiting approval.
+            {% elif submitted_paid or request.args.get('paid') == '1' or request.args.get('paid') == 'confirmed' %}
+            Waiting for approval.
             {% else %}
             This listing is saved and waiting for approval. It appears on the marketplace only after an admin approves it.
             {% endif %}
@@ -440,6 +440,14 @@
         <div id="my-listings-status" style="color:#c8c8c8; font-family:'Rajdhani', sans-serif; font-size:1.05rem; margin-bottom:1rem;">Loading your listings...</div>
         <div id="my-listings" class="dash__grid" data-admin="{{ 1 if user.is_admin else 0 }}"></div>
         </div>
+        </section>
+
+        <section class="fold" id="trash-fold">
+            <button type="button" class="fold__toggle" id="trash-toggle" aria-expanded="false">Trash</button>
+            <div class="fold__body" id="trash-body" hidden>
+                <div id="trash-status" style="color:#c8c8c8; font-family:'Rajdhani', sans-serif; font-size:1.05rem; margin-bottom:1rem;">Nothing in the trash.</div>
+                <div id="trash-listings" class="dash__grid"></div>
+            </div>
         </section>
 
         <section class="fold" id="watching-fold">
@@ -480,9 +488,25 @@ function billingHeaders(json) {
         const r = await fetch('/api/listings/me', { credentials: 'include', cache: 'no-store' });
         if (!r.ok) throw new Error('Failed to load listings');
         const data = await r.json();
-        let listings = (data.listings || []).filter(function (l) {
-            return l.status !== 'deleted' && l.status !== 'archived';
-        });
+        let listings = data.listings || [];
+        const trash = data.trash || [];
+        const trashList = document.getElementById('trash-listings');
+        const trashStatus = document.getElementById('trash-status');
+        const trashToggle = document.getElementById('trash-toggle');
+        if (trashToggle) trashToggle.textContent = 'Trash' + (trash.length ? ' (' + trash.length + ')' : '');
+        if (trashStatus) trashStatus.textContent = trash.length ? (trash.length + ' in the trash') : 'Nothing in the trash.';
+        if (trashList) {
+            const trashLabel = { deleted: 'Deleted', sold: 'Sold', archived: 'Archived' };
+            trashList.innerHTML = trash.map(function (l) {
+                const label = trashLabel[l.status] || 'Removed';
+                return '<div class="dash__card"><p style="margin:0 0 0.2rem;color:#9a9a9a;font-size:0.72rem;letter-spacing:0.04em;">' + escapeHtml(l.id) + '</p>'
+                    + '<h3 class="dash__card-title">' + escapeHtml(l.title || l.name || 'Listing #' + l.id) + '</h3>'
+                    + '<p class="dash__card-desc">' + escapeHtml(l.manufacturer || '') + (l.location ? ' · ' + escapeHtml(l.location) : '') + '<br>'
+                    + (Number(l.price) > 0 ? '<strong>$' + Number(l.price).toLocaleString() + '</strong>' : '') + '</p>'
+                    + '<span class="dash__badge" style="color:#9a9a9a;">' + escapeHtml(label) + '</span></div>';
+            }).join('');
+        }
+        if (location.hash === '#trash' && trashToggle) trashToggle.click();
         if (listings.length === 0) {
             statusEl.textContent = 'No listings yet.';
             return;
@@ -515,13 +539,13 @@ function billingHeaders(json) {
             const canEdit = l.status !== 'archived' && l.status !== 'deleted' && l.status !== 'sold';
             const canDelete = l.status !== 'deleted' && l.status !== 'archived' && l.status !== 'sold';
             const offMarket = (l.market || 'public') === 'off_market' || (l.market || '') === 'broker_only';
-            const paidFee = l.payment_status === 'paid';
+            const paidFee = !!l.fee_paid || l.payment_status === 'paid' || l.payment_status === 'past_due';
             const feeWaiting = paidFee && (l.status === 'pending' || l.status === 'unpaid' || l.status === 'draft');
             const feeDraft = !offMarket && !paidFee && l.status !== 'active' && l.status !== 'suspended';
             const copy = l.resubmitted
                 ? 'Resubmitted. Already paid.'
                 : (feeWaiting
-                ? 'Payment received, awaiting approval.'
+                ? 'Waiting for approval.'
                 : (feeDraft
                 ? 'This listing has not been paid for. It is only saved as a draft.'
                 : (l.status === 'active' && l.pending_review)
@@ -594,17 +618,14 @@ function billingHeaders(json) {
         });
         listEl.querySelectorAll('[data-delete]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Remove this listing? Cancel its subscription in Manage payment first. Removing the listing does not cancel the subscription.')) return;
+                if (!confirm('Remove this listing? It goes to Trash. Cancel its subscription in Manage payment first. Removing the listing does not cancel the subscription.')) return;
                 const id = btn.getAttribute('data-delete');
                 const resp = await fetch('/api/listings/' + id, { method: 'DELETE', credentials: 'include', headers: billingHeaders(false) });
                 const body = await resp.json().catch(function () { return {}; });
                 if (resp.ok) {
                     if (body.billing === 'cancellation_pending') alert(body.message || 'The listing is off the site. Stripe has not confirmed the cancellation yet.');
-                    const card = btn.closest('.dash__card');
-                    if (card) card.remove();
-                    listings = listings.filter(function (item) { return String(item.id) !== String(id); });
-                    applySelling();
-                    if (!listings.length) statusEl.textContent = 'No listings yet.';
+                    window.location.assign('/profile#trash');
+                    window.location.reload();
                 } else {
                     alert(body.message || body.error || 'Failed to delete');
                 }
@@ -612,11 +633,11 @@ function billingHeaders(json) {
         });
         listEl.querySelectorAll('[data-sold]').forEach(function (btn) {
             btn.addEventListener('click', async function () {
-                if (!confirm('Mark this aircraft sold? Cancel its subscription in Manage payment first. This does not cancel the subscription.')) return;
+                if (!confirm('Mark this aircraft sold? It goes to Trash. Cancel its subscription in Manage payment first. This does not cancel the subscription.')) return;
                 const resp = await fetch('/api/listings/' + btn.getAttribute('data-sold') + '/sold', { method: 'POST', credentials: 'include', headers: billingHeaders(true), body: '{}' });
                 const soldBody = await resp.json().catch(function () { return {}; });
                 alert(soldBody.message || (resp.ok ? 'Marked sold.' : 'Could not mark this sold.'));
-                if (resp.ok) window.location.reload();
+                if (resp.ok) { window.location.assign('/profile#trash'); window.location.reload(); }
             });
         });
         listEl.querySelectorAll('[data-pause], [data-resume]').forEach(function (btn) {

@@ -97,76 +97,191 @@ def marketplace_browse():
     return render_template('marketplace_browse.html', listings=cards, manufacturer=request.args.get('manufacturer') or '', max_price=request.args.get('max_price') or '')
 
 
-def _fact_text(value, suffix=''):
-    """A display string for one aircraft fact, or None when there is nothing to show."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, float):
-        text = f'{value:,.2f}'.rstrip('0').rstrip('.')
-    elif isinstance(value, int):
-        text = f'{value:,}'
+def _sheet_number(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:
+        return 0.0
+    return number
+
+
+def _sheet_round(value, decimals=2):
+    factor = 10 ** decimals
+    shifted = value * factor
+    rounded = int(shifted + (0.5 if shifted >= 0 else -0.5))
+    return rounded / factor
+
+
+def _finder_scenario():
+    """Empty-form finder inputs. These are the same defaults the listing cards use."""
+    return {
+        'F2': 971.0,
+        'G2': 120.0,
+        'H2': 5.0,
+        'I2': 6.50,
+        'J2': 9.0,
+        'K2': 0.04,
+        'L2': 2.0,
+        'M2': 65000.0,
+        'N2': 82500.0,
+        'O2': 130000.0,
+        'P2': 0.0,
+        'Q2': 0.0,
+        'R2': 0.5,
+        'S2': 0.0,
+        'T2': 0.0,
+    }
+
+
+def _sheet_metrics(aircraft, params):
+    """Per-dollar columns for one aircraft. Lower raw values are better."""
+    speed = _sheet_number(aircraft.get('speed'))
+    distance = _sheet_number(aircraft.get('range'))
+    seats = _sheet_number(aircraft.get('passengers'))
+    price = _sheet_number(aircraft.get('price'))
+    fixed = _sheet_number(aircraft.get('total_fixed_cost'))
+    variable = _sheet_number(aircraft.get('total_variable_cost'))
+    kind = str(aircraft.get('category') or '').lower()
+    residual = price * ((1 - params['K2']) ** params['H2'])
+    leg_hours = params['F2'] / speed if speed > 0 else 0.0
+    year_hours = leg_hours * params['G2']
+    passenger_pay = (params['Q2'] * params['P2']) * year_hours
+    hourly_variable = variable / 450
+    charter_credit_rate = hourly_variable * params['R2']
+    charter_leg = params['S2'] / speed if speed > 0 else 0.0
+    charter_offset = charter_leg * params['T2'] * charter_credit_rate
+    fuel_price = params['J2'] if 'piston' in kind and params['J2'] else params['I2']
+    fuel = ((hourly_variable / 6) * fuel_price) * year_hours
+    if 'piston' in kind:
+        pilot_pay = params['M2']
+    elif 'business' in kind or 'jet' in kind:
+        pilot_pay = params['O2']
     else:
-        text = str(value).strip()
-    if text in ('', 'None', 'Unknown', 'nan'):
-        return None
-    return text + suffix
+        pilot_pay = params['N2']
+    annual = (fuel + fixed) - charter_offset + passenger_pay - pilot_pay
+    ownership = ((annual * params['H2']) + price) + (price - residual)
+    speed_dollar = (ownership / speed) / 1000 if speed > 0 else 0.0
+    range_dollar = (ownership / distance) / 100 if distance > 0 else 0.0
+    mile_variable = hourly_variable / speed if speed > 0 else 0.0
+    efficiency = ((2 * mile_variable) * ownership) / 1000000
+    return {
+        'speed_dollar': speed_dollar,
+        'range_dollar': range_dollar,
+        'efficiency': efficiency,
+        'seats': seats,
+    }
 
 
-def _listing_facts(row, profile):
-    """Every public fact we have for this aircraft, asking details first."""
-    profile = profile or {}
-    crew = profile.get('min_crew')
-    facts = [
-        {'label': 'Range (seats full)', 'value': _fact_text(profile.get('range'), ' nm') or '—', 'note': ''},
-        {'label': 'Speed', 'value': _fact_text(profile.get('speed'), ' kts') or '—', 'note': ''},
-        {
-            'label': 'Passengers',
-            'value': _fact_text(profile.get('passengers')) or '—',
-            'note': 'inc. 1 pilot seat' if crew == 1 else '',
-        },
-        {'label': 'Cabin', 'value': _fact_text(profile.get('cabin_volume'), ' cu ft') or '—', 'note': ''},
+def _fleet_bounds(fleet, params):
+    speed_values = []
+    range_values = []
+    efficiency_values = []
+    prepared = []
+    for row in fleet:
+        metrics = _sheet_metrics({
+            'speed': row.get('s'),
+            'range': row.get('x'),
+            'passengers': row.get('z'),
+            'price': row.get('p'),
+            'total_fixed_cost': row.get('f'),
+            'total_variable_cost': row.get('v'),
+            'category': row.get('c') or '',
+        }, params)
+        prepared.append(metrics)
+        if metrics['speed_dollar'] > 0:
+            speed_values.append(metrics['speed_dollar'])
+        if metrics['range_dollar'] > 0:
+            range_values.append(metrics['range_dollar'])
+        if metrics['efficiency'] > 0:
+            efficiency_values.append(metrics['efficiency'])
+    bounds = {
+        'speed': (min(speed_values) if speed_values else 0, max(speed_values) if speed_values else 0),
+        'range': (min(range_values) if range_values else 0, max(range_values) if range_values else 0),
+        'efficiency': (min(efficiency_values) if efficiency_values else 0, max(efficiency_values) if efficiency_values else 0),
+    }
+
+    def scale(value, key):
+        low, high = bounds[key]
+        if high <= low:
+            return 0.0
+        return ((value - low) / (high - low)) * 1000
+
+    performance_values = []
+    for metrics in prepared:
+        performance = (scale(metrics['speed_dollar'], 'speed') + scale(metrics['range_dollar'], 'range')) / 2
+        if performance > 0:
+            performance_values.append(performance)
+    bounds['performance'] = (
+        min(performance_values) if performance_values else 0,
+        max(performance_values) if performance_values else 0,
+    )
+    return bounds
+
+
+def _scaled(value, low, high):
+    if high <= low:
+        return 0.0
+    return ((value - low) / (high - low)) * 1000
+
+
+def _bar_percent(normalized):
+    clamped = max(0.0, min(1000.0, normalized))
+    return int(_sheet_round(100 - (clamped / 10), 0))
+
+
+def _bar_color(percent):
+    amount = max(0, min(100, percent)) / 100
+    red = round(240 - (200 * amount))
+    green = round(69 + (111 * amount))
+    blue = round(69 + amount)
+    return f'rgb({red},{green},{blue})'
+
+
+def _bar_point(value):
+    shown = _sheet_round(value, 2)
+    text = f'{shown:,.2f}'.rstrip('0').rstrip('.')
+    return text or '0'
+
+
+def _dollar_bars(profile, price):
+    """The five per-dollar bars from the listing cards, using this asking price."""
+    from app import _sheet_fleet, get_unified_aircraft_data
+    params = _finder_scenario()
+    bounds = _fleet_bounds(_sheet_fleet(get_unified_aircraft_data()), params)
+    metrics = _sheet_metrics({
+        'speed': (profile or {}).get('speed'),
+        'range': (profile or {}).get('range'),
+        'passengers': (profile or {}).get('passengers'),
+        'price': price,
+        'total_fixed_cost': (profile or {}).get('total_fixed_cost'),
+        'total_variable_cost': (profile or {}).get('total_variable_cost'),
+        'category': (profile or {}).get('category') or '',
+    }, params)
+    speed_norm = _scaled(metrics['speed_dollar'], *bounds['speed'])
+    range_norm = _scaled(metrics['range_dollar'], *bounds['range'])
+    efficiency_norm = _scaled(metrics['efficiency'], *bounds['efficiency'])
+    performance = (speed_norm + range_norm) / 2
+    performance_norm = _scaled(performance, *bounds['performance'])
+    all_around = (performance_norm + efficiency_norm) / 2
+    rows = [
+        ('Best Speed/$', metrics['speed_dollar'], speed_norm),
+        ('Best Range/$', metrics['range_dollar'], range_norm),
+        ('Best Performance/$', performance, performance_norm),
+        ('Best Efficiency/$', metrics['efficiency'], efficiency_norm),
+        ('Best All-Around/$', all_around, all_around),
     ]
-    optional = [
-        ('Manufacturer', row.get('manufacturer') or profile.get('manufacturer'), ''),
-        ('Category', profile.get('category') or row.get('engine_type'), ''),
-        ('Variant', row.get('variant'), ''),
-        ('Registration', row.get('registration'), ''),
-        ('Serial', row.get('serial_number'), ''),
-        ('Airframe', row.get('hours'), ' hrs'),
-        ('Engines', row.get('engine_hours'), ' hrs'),
-        ('Engine cycles', row.get('engine_cycles'), ''),
-        ('Engine', row.get('engine_type'), ''),
-        ('Engine program', row.get('engine_program'), ''),
-        ('Avionics', row.get('avionics'), ''),
-        ('Paint', str(row.get('paint_year')) if row.get('paint_year') else None, ''),
-        ('Interior', str(row.get('interior_year')) if row.get('interior_year') else None, ''),
-        ('Cabin layout', row.get('passenger_config'), ''),
-        ('Maintenance', row.get('maintenance_status'), ''),
-        ('Years built', profile.get('date_range'), ''),
-        ('Multi engine', profile.get('multi_engine'), ''),
-        ('Ceiling', profile.get('max_altitude'), ' ft'),
-        ('Runway', profile.get('runway_length'), ' ft'),
-        ('Wingspan', profile.get('wingspan'), ' ft'),
-        ('Length', profile.get('aircraft_length'), ' ft'),
-        ('Height', profile.get('aircraft_height'), ' ft'),
-        ('Cabin height', profile.get('cabin_height'), ' ft'),
-        ('Cabin width', profile.get('cabin_width'), ' ft'),
-        ('Cabin length', profile.get('cabin_length'), ' ft'),
-        ('Baggage', profile.get('baggage_volume'), ' cu ft'),
-        ('Aircraft volume', profile.get('aircraft_volume'), ' cu ft'),
-    ]
-    seen = set()
-    for label, value, suffix in optional:
-        text = _fact_text(value, suffix)
-        if not text or (label, text) in seen:
-            continue
-        if label == 'Engine' and text == next((item['value'] for item in facts if item['label'] == 'Category'), None):
-            continue
-        seen.add((label, text))
-        facts.append({'label': label, 'value': text, 'note': ''})
-    return facts
+    bars = []
+    for label, raw, normalized in rows:
+        percent = _bar_percent(normalized)
+        bars.append({
+            'label': label,
+            'point': _bar_point(raw),
+            'percent': percent,
+            'color': _bar_color(percent),
+        })
+    return bars
 
 
 @product.route('/listing/<int:listing_id>')
@@ -199,11 +314,11 @@ def public_listing(listing_id):
         line for line in (row.get('description') or '').splitlines()
         if not line.strip().lower().startswith('listing number:')
     ).strip()
-    facts = _listing_facts(row, profile)
+    dollar_bars = _dollar_bars(profile, row.get('price'))
     return render_template(
         'listing_public.html', listing=row, profile=profile, media=media,
         seller_name=seller_name or 'Seller', brokers=brokers, seller_notes=seller_notes,
-        facts=facts,
+        dollar_bars=dollar_bars,
     )
 
 
