@@ -441,7 +441,7 @@ async function openAccount(id, focusMessage) {
         : '<p>No listings.</p>';
     const waiting = user.broker_application_status === 'pending';
     const paid = !!data.broker_paid;
-    document.getElementById('account-approve').hidden = !(waiting && paid);
+    document.getElementById('account-approve').hidden = !waiting;
     document.getElementById('account-deny').hidden = !waiting;
     const subscriptionNo = data.subscription_number
         ? '<p class="ap__listing-no">' + esc(data.subscription_number) + '</p>'
@@ -841,12 +841,9 @@ async function loadApprovals() {
         const waitingLine = person.stripe_paid
             ? 'Paid. Waiting for your approval. They are not a broker yet.'
             : 'Submitted. They are not a broker until you approve them after payment, or a brokerage accepts them.';
-        const approve = person.stripe_paid
-            ? '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
-            : '';
         return '<div class="ap__card" data-user="' + person.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">' + subscriptionNo + '<strong>' + esc(name) + '</strong><br>' + esc(company) + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + waitingLine + '</div>'
             + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-            + approve
+            + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');

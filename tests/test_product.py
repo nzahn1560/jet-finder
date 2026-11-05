@@ -713,6 +713,8 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/admin')
         self.assertIn(b'subscription_number', page.data)
         self.assertIn(b'ap__listing-no', page.data)
+        self.assertIn(b'data-approve-broker="\' + person.id + \'">Approve</button>', page.data)
+        self.assertIn(b"document.getElementById('account-approve').hidden = !waiting;", page.data)
         approved = self.client.post(f'/api/admin/brokers/{applicant_id}/approve')
         self.assertEqual(approved.status_code, 200, approved.get_json())
         person = db_module.get_user_by_id(applicant_id)
