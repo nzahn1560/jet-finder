@@ -1540,6 +1540,7 @@ def dashboard():
         teams=teams,
         team_people=team_people,
         submitted_paid=submitted_paid,
+        broker_number=_broker_subscription_number(person['id']) if person else None,
     )
 
 
@@ -1603,6 +1604,7 @@ def public_profile(user_id):
         pending_members=pending_members,
         teams=teams,
         team_people=team_people,
+        broker_number=_broker_subscription_number(person['id']) if is_owner else None,
     )
 
 
@@ -3967,8 +3969,17 @@ def _broker_subscription_row(user_id):
 
 
 def _broker_subscription_number(user_id):
-    row = _broker_subscription_row(user_id)
-    return row.get('id') if row else None
+    """The Stripe subscription id on this account. A team member uses the main account's id."""
+    row = _broker_subscription_row(user_id) or {}
+    if row.get('stripe_subscription_id'):
+        return row.get('stripe_subscription_id')
+    membership = db_module.team_membership(user_id) or {}
+    leader_id = membership.get('admin_user_id')
+    if leader_id and int(leader_id) != int(user_id):
+        leader = _broker_subscription_row(leader_id) or {}
+        if leader.get('stripe_subscription_id'):
+            return leader.get('stripe_subscription_id')
+    return row.get('stripe_customer_id') or (get_user_by_id(user_id) or {}).get('stripe_customer_id') or None
 
 
 def _broker_seat_granted(user) -> bool:
@@ -4044,7 +4055,7 @@ def _record_paid_brokerage(user_id, customer_id=None, subscription_id=None, subs
     """Save the $19.99 payment. The person stays out of broker access until an admin approves them."""
     existing = get_user_subscription(user_id, subscription_type) or {}
     already_paid = existing.get('subscription_status') in ('active', 'past_due', 'trialing')
-    sub_id = update_user_subscription(
+    update_user_subscription(
         user_id,
         subscription_type,
         stripe_customer_id=customer_id,
@@ -4058,12 +4069,12 @@ def _record_paid_brokerage(user_id, customer_id=None, subscription_id=None, subs
     if person.get('broker_application_status') != 'pending':
         db_module.set_broker_application(user_id, 'pending')
     if not already_paid:
-        _notify_admins_brokerage(user_id, sub_id)
+        _notify_admins_brokerage(user_id, subscription_id)
     return 'queued'
 
 
 def _grant_broker_account(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
-    """Turn on broker access after an admin approves a paid brokerage."""
+    """Turn on broker access when an admin approves the submission."""
     update_user_subscription(
         user_id,
         subscription_type,
@@ -10124,12 +10135,13 @@ def api_admin_approve_broker(user_id):
     person = get_user_by_id(user_id)
     if not person:
         return jsonify({'error': 'not_found'}), 404
+    waiting = person.get('broker_application_status') == 'pending'
     paid = (
         has_active_subscription(user_id, 'broker')
         or has_active_subscription(user_id, 'broker_team')
         or bool(db_module.user_on_active_team(user_id))
     )
-    if not paid:
+    if not waiting and not paid:
         return jsonify({
             'error': 'payment_required',
             'message': 'This person has not paid for a brokerage.',
