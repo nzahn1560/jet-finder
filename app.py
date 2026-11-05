@@ -1547,14 +1547,20 @@ def dashboard():
     )
 
 
-def _broker_billing_row(user_id):
-    """The live brokerage subscription on this account, with its own Stripe subscription id."""
+def _live_broker_subscription(user_id):
+    """The brokerage subscription shown on this account's subscription bar."""
     row = _account_subscription(user_id) or {}
     if row.get('subscription_type') not in ('broker', 'broker_team'):
         return None
     if row.get('subscription_status') not in ('active', 'past_due', 'trialing'):
         return None
-    if not row.get('stripe_customer_id') or not row.get('stripe_subscription_id'):
+    return row
+
+
+def _broker_billing_row(user_id):
+    """The live brokerage subscription on this account, with its own Stripe subscription id."""
+    row = _live_broker_subscription(user_id)
+    if not row or not row.get('stripe_customer_id') or not row.get('stripe_subscription_id'):
         return None
     return row
 
@@ -4643,8 +4649,8 @@ def api_broker_cancel_request():
     if not _billing_request_ok():
         return jsonify({'error': 'forbidden'}), 403
     user = request.current_user  # type: ignore[attr-defined]
-    row = _broker_billing_row(user['id'])
-    if not row or not row.get('stripe_subscription_id'):
+    row = _live_broker_subscription(user['id'])
+    if not row:
         return jsonify({
             'error': 'no_subscription',
             'message': 'There is no brokerage subscription on this account.',
@@ -10298,7 +10304,7 @@ def api_admin_approvals():
 @require_admin
 def api_admin_clear_cancel_request(user_id):
     """Remove a delete request from Approvals. This does not cancel Stripe."""
-    row = _broker_billing_row(user_id)
+    row = _live_broker_subscription(user_id)
     if not row or not row.get('cancel_requested_at'):
         return jsonify({'error': 'not_found', 'message': 'There is no delete request on this account.'}), 404
     db_module.set_subscription_cancel_request(row['id'], False)
