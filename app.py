@@ -1547,6 +1547,57 @@ def dashboard():
     )
 
 
+def _broker_billing_row(user_id):
+    """The live brokerage subscription on this account, with its own Stripe subscription id."""
+    row = _account_subscription(user_id) or {}
+    if row.get('subscription_type') not in ('broker', 'broker_team'):
+        return None
+    if row.get('subscription_status') not in ('active', 'past_due', 'trialing'):
+        return None
+    if not row.get('stripe_customer_id') or not row.get('stripe_subscription_id'):
+        return None
+    return row
+
+
+def _broker_portal_params(row, return_url):
+    """Portal session for this account's brokerage subscription id only."""
+    sub_id = row['stripe_subscription_id']
+    done = {'type': 'redirect', 'redirect': {'return_url': return_url}}
+    return {
+        'customer': row['stripe_customer_id'],
+        'return_url': return_url,
+        'configuration': _portal_configuration_id(),
+        'flow_data': {
+            'type': 'subscription_update',
+            'subscription_update': {'subscription': sub_id},
+            'after_completion': done,
+        },
+    }
+
+
+def _open_broker_portal(row, return_url):
+    """Open the customer portal on this account's brokerage subscription, not a listing fee."""
+    sub_id = row['stripe_subscription_id']
+    first = _broker_portal_params(row, return_url)
+    cancel = {
+        'type': 'subscription_cancel',
+        'subscription_cancel': {'subscription': sub_id},
+        'after_completion': {'type': 'redirect', 'redirect': {'return_url': return_url}},
+    }
+    flows = (first['flow_data'], cancel)
+    last_error = None
+    common = {key: value for key, value in first.items() if key != 'flow_data'}
+    for flow in flows:
+        params = dict(common)
+        params['flow_data'] = flow
+        try:
+            return stripe.billing_portal.Session.create(**params)
+        except Exception as exc:
+            last_error = exc
+            logger.exception('Broker portal could not open %s for %s', flow['type'], sub_id)
+    raise last_error
+
+
 def _account_subscription(user_id):
     """The brokerage subscription for the account bar. An active one wins over a newer inactive row."""
     rows = []
@@ -4507,20 +4558,26 @@ def api_billing_portal():
     """Stripe Customer Portal: update the card or cancel at the end of the month."""
     user = request.current_user  # type: ignore[attr-defined]
     purpose = ((request.get_json(silent=True) or {}).get('purpose') or '').strip().lower()
-    row = None
-    for kind in ('broker', 'broker_team'):
-        candidate = get_user_subscription(user['id'], kind) or {}
-        if candidate.get('subscription_status') not in ('active', 'past_due', 'trialing'):
-            continue
-        if not candidate.get('stripe_customer_id'):
-            candidate = dict(candidate)
-            candidate['stripe_customer_id'] = user.get('stripe_customer_id')
-        if candidate.get('stripe_customer_id'):
-            row = candidate
-            break
-        row = row or candidate
-    if purpose == 'broker' and not (row and row.get('stripe_customer_id')):
-        return jsonify({'url': STRIPE_CUSTOMER_PORTAL_URL}), 200
+    broker_row = _broker_billing_row(user['id'])
+    if purpose == 'broker':
+        if not broker_row:
+            return jsonify({
+                'error': 'no_subscription',
+                'message': 'There is no brokerage subscription on this account.',
+            }), 404
+        if not _stripe_configured():
+            return jsonify({
+                'error': 'payment_not_ready',
+                'message': 'Billing is not available until Stripe is configured.',
+            }), 503
+        base = _public_base()
+        try:
+            portal = _open_broker_portal(broker_row, f'{base}/dashboard')
+        except Exception:
+            logger.exception('Broker billing portal creation failed')
+            return jsonify({'error': 'stripe_error', 'message': 'The brokerage subscription could not be opened.'}), 500
+        return jsonify({'url': portal.url}), 200
+    row = broker_row
     if not row:
         customer = db_module.listing_stripe_customer(user['id'])
         if customer:

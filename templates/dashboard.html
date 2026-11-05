@@ -308,7 +308,7 @@
                 <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <strong style="color: #fff;">Subscription</strong>
                     <span style="padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
-                    {% if subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
+                    {% if subscription.subscription_type in ['broker', 'broker_team'] and subscription.stripe_subscription_id and subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
                     <button type="button" class="subscription-bar__pay js-manage-broker-payment">Manage payment</button>
                     {% endif %}
                 </div>
@@ -331,7 +331,8 @@
                     });
                     const data = await response.json().catch(function () { return {}; });
                     if (data.url) { window.location = data.url; return; }
-                    window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
+                    button.disabled = false;
+                    alert(data.message || 'The brokerage subscription could not be opened.');
                 });
             });
         })();

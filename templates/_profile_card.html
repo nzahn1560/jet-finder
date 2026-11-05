@@ -329,7 +329,7 @@
         {% set paid_broker = subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team'] %}
         {% set broker_approved = (user.profile_role or '') == 'broker' and (user.broker_application_status or '') == 'approved' %}
         {% set broker_live = on_team or (paid_broker and broker_approved) %}
-        {% set manage_broker_payment = paid_broker and subscription and subscription.subscription_type in ['broker', 'broker_team'] %}
+        {% set manage_broker_payment = paid_broker and subscription and subscription.stripe_subscription_id and subscription.subscription_type in ['broker', 'broker_team'] %}
         <div class="broker-panel">
                 {% if broker_live and membership and membership.is_admin %}
                 <p class="broker-panel__kicker">Brokerage</p>
@@ -589,7 +589,10 @@
             });
             const data = await response.json().catch(function () { return {}; });
             if (data.url) { window.location = data.url; return; }
-            window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
+            button.disabled = false;
+            const status = document.getElementById('broker-cta-status') || document.getElementById('profile-save-status');
+            if (status) status.textContent = data.message || 'The brokerage subscription could not be opened.';
+            else alert(data.message || 'The brokerage subscription could not be opened.');
         });
     });
     document.querySelectorAll('.allow-member').forEach(function (button) {
