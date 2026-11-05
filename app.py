@@ -1536,7 +1536,7 @@ def dashboard():
         'dashboard.html',
         user=person,
         is_owner=True,
-        subscription=person.get('subscription') if person else None,
+        subscription=_account_subscription(person['id']) if person else None,
         billing_customer=bool(person and db_module.listing_stripe_customer(person['id'])),
         membership=membership,
         pending_members=pending_members,
@@ -1545,6 +1545,22 @@ def dashboard():
         submitted_paid=submitted_paid,
         broker_number=_broker_subscription_number(person['id']) if person else None,
     )
+
+
+def _account_subscription(user_id):
+    """The brokerage subscription for the account bar. An active one wins over a newer inactive row."""
+    rows = []
+    for kind in ('broker', 'broker_team'):
+        row = get_user_subscription(user_id, kind)
+        if row:
+            rows.append(row)
+    live = [row for row in rows if row.get('subscription_status') in ('active', 'past_due', 'trialing')]
+    billed = [row for row in live if row.get('stripe_customer_id')]
+    if billed:
+        return billed[0]
+    if live:
+        return live[0]
+    return rows[0] if rows else None
 
 
 def _place_parts(location):
@@ -1608,7 +1624,7 @@ def public_profile(user_id):
         teams=teams,
         team_people=team_people,
         broker_number=_broker_subscription_number(person['id']) if is_owner else None,
-        subscription=get_user_subscription(person['id']) if is_owner else None,
+        subscription=_account_subscription(person['id']) if is_owner else None,
     )
 
 
@@ -4494,11 +4510,17 @@ def api_billing_portal():
     row = None
     for kind in ('broker', 'broker_team'):
         candidate = get_user_subscription(user['id'], kind) or {}
-        if candidate.get('stripe_customer_id') and candidate.get('subscription_status') in ('active', 'past_due'):
+        if candidate.get('subscription_status') not in ('active', 'past_due', 'trialing'):
+            continue
+        if not candidate.get('stripe_customer_id'):
+            candidate = dict(candidate)
+            candidate['stripe_customer_id'] = user.get('stripe_customer_id')
+        if candidate.get('stripe_customer_id'):
             row = candidate
             break
-    if purpose == 'broker' and not row:
-        return jsonify({'error': 'no_subscription', 'message': 'There is no brokerage subscription to manage.'}), 404
+        row = row or candidate
+    if purpose == 'broker' and not (row and row.get('stripe_customer_id')):
+        return jsonify({'url': STRIPE_CUSTOMER_PORTAL_URL}), 200
     if not row:
         customer = db_module.listing_stripe_customer(user['id'])
         if customer:

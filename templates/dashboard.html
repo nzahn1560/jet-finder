@@ -170,6 +170,22 @@
         border: 1px solid rgba(255,255,255,0.2);
     }
     .dash__btn--secondary:hover { color: #fff; border-color: rgba(255,255,255,0.35); transform: translateY(-2px); }
+    .subscription-bar__pay {
+        display: inline-flex;
+        align-items: center;
+        margin: 0;
+        padding: 0.35rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.35);
+        background: transparent;
+        color: #fff;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .subscription-bar__pay:hover { border-color: #fff; }
     .dash__section-title {
         font-family: 'Orbitron', sans-serif;
         font-size: 1.15rem;
@@ -292,8 +308,8 @@
                 <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <strong style="color: #fff;">Subscription</strong>
                     <span style="padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
-                    {% if subscription.subscription_type in ['broker', 'broker_team'] and subscription.stripe_customer_id and subscription.subscription_status in ['active', 'past_due'] %}
-                    <button type="button" class="dash__btn dash__btn--secondary js-manage-broker-payment" style="border:0; cursor:pointer;">Manage payment</button>
+                    {% if subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
+                    <button type="button" class="subscription-bar__pay js-manage-broker-payment">Manage payment</button>
                     {% endif %}
                 </div>
                 <span style="color: #8e8e93;">{{ subscription.subscription_type.replace('_', ' ')|title }}</span>
