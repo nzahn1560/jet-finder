@@ -25,7 +25,7 @@
     .showroom__hero:focus-within .showroom__nav { opacity: 1; pointer-events: auto; }
     .showroom__nav--prev { left: 16px; }
     .showroom__nav--next { right: 16px; }
-    .showroom__sheet { max-width: 720px; margin: 0.6rem auto 0; padding: 0 1rem 2rem; position: relative; }
+    .showroom__sheet { max-width: 960px; margin: 0.6rem auto 0; padding: 0 1rem 2rem; position: relative; }
     .showroom__panel { background: #1a1a1a; border-radius: 16px; padding: 0.9rem 1rem 1.1rem; }
     .showroom h1 { color: #fff; font-size: clamp(1.7rem, 3.5vw, 2.6rem); margin: 0 0 0.2rem; }
     .showroom__seller { color: #f4f4f4; font-size: 1.15rem; text-decoration: none; }
@@ -90,25 +90,15 @@
             </p>
             <div class="showroom__price"><strong>${{ '{:,.0f}'.format(listing.price or 0) }}</strong></div>
             <div class="showroom__stats">
-                <div class="showroom__stat"><span>Range (seats full)</span><b>{{ profile.range or '—' }} nm</b></div>
-                <div class="showroom__stat"><span>Speed</span><b>{{ profile.speed or '—' }} kts</b></div>
-                <div class="showroom__stat"><span>Passengers{% if profile.min_crew == 1 %} <em class="showroom__crew">(inc. 1 pilot seat)</em>{% endif %}</span><b>{{ profile.passengers or '—' }}</b></div>
-                <div class="showroom__stat"><span>Cabin</span><b>{{ profile.cabin_volume or '—' }} cu ft</b></div>
-                {% if listing.hours is not none %}<div class="showroom__stat"><span>Airframe</span><b>{{ '{:,.0f}'.format(listing.hours or 0) }} hrs</b></div>{% endif %}
-                {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}
+                {% for fact in facts %}
+                <div class="showroom__stat"><span>{{ fact.label }}{% if fact.note %} <em class="showroom__crew">({{ fact.note }})</em>{% endif %}</span><b>{{ fact.value }}</b></div>
+                {% endfor %}
             </div>
-            <details class="showroom__notes">
+            <details class="showroom__notes" open>
                 <summary>Seller notes</summary>
                 <p class="showroom__number">{{ listing.id }}</p>
                 {% if seller_notes %}<p>{{ seller_notes }}</p>{% endif %}
             </details>
-            {% if listing.avionics or listing.paint_year or listing.interior_year %}
-            <p class="showroom__notes">
-                {% if listing.avionics %}Avionics: {{ listing.avionics }}. {% endif %}
-                {% if listing.paint_year %}Paint {{ listing.paint_year }}. {% endif %}
-                {% if listing.interior_year %}Interior {{ listing.interior_year }}.{% endif %}
-            </p>
-            {% endif %}
             {% set viewer = get_current_user_info() %}
             {% if viewer and brokers %}
             <form class="showroom__send" id="send-listing">
