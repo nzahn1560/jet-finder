@@ -329,7 +329,7 @@
         {% set paid_broker = subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team'] %}
         {% set broker_approved = (user.profile_role or '') == 'broker' and (user.broker_application_status or '') == 'approved' %}
         {% set broker_live = on_team or (paid_broker and broker_approved) %}
-        {% set manage_broker_payment = paid_broker and subscription and subscription.stripe_customer_id and subscription.subscription_type in ['broker', 'broker_team'] %}
+        {% set manage_broker_payment = paid_broker and subscription and subscription.subscription_type in ['broker', 'broker_team'] %}
         <div class="broker-panel">
                 {% if broker_live and membership and membership.is_admin %}
                 <p class="broker-panel__kicker">Brokerage</p>
