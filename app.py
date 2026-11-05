@@ -108,7 +108,7 @@ def get_user_subscription(user_id, subscription_type=None):
 def update_user_subscription(user_id, subscription_type, stripe_customer_id=None,
                            stripe_subscription_id=None, subscription_status=None,
                            activated_at=None, expires_at=None):
-    db_module.update_user_subscription(user_id, subscription_type,
+    return db_module.update_user_subscription(user_id, subscription_type,
         stripe_customer_id=stripe_customer_id, stripe_subscription_id=stripe_subscription_id,
         subscription_status=subscription_status, activated_at=activated_at, expires_at=expires_at)
 
@@ -818,7 +818,7 @@ def api_team_checkout():
             logo_url=user.get('company_logo_url'),
             active=False,
         )
-    db_module.set_broker_application(user['id'], 'pending')
+    _queue_broker_submission(user['id'])
     if not _stripe_configured():
         return jsonify({
             'error': 'payment_not_ready',
@@ -1504,6 +1504,18 @@ def marketplace_search():
     """Old JSON marketplace. The live search is the homepage."""
     return redirect(url_for('home'))
 
+def _listing_fee_is_paid(row) -> bool:
+    """True once the listing fee is recorded, including a live listing subscription."""
+    if not row:
+        return False
+    if row.get('payment_status') in ('paid', 'past_due'):
+        return True
+    if row.get('stripe_subscription_id'):
+        return True
+    subscription = db_module.open_listing_subscription(row.get('id'))
+    return bool(subscription and subscription.get('status') in ('active', 'trialing', 'past_due'))
+
+
 @app.route('/dashboard')
 @app.route('/profile')
 @login_required
@@ -1511,6 +1523,12 @@ def dashboard():
     """Customer profile: aircraft they sell, and aircraft they are watching."""
     user = get_current_user_info()
     person, membership, pending_members, teams, team_people = _profile_page_context(user)
+    submitted_paid = False
+    submitted_raw = request.args.get('submitted')
+    if submitted_raw and str(submitted_raw).isdigit() and person:
+        submitted_row = db_module.get_listing_with_owner(int(submitted_raw))
+        if submitted_row and submitted_row.get('user_id') == person.get('id'):
+            submitted_paid = _listing_fee_is_paid(submitted_row)
     return render_template(
         'dashboard.html',
         user=person,
@@ -1521,6 +1539,7 @@ def dashboard():
         pending_members=pending_members,
         teams=teams,
         team_people=team_people,
+        submitted_paid=submitted_paid,
     )
 
 
@@ -3703,13 +3722,17 @@ def api_profile():
         if 'profile_city' in data or 'profile_state' in data:
             data['profile_location'] = ', '.join(part for part in (city, state) if part)
         requested = (data.get('profile_role') or '').strip().lower()
-        already_broker = authz.is_broker(user)
-        on_team = bool(db_module.user_on_active_team(user['id']))
-        if requested == 'broker' and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
+        granted = _broker_seat_granted(user)
+        if requested == 'broker' and not granted:
             data.pop('profile_role', None)
-            db_module.set_broker_application(user['id'], 'pending')
-            broker_checkout_required = True
-        if 'roles' in data and not already_broker and not on_team and not has_active_subscription(user['id'], 'broker'):
+            if not db_module.user_on_active_team(user['id']):
+                _queue_broker_submission(user['id'])
+                if not (
+                    has_active_subscription(user['id'], 'broker')
+                    or has_active_subscription(user['id'], 'broker_team')
+                ):
+                    broker_checkout_required = True
+        if 'roles' in data and not granted:
             kept = [role for role in authz.clean_roles(data.get('roles')).split(',') if role and role != 'broker']
             data['roles'] = ','.join(kept)
         db_module.update_user_profile(user['id'], data)
@@ -3930,25 +3953,98 @@ def _place_approved_broker(user_id):
         }, synchronize_session=False)
 
 
-def _notify_admins_brokerage(user_id):
-    """A paid checkout is waiting. The admin approves the brokerage."""
+def _broker_subscription_row(user_id):
+    """The broker subscription this person is under, active rows first."""
+    chosen = None
+    for kind in ('broker', 'broker_team'):
+        row = get_user_subscription(user_id, kind) or {}
+        if not row.get('id'):
+            continue
+        if row.get('subscription_status') in ('active', 'past_due', 'trialing'):
+            return row
+        chosen = chosen or row
+    return chosen
+
+
+def _broker_subscription_number(user_id):
+    row = _broker_subscription_row(user_id)
+    return row.get('id') if row else None
+
+
+def _broker_seat_granted(user) -> bool:
+    """A broker seat exists only after approval of a paid subscription, or acceptance onto a team."""
+    if not user:
+        return False
+    if db_module.user_on_active_team(user['id']):
+        return True
+    if user.get('broker_application_status') != 'approved':
+        return False
+    return bool(
+        has_active_subscription(user['id'], 'broker')
+        or has_active_subscription(user['id'], 'broker_team')
+    )
+
+
+def _notify_admins_brokerage(user_id, subscription_number=None):
+    """A broker submission is waiting in Approvals. Paying does not make them a broker."""
+    import email_service as email_mod
     person = get_user_by_id(user_id) or {}
     name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part) or person.get('email') or 'Account'
     company = (person.get('company') or '').strip()
     label = company or name
-    subject = f'Brokerage to approve: {label}'
-    text = f'{name} paid for a brokerage. Approve it in the admin portal. A team request is not this queue.'
-    link = '/admin'
+    number = subscription_number or _broker_subscription_number(user_id)
+    if number:
+        subject = f'Broker subscription {number} to approve: {label}'
+        text = (
+            f'{name} submitted to become a broker.\n'
+            f'Broker subscription #{number}.\n'
+            f'They are not a broker until you approve them. A team request is not this queue.'
+        )
+    else:
+        subject = f'Broker submission to approve: {label}'
+        text = (
+            f'{name} submitted to become a broker.\n'
+            f'Payment has not been recorded yet.\n'
+            f'They are not a broker until you approve them after they have paid, or a brokerage accepts them.'
+        )
+    link = '/admin?tab=approvals'
     try:
         for admin_id in db_module.list_admin_user_ids():
             db_module.create_notification(admin_id, 'broker_approval', subject, text, link)
     except Exception:
         logger.exception('Could not alert admins about brokerage %s', user_id)
+    addresses = _admin_addresses()
+    if not addresses:
+        logger.info('Broker submission %s is waiting. Set ADMIN_EMAILS to get these by email.', user_id)
+        return
+    page = request.host_url.rstrip('/') + link
+    html = f'<p>{text.replace(chr(10), "<br>")}</p><p><a href="{page}">Open approvals</a></p>'
+    for addr in addresses:
+        try:
+            email_mod.send_email(addr, subject, html, text)
+        except Exception:
+            logger.exception('Could not email admin %s about broker submission %s', addr, user_id)
+
+
+def _queue_broker_submission(user_id):
+    """Put a broker application in Approvals. This does not grant broker access."""
+    person = get_user_by_id(user_id) or {}
+    if person.get('profile_role') == 'broker' and person.get('broker_application_status') == 'approved':
+        return
+    membership = db_module.team_membership(user_id) or {}
+    if membership and not membership.get('is_admin') and membership.get('membership_status') == 'pending':
+        return
+    if person.get('broker_application_status') == 'pending':
+        return
+    db_module.set_broker_application(user_id, 'pending')
+    _notify_admins_brokerage(user_id)
 
 
 def _record_paid_brokerage(user_id, customer_id=None, subscription_id=None, subscription_type='broker'):
-    """Save the $19.99 payment. A new brokerage stays in the approval queue."""
-    update_user_subscription(
+    """Save the $19.99 payment. The person stays out of broker access until an admin approves them."""
+    existing = get_user_subscription(user_id, subscription_type) or {}
+    already_paid = existing.get('subscription_status') in ('active', 'past_due', 'trialing')
+    sub_id = update_user_subscription(
         user_id,
         subscription_type,
         stripe_customer_id=customer_id,
@@ -3961,9 +4057,8 @@ def _record_paid_brokerage(user_id, customer_id=None, subscription_id=None, subs
         return 'live'
     if person.get('broker_application_status') != 'pending':
         db_module.set_broker_application(user_id, 'pending')
-        _notify_admins_brokerage(user_id)
-    else:
-        db_module.set_broker_application(user_id, 'pending')
+    if not already_paid:
+        _notify_admins_brokerage(user_id, sub_id)
     return 'queued'
 
 
@@ -4287,7 +4382,7 @@ def api_broker_checkout():
         return jsonify({'already': True, 'message': 'You are on a team, so there is no individual broker fee.'}), 200
     if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
         return jsonify({'already': True, 'message': 'Payment received.'}), 200
-    db_module.set_broker_application(user['id'], 'pending')
+    _queue_broker_submission(user['id'])
     url = _broker_checkout_url(user)
     if not url:
         return jsonify({'error': 'stripe_error', 'message': 'Checkout could not be started.'}), 500
@@ -4348,7 +4443,7 @@ def api_broker_application():
         fields['profile_location'] = ', '.join(part for part in (city, state) if part)
     if fields:
         db_module.update_user_profile(user['id'], fields)
-    db_module.set_broker_application(user['id'], 'pending')
+    _queue_broker_submission(user['id'])
     if has_active_subscription(user['id'], 'broker') or has_active_subscription(user['id'], 'broker_team'):
         return jsonify({'already': True, 'message': 'Payment received.', 'broker': False}), 200
     if not _billing_request_ok():
@@ -7173,9 +7268,9 @@ def api_listings_me():
         media_by_listing = db_module.list_media_for_listings(listing_ids)
         resent = db_module.resubmitted_listing_ids(listing_ids)
         out = []
+        trash = []
         for row in rows:
-            if row.get('status') in ('archived', 'deleted'):
-                continue
+            parked = row.get('status') in ('archived', 'deleted', 'sold')
             combined = _row_to_combined_listing(row, aircraft_map)
             media = media_by_listing.get(int(row.get('id') or 0), [])
             # cover_image = first photo URL (lazy-load gallery on detail page)
@@ -7190,6 +7285,7 @@ def api_listings_me():
                 'market': sections_module.normalize_market(row.get('market')),
                 'status': row.get('status'),
                 'payment_status': row.get('payment_status'),
+                'fee_paid': _listing_fee_is_paid(row),
                 'paused': bool(row.get('paused')),
                 'serial_number': row.get('serial_number') or '',
                 'pricing_plan': row.get('pricing_plan'),
@@ -7211,8 +7307,11 @@ def api_listings_me():
                     'category': combined.get('category'),
                     'image': cover or combined.get('image'),  # prefer uploaded photo over placeholder
                 })
-            out.append(base)
-        return jsonify({'listings': out, 'total': len(out)}), 200
+            if parked:
+                trash.append(base)
+            else:
+                out.append(base)
+        return jsonify({'listings': out, 'trash': trash, 'total': len(out)}), 200
     except Exception:
         logger.exception('api_listings_me failed')
         return jsonify({'error': 'server_error'}), 500
@@ -9936,6 +10035,11 @@ def api_admin_user_account(user_id):
     return jsonify({
         'user': _user_public_dict(person),
         'listings': _admin_user_listings(user_id),
+        'subscription_number': _broker_subscription_number(user_id),
+        'broker_paid': bool(
+            has_active_subscription(user_id, 'broker')
+            or has_active_subscription(user_id, 'broker_team')
+        ),
     })
 
 
@@ -9984,12 +10088,11 @@ def api_admin_approvals():
             has_active_subscription(person['id'], 'broker')
             or has_active_subscription(person['id'], 'broker_team')
         )
-        if not paid:
-            continue
         membership = db_module.team_membership(person['id'])
         if membership and not membership.get('is_admin') and membership.get('membership_status') == 'pending':
             continue
-        person['stripe_paid'] = True
+        person['stripe_paid'] = paid
+        person['subscription_number'] = _broker_subscription_number(person['id'])
         brokers.append(person)
     return jsonify({
         'brokers': brokers,

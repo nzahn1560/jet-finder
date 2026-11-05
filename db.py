@@ -2898,6 +2898,8 @@ def admin_list_user_listings(status=None, limit=500):
                 UserListing.status.in_(('pending', 'unpaid')),
                 UserListing.pending_changes.isnot(None),
             ))
+        elif status == 'trash':
+            q = q.filter(UserListing.status.in_(('deleted', 'sold', 'archived')))
         elif status:
             q = q.filter(UserListing.status == status)
         rows = q.order_by(UserListing.created_at.desc()).limit(limit).all()
@@ -4197,16 +4199,20 @@ def update_user_subscription(user_id, subscription_type, stripe_customer_id=None
             if subscription_status is not None: existing.subscription_status = subscription_status
             if activated_at is not None: existing.activated_at = activated_at
             if expires_at is not None: existing.expires_at = expires_at
-        else:
-            s.add(UserSubscription(
-                user_id=user_id,
-                subscription_type=subscription_type,
-                stripe_customer_id=stripe_customer_id,
-                stripe_subscription_id=stripe_subscription_id,
-                subscription_status=subscription_status or 'inactive',
-                activated_at=activated_at,
-                expires_at=expires_at,
-            ))
+            s.flush()
+            return existing.id
+        row = UserSubscription(
+            user_id=user_id,
+            subscription_type=subscription_type,
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=stripe_subscription_id,
+            subscription_status=subscription_status or 'inactive',
+            activated_at=activated_at,
+            expires_at=expires_at,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
 
 
 def record_per_use_purchase(user_id, service_type, amount, stripe_payment_intent_id=None):

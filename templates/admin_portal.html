@@ -23,6 +23,7 @@
     .ap__btn--approve { background: #22c55e; color: #000; }
     .ap__btn--reject { background: #ef4444; color: #fff; }
     .ap__btn--secondary { background: rgba(255,255,255,0.1); color: #fff; }
+    .ap__btn.is-on { outline: 2px solid #F05545; }
     .ap__filter { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
     .ap__filter select, .ap__filter input { padding: 0.5rem 0.75rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-family: 'Rajdhani', sans-serif; }
     .ap__empty { color: #8e8e93; padding: 1rem; text-align: center; }
@@ -90,6 +91,7 @@
                     <option value="">All</option>
                 </select>
                 <button class="ap__btn ap__btn--secondary" id="refresh-listings">Refresh</button>
+                <button class="ap__btn ap__btn--secondary" id="trash-listings" type="button" aria-pressed="false">Trash</button>
             </div>
             <div id="listings-list"></div>
         </div>
@@ -222,8 +224,10 @@ if (highlightId) {
     if (arrived) arrived.hidden = false;
 }
 
+let showTrash = false;
+
 async function loadAdminListings() {
-    const status = document.getElementById('status-filter').value;
+    const status = showTrash ? 'trash' : document.getElementById('status-filter').value;
     const target = document.getElementById('listings-list');
     target.innerHTML = '<div class="ap__empty">Loading...</div>';
     try {
@@ -233,7 +237,7 @@ async function loadAdminListings() {
         if (r.status === 403) { target.innerHTML = '<div class="ap__empty">Admin access required.</div>'; return; }
         const data = await r.json();
         const items = data.listings || [];
-        if (!items.length) { target.innerHTML = '<div class="ap__empty">No listings.</div>'; return; }
+        if (!items.length) { target.innerHTML = '<div class="ap__empty">' + (showTrash ? 'Trash is empty.' : 'No listings.') + '</div>'; return; }
         target.innerHTML = items.map(function (l) {
             const updateWaiting = l.pending_review && l.status === 'active';
             const color = STATUS_COLORS[l.status] || '#8e8e93';
@@ -284,7 +288,7 @@ async function loadAdminListings() {
                 const act = btn.getAttribute('data-act');
                 let resp;
                 if (act === 'delete') {
-                    if (!confirm('Delete this listing? It will leave the marketplace.')) return;
+                    if (!confirm('Delete this listing? It leaves the marketplace and goes to Trash.')) return;
                     resp = await fetch('/api/admin/listings/' + id, { method: 'DELETE', credentials: 'include' });
                 } else {
                     let body = undefined;
@@ -436,14 +440,21 @@ async function openAccount(id, focusMessage) {
         }).join('')
         : '<p>No listings.</p>';
     const waiting = user.broker_application_status === 'pending';
-    document.getElementById('account-approve').hidden = !waiting;
+    const paid = !!data.broker_paid;
+    document.getElementById('account-approve').hidden = !(waiting && paid);
     document.getElementById('account-deny').hidden = !waiting;
-    body.innerHTML = ''
+    const subscriptionNo = data.subscription_number
+        ? '<p class="ap__listing-no">' + esc(data.subscription_number) + '</p>'
+        : '';
+    const brokerageState = waiting
+        ? (paid ? 'Paid, waiting for approval. Not a broker yet.' : 'Submitted. Not a broker until approved after payment, or accepted onto a team.')
+        : (user.broker_application_status || '');
+    body.innerHTML = subscriptionNo
         + accountLine('Email', user.email)
         + accountLine('Phone', user.phone)
         + accountLine('Company', user.company)
         + accountLine('Role', user.profile_role)
-        + accountLine('Brokerage', waiting ? 'Paid, waiting for approval' : (user.broker_application_status || ''))
+        + accountLine('Brokerage', brokerageState)
         + accountLine('Location', user.profile_location)
         + accountLine('Specialty', user.broker_specialties)
         + accountLine('Years in business', user.broker_years)
@@ -471,7 +482,7 @@ document.getElementById('account-approve').addEventListener('click', async funct
     if (!accountId) return;
     const status = document.getElementById('account-status');
     if (!(await postAdmin('/api/admin/brokers/' + accountId + '/approve'))) return;
-    status.textContent = 'Approved. They are a brokerage.';
+    status.textContent = 'Approved. They are a broker.';
     document.getElementById('account-approve').hidden = true;
     document.getElementById('account-deny').hidden = true;
     loadApprovals();
@@ -824,13 +835,22 @@ async function loadApprovals() {
         const name = ((person.first_name || '') + ' ' + (person.last_name || '')).trim() || person.email;
         const company = person.company ? person.company + ' · ' : '';
         const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
-        return '<div class="ap__card" data-user="' + person.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;"><strong>' + esc(name) + '</strong><br>' + esc(company) + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>Paid. Waiting to become a brokerage.</div>'
+        const subscriptionNo = person.subscription_number
+            ? '<p class="ap__listing-no">' + esc(person.subscription_number) + '</p>'
+            : '';
+        const waitingLine = person.stripe_paid
+            ? 'Paid. Waiting for your approval. They are not a broker yet.'
+            : 'Submitted. They are not a broker until you approve them after payment, or a brokerage accepts them.';
+        const approve = person.stripe_paid
+            ? '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
+            : '';
+        return '<div class="ap__card" data-user="' + person.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">' + subscriptionNo + '<strong>' + esc(name) + '</strong><br>' + esc(company) + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + waitingLine + '</div>'
             + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-            + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
+            + approve
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');
-    target.innerHTML = brokers || '<div class="ap__empty">Nothing is waiting. A paid brokerage checkout shows up here. A team request goes to that brokerage.</div>';
+    target.innerHTML = brokers || '<div class="ap__empty">Nothing is waiting. A broker submission shows up here. A team request goes to that brokerage.</div>';
     bindAccountMessages(target);
     target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
         card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
@@ -877,8 +897,20 @@ async function loadAdminBrokers() {
     });
 }
 
-document.getElementById('status-filter').addEventListener('change', loadAdminListings);
+document.getElementById('status-filter').addEventListener('change', function () {
+    showTrash = false;
+    const trash = document.getElementById('trash-listings');
+    trash.classList.remove('is-on');
+    trash.setAttribute('aria-pressed', 'false');
+    loadAdminListings();
+});
 document.getElementById('refresh-listings').addEventListener('click', loadAdminListings);
+document.getElementById('trash-listings').addEventListener('click', function () {
+    showTrash = !showTrash;
+    this.classList.toggle('is-on', showTrash);
+    this.setAttribute('aria-pressed', showTrash ? 'true' : 'false');
+    loadAdminListings();
+});
 
 (async function init() {
     const me = await fetch('/api/auth/me', { credentials: 'include' });
@@ -888,12 +920,16 @@ document.getElementById('refresh-listings').addEventListener('click', loadAdminL
         document.querySelector('.ap__inner').innerHTML = '<h1 class="ap__title">Admin access required</h1><p class="ap__sub">Your account is not an admin.</p>';
         return;
     }
-    const requested = new URLSearchParams(window.location.search).get('status');
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('status');
     const filter = document.getElementById('status-filter');
     if (requested && filter && Array.from(filter.options).some(function (option) { return option.value === requested; })) {
         filter.value = requested;
     }
     loadAdminListings();
+    const tabName = params.get('tab');
+    const tabButton = tabName ? document.querySelector('.ap__tab[data-tab="' + tabName + '"]') : null;
+    if (tabButton) tabButton.click();
 })();
 </script>
 {% endblock %}
