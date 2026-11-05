@@ -18,6 +18,8 @@
     .ap__col strong { color: #fff; font-size: 1.7rem; }
     .ap__badge { padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 1.05rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
     .ap__listing-no { margin: 0 0 0.35rem; color: #fff; font-size: 4.25rem; font-weight: 800; line-height: 1; letter-spacing: 0.02em; }
+    .ap__broker-no { margin: 0 0 0.55rem; color: #fff; font-size: 1.45rem; font-weight: 800; line-height: 1.25; word-break: break-all; }
+    .ap__broker-no span { display: block; margin-bottom: 0.2rem; color: #9a9a9a; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
     .ap__resubmitted { margin: 0.35rem 0 0.5rem; color: #f4f4f4; font-size: 1.7rem; font-weight: 800; }
     .ap__btn { padding: 0.6rem 1rem; border-radius: 8px; border: 0; font-weight: 700; font-size: 1.15rem; font-family: 'Rajdhani', sans-serif; cursor: pointer; }
     .ap__btn--approve { background: #22c55e; color: #000; }
@@ -444,7 +446,7 @@ async function openAccount(id, focusMessage) {
     document.getElementById('account-approve').hidden = !waiting;
     document.getElementById('account-deny').hidden = !waiting;
     const subscriptionNo = data.subscription_number
-        ? '<p class="ap__listing-no">' + esc(data.subscription_number) + '</p>'
+        ? '<p class="ap__broker-no"><span>Broker number</span>' + esc(data.subscription_number) + '</p>'
         : '';
     const brokerageState = waiting
         ? (paid ? 'Paid, waiting for approval. Not a broker yet.' : 'Submitted. Not a broker until approved after payment, or accepted onto a team.')
@@ -836,7 +838,7 @@ async function loadApprovals() {
         const company = person.company ? person.company + ' · ' : '';
         const practice = [person.broker_specialties, person.broker_years ? person.broker_years + ' years in business' : ''].filter(Boolean).join(' · ');
         const subscriptionNo = person.subscription_number
-            ? '<p class="ap__listing-no">' + esc(person.subscription_number) + '</p>'
+            ? '<p class="ap__broker-no"><span>Broker number</span>' + esc(person.subscription_number) + '</p>'
             : '';
         const waitingLine = person.stripe_paid
             ? 'Paid. Waiting for your approval. They are not a broker yet.'
