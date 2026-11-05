@@ -1443,6 +1443,8 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/dashboard')
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Manage payment', page.data)
+        self.assertIn(b'Delete subscription', page.data)
+        self.assertIn(b'/api/account/broker-subscription/cancel-request', page.data)
         self.assertIn(b'subscription-bar__pay', page.data)
         opened = self.client.post('/api/account/billing-portal', json={'purpose': 'broker'})
         self.assertEqual(opened.status_code, 503, opened.get_json())
@@ -1467,6 +1469,53 @@ class ProductTests(unittest.TestCase):
         button_at = page.data.find(b'js-manage-broker-payment', active_at)
         self.assertGreater(button_at, active_at)
         self.assertLess(button_at - active_at, 500)
+        bar_end = page.data.find(b'Manage billing', bar)
+        bar_html = page.data[bar:bar_end if bar_end > bar else bar + 2500]
+        self.assertIn(b'Delete subscription', bar_html)
+        self.assertNotIn(b'js-manage-broker-payment', bar_html)
+        self.assertNotIn(b'billing-portal', bar_html)
+
+    def test_deleting_a_broker_subscription_waits_for_approval(self):
+        person = self._paid_broker('end-ask@example.com', 'sub_end_ask')
+        self._login(person['email'], 'broker-pass-1')
+        missing = self.client.post('/api/account/broker-subscription/cancel-request')
+        self.assertEqual(missing.status_code, 200, missing.get_json())
+        row = db_module.get_user_subscription(person['id'], 'broker')
+        self.assertEqual(row['subscription_status'], 'active')
+        self.assertIsNotNone(row.get('cancel_requested_at'))
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        waiting = self.client.get('/profile')
+        self.assertIn(b'Delete requested', waiting.data)
+        self.assertIn(b'Waiting for approval.', waiting.data)
+        self._login('admin@example.com', 'admin-pass-1')
+        approvals = self.client.get('/api/admin/approvals')
+        self.assertEqual(approvals.status_code, 200)
+        match = next(item for item in approvals.get_json()['subscription_deletes'] if item['user_id'] == person['id'])
+        self.assertEqual(match['subscription_number'], 'sub_end_ask')
+        self.assertEqual(match['subscription_status'], 'active')
+        portal = self.client.get('/admin')
+        self.assertIn(b'data-clear-cancel', portal.data)
+        self.assertIn(b'End it in Stripe yourself.', portal.data)
+        import app as app_module
+        with patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('stripe cancel')):
+            cleared = self.client.post(f"/api/admin/subscriptions/{person['id']}/cancel-request/clear")
+        self.assertEqual(cleared.status_code, 200, cleared.get_json())
+        self.assertEqual(cleared.get_json()['subscription_status'], 'active')
+        row = db_module.get_user_subscription(person['id'], 'broker')
+        self.assertEqual(row['subscription_status'], 'active')
+        self.assertIsNone(row.get('cancel_requested_at'))
+        self.assertFalse(any(
+            item['user_id'] == person['id']
+            for item in self.client.get('/api/admin/approvals').get_json()['subscription_deletes']
+        ))
+        self._login(person['email'], 'broker-pass-1')
+        with patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('stripe cancel')):
+            again = self.client.post('/api/account/broker-subscription/cancel-request')
+        self.assertEqual(again.status_code, 200, again.get_json())
+        db_module.update_user_subscription(person['id'], 'broker', subscription_status='canceled')
+        ended = db_module.get_user_subscription(person['id'], 'broker')
+        self.assertEqual(ended['subscription_status'], 'canceled')
+        self.assertIsNone(ended.get('cancel_requested_at'))
 
     def test_listing_fee_ignores_a_client_supplied_amount(self):
         from app import _listing_fee_cents

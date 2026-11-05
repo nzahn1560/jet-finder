@@ -4105,6 +4105,39 @@ def _notify_admins_brokerage(user_id, subscription_number=None):
             logger.exception('Could not email admin %s about broker submission %s', addr, user_id)
 
 
+def _notify_admins_subscription_delete(user_id, subscription_number):
+    """An account asked to end a brokerage subscription. Stripe is not called."""
+    import email_service as email_mod
+    person = get_user_by_id(user_id) or {}
+    name = ' '.join(part for part in [person.get('first_name'), person.get('last_name')] if part) or person.get('email') or 'Account'
+    company = (person.get('company') or '').strip()
+    label = company or name
+    number = subscription_number or 'unknown'
+    subject = f'End brokerage subscription {number}: {label}'
+    text = (
+        f'{name} asked to end the brokerage subscription.\n'
+        f'Broker number {number}.\n'
+        f'End it in Stripe yourself. This site does not cancel it. The subscription stays active until you do.'
+    )
+    link = '/admin?tab=approvals'
+    try:
+        for admin_id in db_module.list_admin_user_ids():
+            db_module.create_notification(admin_id, 'broker_approval', subject, text, link)
+    except Exception:
+        logger.exception('Could not alert admins about a subscription delete for %s', user_id)
+    addresses = _admin_addresses()
+    if not addresses:
+        logger.info('Subscription delete for %s is waiting. Set ADMIN_EMAILS to get these by email.', user_id)
+        return
+    page = request.host_url.rstrip('/') + link
+    html = f'<p>{text.replace(chr(10), "<br>")}</p><p><a href="{page}">Open approvals</a></p>'
+    for addr in addresses:
+        try:
+            email_mod.send_email(addr, subject, html, text)
+        except Exception:
+            logger.exception('Could not email admin %s about subscription delete %s', addr, user_id)
+
+
 def _queue_broker_submission(user_id):
     """Put a broker application in Approvals. This does not grant broker access."""
     person = get_user_by_id(user_id) or {}
@@ -4601,6 +4634,38 @@ def api_billing_portal():
         logger.exception('Billing portal creation failed')
         return jsonify({'error': 'stripe_error', 'message': 'Billing could not be opened.'}), 500
     return jsonify({'url': portal.url}), 200
+
+
+@app.route('/api/account/broker-subscription/cancel-request', methods=['POST'])
+@require_auth
+def api_broker_cancel_request():
+    """Ask an admin to end this account's brokerage subscription. Stripe is not called."""
+    if not _billing_request_ok():
+        return jsonify({'error': 'forbidden'}), 403
+    user = request.current_user  # type: ignore[attr-defined]
+    row = _broker_billing_row(user['id'])
+    if not row or not row.get('stripe_subscription_id'):
+        return jsonify({
+            'error': 'no_subscription',
+            'message': 'There is no brokerage subscription on this account.',
+        }), 404
+    if not row.get('cancel_requested_at'):
+        db_module.set_subscription_cancel_request(row['id'], True)
+        _notify_admins_subscription_delete(user['id'], row.get('stripe_subscription_id'))
+        person = get_user_by_id(user['id']) or user
+        db_module.notify_user(
+            user['id'],
+            'billing',
+            'Delete request sent',
+            'Your request to end the brokerage subscription was sent for approval. It stays active until an admin ends it.',
+            '/profile',
+            person.get('email'),
+        )
+    return jsonify({
+        'ok': True,
+        'pending': True,
+        'message': 'Sent for approval. The subscription stays active until an admin ends it.',
+    }), 200
 
 
 def _money_label(cents, interval):
@@ -10206,12 +10271,48 @@ def api_admin_approvals():
         person['stripe_paid'] = paid
         person['subscription_number'] = _broker_subscription_number(person['id'])
         brokers.append(person)
+    deletes = []
+    for row in db_module.list_subscription_cancel_requests():
+        person = get_user_by_id(row.get('user_id')) or {}
+        requested = row.get('cancel_requested_at')
+        deletes.append({
+            'user_id': row.get('user_id'),
+            'first_name': person.get('first_name'),
+            'last_name': person.get('last_name'),
+            'email': person.get('email'),
+            'company': person.get('company'),
+            'subscription_number': row.get('stripe_subscription_id'),
+            'subscription_status': row.get('subscription_status'),
+            'requested_at': requested.isoformat() if hasattr(requested, 'isoformat') else requested,
+        })
     return jsonify({
         'brokers': brokers,
         'brokerages': [],
         'members': [],
+        'subscription_deletes': deletes,
         'categories': list(db_module.BROKERAGE_CATEGORIES),
     })
+
+
+@app.route('/api/admin/subscriptions/<int:user_id>/cancel-request/clear', methods=['POST'])
+@require_admin
+def api_admin_clear_cancel_request(user_id):
+    """Remove a delete request from Approvals. This does not cancel Stripe."""
+    row = _broker_billing_row(user_id)
+    if not row or not row.get('cancel_requested_at'):
+        return jsonify({'error': 'not_found', 'message': 'There is no delete request on this account.'}), 404
+    db_module.set_subscription_cancel_request(row['id'], False)
+    person = get_user_by_id(user_id) or {}
+    db_module.notify_user(
+        user_id,
+        'billing',
+        'Subscription stays active',
+        'The request to end the brokerage subscription was cleared. The subscription is still active.',
+        '/profile',
+        person.get('email'),
+    )
+    fresh = get_user_subscription(user_id, row.get('subscription_type')) or {}
+    return jsonify({'ok': True, 'subscription_status': fresh.get('subscription_status')})
 
 
 @app.route('/api/admin/brokerages')
