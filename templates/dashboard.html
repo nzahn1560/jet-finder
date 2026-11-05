@@ -186,6 +186,11 @@
         white-space: nowrap;
     }
     .subscription-bar__pay:hover { border-color: #fff; }
+    .subscription-bar__delete {
+        border-color: #ef4444;
+        color: #fecaca;
+    }
+    .subscription-bar__delete:hover { border-color: #f87171; color: #fff; }
     .subscription-bar__pay:disabled { opacity: 0.7; cursor: default; }
     .dash__section-title {
         font-family: 'Orbitron', sans-serif;
@@ -309,11 +314,11 @@
                 <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <strong style="color: #fff;">Subscription</strong>
                     <span style="padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
-                    {% if subscription.subscription_type in ['broker', 'broker_team'] and subscription.stripe_subscription_id and subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
+                    {% if subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
                     {% if subscription.cancel_requested_at %}
-                    <button type="button" class="subscription-bar__pay" disabled>Delete requested</button>
+                    <button type="button" class="subscription-bar__pay subscription-bar__delete" disabled>Delete requested</button>
                     {% else %}
-                    <button type="button" class="subscription-bar__pay js-delete-broker-subscription">Delete subscription</button>
+                    <button type="button" class="subscription-bar__pay subscription-bar__delete js-delete-broker-subscription">Delete</button>
                     {% endif %}
                     {% endif %}
                 </div>
@@ -329,7 +334,7 @@
         (function () {
             document.querySelectorAll('.subscription-status .js-delete-broker-subscription').forEach(function (button) {
                 button.addEventListener('click', async function () {
-                    if (!window.confirm('Send a request to end this brokerage subscription? It stays active until an admin ends it.')) return;
+                    if (!window.confirm('Send this account to the admin to delete the subscription? It stays active until an admin ends it.')) return;
                     button.disabled = true;
                     const response = await fetch('/api/account/broker-subscription/cancel-request', {
                         method: 'POST',

@@ -1443,7 +1443,7 @@ class ProductTests(unittest.TestCase):
         page = self.client.get('/dashboard')
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Manage payment', page.data)
-        self.assertIn(b'Delete subscription', page.data)
+        self.assertIn(b'js-delete-broker-subscription">Delete', page.data)
         self.assertIn(b'/api/account/broker-subscription/cancel-request', page.data)
         self.assertIn(b'subscription-bar__pay', page.data)
         opened = self.client.post('/api/account/billing-portal', json={'purpose': 'broker'})
@@ -1471,7 +1471,7 @@ class ProductTests(unittest.TestCase):
         self.assertLess(button_at - active_at, 500)
         bar_end = page.data.find(b'Manage billing', bar)
         bar_html = page.data[bar:bar_end if bar_end > bar else bar + 2500]
-        self.assertIn(b'Delete subscription', bar_html)
+        self.assertIn(b'js-delete-broker-subscription">Delete', bar_html)
         self.assertNotIn(b'js-manage-broker-payment', bar_html)
         self.assertNotIn(b'billing-portal', bar_html)
 
@@ -1516,6 +1516,16 @@ class ProductTests(unittest.TestCase):
         ended = db_module.get_user_subscription(person['id'], 'broker')
         self.assertEqual(ended['subscription_status'], 'canceled')
         self.assertIsNone(ended.get('cancel_requested_at'))
+        plain = self._signup('end-plain@example.com', 'broker-pass-1', 'seller')
+        db_module.update_user_subscription(plain['id'], 'broker', subscription_status='active')
+        self._login(plain['email'], 'broker-pass-1')
+        shown = self.client.get('/profile')
+        self.assertIn(b'js-delete-broker-subscription">Delete', shown.data)
+        asked = self.client.post('/api/account/broker-subscription/cancel-request')
+        self.assertEqual(asked.status_code, 200, asked.get_json())
+        plain_row = db_module.get_user_subscription(plain['id'], 'broker')
+        self.assertEqual(plain_row['subscription_status'], 'active')
+        self.assertIsNotNone(plain_row.get('cancel_requested_at'))
 
     def test_listing_fee_ignores_a_client_supplied_amount(self):
         from app import _listing_fee_cents
