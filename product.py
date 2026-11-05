@@ -97,6 +97,78 @@ def marketplace_browse():
     return render_template('marketplace_browse.html', listings=cards, manufacturer=request.args.get('manufacturer') or '', max_price=request.args.get('max_price') or '')
 
 
+def _fact_text(value, suffix=''):
+    """A display string for one aircraft fact, or None when there is nothing to show."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float):
+        text = f'{value:,.2f}'.rstrip('0').rstrip('.')
+    elif isinstance(value, int):
+        text = f'{value:,}'
+    else:
+        text = str(value).strip()
+    if text in ('', 'None', 'Unknown', 'nan'):
+        return None
+    return text + suffix
+
+
+def _listing_facts(row, profile):
+    """Every public fact we have for this aircraft, asking details first."""
+    profile = profile or {}
+    crew = profile.get('min_crew')
+    facts = [
+        {'label': 'Range (seats full)', 'value': _fact_text(profile.get('range'), ' nm') or '—', 'note': ''},
+        {'label': 'Speed', 'value': _fact_text(profile.get('speed'), ' kts') or '—', 'note': ''},
+        {
+            'label': 'Passengers',
+            'value': _fact_text(profile.get('passengers')) or '—',
+            'note': 'inc. 1 pilot seat' if crew == 1 else '',
+        },
+        {'label': 'Cabin', 'value': _fact_text(profile.get('cabin_volume'), ' cu ft') or '—', 'note': ''},
+    ]
+    optional = [
+        ('Manufacturer', row.get('manufacturer') or profile.get('manufacturer'), ''),
+        ('Category', profile.get('category') or row.get('engine_type'), ''),
+        ('Variant', row.get('variant'), ''),
+        ('Registration', row.get('registration'), ''),
+        ('Serial', row.get('serial_number'), ''),
+        ('Airframe', row.get('hours'), ' hrs'),
+        ('Engines', row.get('engine_hours'), ' hrs'),
+        ('Engine cycles', row.get('engine_cycles'), ''),
+        ('Engine', row.get('engine_type'), ''),
+        ('Engine program', row.get('engine_program'), ''),
+        ('Avionics', row.get('avionics'), ''),
+        ('Paint', str(row.get('paint_year')) if row.get('paint_year') else None, ''),
+        ('Interior', str(row.get('interior_year')) if row.get('interior_year') else None, ''),
+        ('Cabin layout', row.get('passenger_config'), ''),
+        ('Maintenance', row.get('maintenance_status'), ''),
+        ('Years built', profile.get('date_range'), ''),
+        ('Multi engine', profile.get('multi_engine'), ''),
+        ('Ceiling', profile.get('max_altitude'), ' ft'),
+        ('Runway', profile.get('runway_length'), ' ft'),
+        ('Wingspan', profile.get('wingspan'), ' ft'),
+        ('Length', profile.get('aircraft_length'), ' ft'),
+        ('Height', profile.get('aircraft_height'), ' ft'),
+        ('Cabin height', profile.get('cabin_height'), ' ft'),
+        ('Cabin width', profile.get('cabin_width'), ' ft'),
+        ('Cabin length', profile.get('cabin_length'), ' ft'),
+        ('Baggage', profile.get('baggage_volume'), ' cu ft'),
+        ('Aircraft volume', profile.get('aircraft_volume'), ' cu ft'),
+    ]
+    seen = set()
+    for label, value, suffix in optional:
+        text = _fact_text(value, suffix)
+        if not text or (label, text) in seen:
+            continue
+        if label == 'Engine' and text == next((item['value'] for item in facts if item['label'] == 'Category'), None):
+            continue
+        seen.add((label, text))
+        facts.append({'label': label, 'value': text, 'note': ''})
+    return facts
+
+
 @product.route('/listing/<int:listing_id>')
 def public_listing(listing_id):
     row = db_module.get_user_listing_by_id(listing_id, active_only=True)
@@ -127,9 +199,11 @@ def public_listing(listing_id):
         line for line in (row.get('description') or '').splitlines()
         if not line.strip().lower().startswith('listing number:')
     ).strip()
+    facts = _listing_facts(row, profile)
     return render_template(
         'listing_public.html', listing=row, profile=profile, media=media,
         seller_name=seller_name or 'Seller', brokers=brokers, seller_notes=seller_notes,
+        facts=facts,
     )
 
 
