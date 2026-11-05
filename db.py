@@ -526,6 +526,7 @@ class UserSubscription(Base):
     stripe_customer_id = Column(String(255))
     stripe_subscription_id = Column(String(255))
     subscription_status = Column(String(50), default='inactive')
+    cancel_requested_at = Column(DateTime)
     activated_at = Column(DateTime)
     expires_at = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
@@ -1084,6 +1085,7 @@ def _upgrade_billing_columns():
         ('listing_subscriptions', 'agreed_amount_cents', 'INTEGER'),
         ('listing_subscriptions', 'current_period_start', 'TIMESTAMP'),
         ('listing_subscriptions', 'next_renewal_at', 'TIMESTAMP'),
+        ('user_subscriptions', 'cancel_requested_at', 'TIMESTAMP'),
         ('listing_subscriptions', 'cancellation_requested_at', 'TIMESTAMP'),
         ('listing_subscriptions', 'cancellation_effective_at', 'TIMESTAMP'),
         ('listing_subscriptions', 'cancellation_reason', 'VARCHAR(80)'),
@@ -4197,6 +4199,8 @@ def update_user_subscription(user_id, subscription_type, stripe_customer_id=None
             if stripe_customer_id is not None: existing.stripe_customer_id = stripe_customer_id
             if stripe_subscription_id is not None: existing.stripe_subscription_id = stripe_subscription_id
             if subscription_status is not None: existing.subscription_status = subscription_status
+            if subscription_status == 'canceled':
+                existing.cancel_requested_at = None
             if activated_at is not None: existing.activated_at = activated_at
             if expires_at is not None: existing.expires_at = expires_at
             s.flush()
@@ -4213,6 +4217,32 @@ def update_user_subscription(user_id, subscription_type, stripe_customer_id=None
         s.add(row)
         s.flush()
         return row.id
+
+
+def set_subscription_cancel_request(subscription_id, requested):
+    """Record that this account asked an admin to end the subscription. Stripe is not called."""
+    with get_session() as s:
+        row = s.query(UserSubscription).filter(UserSubscription.id == int(subscription_id)).first()
+        if not row:
+            return False
+        row.cancel_requested_at = datetime.utcnow() if requested else None
+        return True
+
+
+def list_subscription_cancel_requests():
+    """Brokerage subscriptions an admin still has to end by hand."""
+    with get_session() as s:
+        rows = (
+            s.query(UserSubscription)
+            .filter(
+                UserSubscription.cancel_requested_at.isnot(None),
+                UserSubscription.subscription_type.in_(('broker', 'broker_team')),
+                UserSubscription.subscription_status.in_(('active', 'past_due', 'trialing')),
+            )
+            .order_by(UserSubscription.cancel_requested_at.asc())
+            .all()
+        )
+        return [row.to_dict() for row in rows]
 
 
 def record_per_use_purchase(user_id, service_type, amount, stripe_payment_intent_id=None):

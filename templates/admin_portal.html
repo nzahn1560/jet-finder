@@ -849,7 +849,17 @@ async function loadApprovals() {
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');
-    target.innerHTML = brokers || '<div class="ap__empty">Nothing is waiting. A broker submission shows up here. A team request goes to that brokerage.</div>';
+    const deletes = (data.subscription_deletes || []).map(function (item) {
+        const name = ((item.first_name || '') + ' ' + (item.last_name || '')).trim() || item.email;
+        const company = item.company ? item.company + ' · ' : '';
+        const subscriptionNo = item.subscription_number
+            ? '<p class="ap__broker-no"><span>Broker number</span>' + esc(item.subscription_number) + '</p>'
+            : '';
+        return '<div class="ap__card" data-user="' + item.user_id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">' + subscriptionNo + '<strong>' + esc(name) + '</strong><br>' + esc(company) + esc(item.email || '') + '<br>Asked to end the brokerage subscription. End it in Stripe yourself. Clearing this request does not cancel it.</div>'
+            + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+            + '<button class="ap__btn ap__btn--reject" data-clear-cancel="' + item.user_id + '">Clear request</button></div></div></div>';
+    }).join('');
+    target.innerHTML = (brokers + deletes) || '<div class="ap__empty">Nothing is waiting. A broker submission shows up here. A team request goes to that brokerage.</div>';
     bindAccountMessages(target);
     target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
         card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
@@ -864,6 +874,12 @@ async function loadApprovals() {
         btn.addEventListener('click', async function (event) {
             event.stopPropagation();
             if (await postAdmin('/api/admin/brokers/' + btn.getAttribute('data-deny-broker') + '/deny')) loadApprovals();
+        });
+    });
+    target.querySelectorAll('[data-clear-cancel]').forEach(function (btn) {
+        btn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            if (await postAdmin('/api/admin/subscriptions/' + btn.getAttribute('data-clear-cancel') + '/cancel-request/clear')) loadApprovals();
         });
     });
 }

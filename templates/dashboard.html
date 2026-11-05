@@ -186,6 +186,7 @@
         white-space: nowrap;
     }
     .subscription-bar__pay:hover { border-color: #fff; }
+    .subscription-bar__pay:disabled { opacity: 0.7; cursor: default; }
     .dash__section-title {
         font-family: 'Orbitron', sans-serif;
         font-size: 1.15rem;
@@ -309,30 +310,37 @@
                     <strong style="color: #fff;">Subscription</strong>
                     <span style="padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
                     {% if subscription.subscription_type in ['broker', 'broker_team'] and subscription.stripe_subscription_id and subscription.subscription_status in ['active', 'past_due', 'trialing'] %}
-                    <button type="button" class="subscription-bar__pay js-manage-broker-payment">Manage payment</button>
+                    {% if subscription.cancel_requested_at %}
+                    <button type="button" class="subscription-bar__pay" disabled>Delete requested</button>
+                    {% else %}
+                    <button type="button" class="subscription-bar__pay js-delete-broker-subscription">Delete subscription</button>
+                    {% endif %}
                     {% endif %}
                 </div>
                 <span style="color: #8e8e93;">{{ subscription.subscription_type.replace('_', ' ')|title }}</span>
             </div>
-            {% if subscription.subscription_status == 'past_due' %}
+            {% if subscription.cancel_requested_at %}
+            <p style="color:#d0d0d0; margin:0.8rem 0 0;">Waiting for approval. The subscription stays active until an admin ends it.</p>
+            {% elif subscription.subscription_status == 'past_due' %}
             <p style="color:#f4d19b; margin:0.8rem 0 0;">The last payment failed. Update the card to keep broker access.</p>
             {% endif %}
         </div>
         <script>
         (function () {
-            document.querySelectorAll('.subscription-status .js-manage-broker-payment').forEach(function (button) {
+            document.querySelectorAll('.subscription-status .js-delete-broker-subscription').forEach(function (button) {
                 button.addEventListener('click', async function () {
+                    if (!window.confirm('Send a request to end this brokerage subscription? It stays active until an admin ends it.')) return;
                     button.disabled = true;
-                    const response = await fetch('/api/account/billing-portal', {
+                    const response = await fetch('/api/account/broker-subscription/cancel-request', {
                         method: 'POST',
                         credentials: 'include',
                         headers: billingHeaders(true),
-                        body: JSON.stringify({ purpose: 'broker' }),
+                        body: '{}',
                     });
                     const data = await response.json().catch(function () { return {}; });
-                    if (data.url) { window.location = data.url; return; }
+                    if (response.ok) { window.location.reload(); return; }
                     button.disabled = false;
-                    alert(data.message || 'The brokerage subscription could not be opened.');
+                    alert(data.message || 'The request could not be sent.');
                 });
             });
         })();
