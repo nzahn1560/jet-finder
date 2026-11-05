@@ -514,17 +514,20 @@ def service_providers():
 
 def _point_geography(place, lat=None, lon=None, city='', state=''):
     """City, airport code, and coordinates for a broker pin and its search text."""
-    airport = sections_module.resolve_place(place, country='US') if place else None
-    airport = airport or {}
+    found = sections_module.resolve_place(place) if place else None
+    found = found or {}
+    if found.get('lat') is not None and found.get('lon') is not None:
+        lat = found.get('lat')
+        lon = found.get('lon')
     return {
-        'lat': lat if lat is not None else airport.get('lat'),
-        'lon': lon if lon is not None else airport.get('lon'),
-        'iata': airport.get('iata') or '',
-        'icao': airport.get('icao') or '',
-        'airport_name': airport.get('name') or '',
-        'city': city or airport.get('city') or '',
+        'lat': lat,
+        'lon': lon,
+        'iata': found.get('iata') or '',
+        'icao': found.get('icao') or '',
+        'airport_name': found.get('name') or '',
+        'city': city or found.get('city') or '',
         'region': state or '',
-        'country': airport.get('country') or '',
+        'country': found.get('country') or '',
     }
 
 
@@ -1605,6 +1608,7 @@ def public_profile(user_id):
         teams=teams,
         team_people=team_people,
         broker_number=_broker_subscription_number(person['id']) if is_owner else None,
+        subscription=get_user_subscription(person['id']) if is_owner else None,
     )
 
 
@@ -3725,19 +3729,18 @@ def api_profile():
             data['profile_location'] = ', '.join(part for part in (city, state) if part)
         requested = (data.get('profile_role') or '').strip().lower()
         granted = _broker_seat_granted(user)
-        if requested == 'broker' and not granted:
+        current_role = (user.get('profile_role') or 'other').strip().lower()
+        if 'profile_role' in data and (
+            (requested == 'broker' and not granted)
+            or (current_role == 'broker' and granted and requested != 'broker')
+        ):
             data.pop('profile_role', None)
-            if not db_module.user_on_active_team(user['id']):
-                _queue_broker_submission(user['id'])
-                if not (
-                    has_active_subscription(user['id'], 'broker')
-                    or has_active_subscription(user['id'], 'broker_team')
-                ):
-                    broker_checkout_required = True
         if 'roles' in data and not granted:
             kept = [role for role in authz.clean_roles(data.get('roles')).split(',') if role and role != 'broker']
             data['roles'] = ','.join(kept)
         db_module.update_user_profile(user['id'], data)
+        if 'profile_location' in data:
+            _place_approved_broker(user['id'])
         user = get_user_by_id(user['id']) or user
     return jsonify({
         'user': _user_public_dict(user),
@@ -3940,18 +3943,16 @@ def _checkout_idempotency(prefix):
 
 
 def _place_approved_broker(user_id):
-    """Give an approved broker a map pin from the location already on the profile."""
+    """Put this account on the map from the city and state saved on the profile."""
     person = get_user_by_id(user_id) or {}
-    if person.get('broker_lat') is not None and person.get('broker_lon') is not None:
-        return
     place = (person.get('profile_location') or '').strip()
-    airport = sections_module.resolve_place(place, country='US') if place else None
-    if not airport or airport.get('lat') is None:
+    found = sections_module.resolve_place(place) if place else None
+    if not found or found.get('lat') is None:
         return
     with db_module.get_session() as session:
         session.query(db_module.User).filter(db_module.User.id == user_id).update({
-            'broker_lat': airport.get('lat'),
-            'broker_lon': airport.get('lon'),
+            'broker_lat': found.get('lat'),
+            'broker_lon': found.get('lon'),
         }, synchronize_session=False)
 
 
@@ -4489,12 +4490,15 @@ def api_broker_confirm():
 def api_billing_portal():
     """Stripe Customer Portal: update the card or cancel at the end of the month."""
     user = request.current_user  # type: ignore[attr-defined]
+    purpose = ((request.get_json(silent=True) or {}).get('purpose') or '').strip().lower()
     row = None
     for kind in ('broker', 'broker_team'):
         candidate = get_user_subscription(user['id'], kind) or {}
         if candidate.get('stripe_customer_id') and candidate.get('subscription_status') in ('active', 'past_due'):
             row = candidate
             break
+    if purpose == 'broker' and not row:
+        return jsonify({'error': 'no_subscription', 'message': 'There is no brokerage subscription to manage.'}), 404
     if not row:
         customer = db_module.listing_stripe_customer(user['id'])
         if customer:
@@ -7643,8 +7647,16 @@ def admin_listing_audit(listing_id):
 
 
 def _edits_wait_for_approval(row, user):
-    """An approved listing stays as it is until an admin approves the owner's update."""
+    """Price, the aircraft, and photos on a live listing wait for an admin."""
     return bool(row and row.get('status') == 'active' and user and not user.get('is_admin'))
+
+
+# Notes, hours, location, and contact details. Not the price, the aircraft, or who may see the listing.
+_LIVE_LISTING_FIELDS = {
+    'description', 'hours', 'location', 'city', 'state', 'email',
+    'registration', 'variant', 'engine_program', 'engine_hours', 'engine_cycles',
+    'maintenance_status', 'avionics', 'paint_year', 'interior_year', 'passenger_config',
+}
 
 
 def _blank_revision():
@@ -7739,8 +7751,8 @@ def _drop_pending_listing_update(listing_id, row):
 def api_listings_patch(listing_id: int):
     """Update a listing. Owners can edit their own; admins can edit any.
 
-    Edits to an approved listing are held for approval. The live price, photos,
-    and other details stay as they are until an admin approves the update.
+    Price, the aircraft, and photos on a live listing wait for approval.
+    Notes, hours, location, and contact details save immediately.
     """
     user = request.current_user  # type: ignore[attr-defined]
     row = db_module.get_listing_with_owner(listing_id)
@@ -7766,15 +7778,25 @@ def api_listings_patch(listing_id: int):
         pending = db_module.parse_listing_pending(row.get('pending_changes')) or _blank_revision()
         fields = dict(pending.get('fields') or {})
         incoming = db_module.normalize_listing_fields(data)
-        for key, value in incoming.items():
+        live = {key: value for key, value in incoming.items() if key in _LIVE_LISTING_FIELDS}
+        held = {key: value for key, value in incoming.items() if key not in _LIVE_LISTING_FIELDS}
+        if live:
+            db_module.update_user_listing_fields(listing_id, live)
+            row = db_module.get_listing_with_owner(listing_id) or row
+        for key, value in held.items():
             if _same_listing_value(row.get(key), value):
                 fields.pop(key, None)
             else:
                 fields[key] = value
+        for key in list(fields):
+            if key in _LIVE_LISTING_FIELDS:
+                fields.pop(key, None)
         pending['fields'] = fields
         if not incoming and not db_module.parse_listing_pending(row.get('pending_changes')):
             return jsonify({'error': 'no_changes'}), 400
-        note = _save_listing_revision(listing_id, row, user, pending)
+        note = _save_listing_revision(listing_id, row, user, pending) if held or fields or pending.get('media_add') or pending.get('media_remove') or pending.get('media_order') else None
+        if not note and row.get('pending_changes') and not fields and not pending.get('media_add') and not pending.get('media_remove') and not pending.get('media_order'):
+            db_module.set_listing_pending_changes(listing_id, None)
         return jsonify({
             'ok': True,
             'status': 'active',

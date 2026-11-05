@@ -537,6 +537,60 @@ class ProductTests(unittest.TestCase):
         page = self.client.get(f'/listing/{listing_id}')
         self.assertIn(b'$1,800,000', page.data)
 
+    def test_listing_notes_and_profile_details_save_without_approval(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Notes Jet', 'public'))
+        listing_id = created.get_json()['id']
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        notes = self.client.patch(f'/api/listings/{listing_id}', json={
+            'description': 'Fresh interior and a new coat of paint.',
+            'hours': 640,
+            'location': 'Keller, Texas',
+            'email': 'seller@example.com',
+        })
+        self.assertEqual(notes.status_code, 200, notes.get_json())
+        self.assertFalse(notes.get_json().get('pending_review'))
+        row = db_module.get_listing_with_owner(listing_id)
+        self.assertIn('Fresh interior', row['description'])
+        self.assertEqual(row['hours'], 640)
+        self.assertEqual(row['location'], 'Keller, Texas')
+        self.assertFalse(row.get('pending_changes'))
+        shown = self.client.get(f'/listing/{listing_id}')
+        self.assertIn(b'Fresh interior and a new coat of paint.', shown.data)
+        self.assertIn(b'Keller, Texas', shown.data)
+        signed = self.client.post('/api/auth/signup', json={
+            'email': 'desk-edit@example.com',
+            'password': 'seller-pass-1',
+            'first_name': 'Desk',
+            'profile_role': 'seller',
+            'profile_location': 'KTEB',
+        })
+        self.assertEqual(signed.status_code, 201, signed.get_json())
+        person_id = signed.get_json()['user']['id']
+        self._login('desk-edit@example.com', 'seller-pass-1')
+        profile = self.client.patch('/api/profile', json={
+            'phone': '555-0177',
+            'broker_bio': 'Based in Keller.',
+            'broker_specialties': 'King Air',
+            'broker_years': 8,
+            'profile_city': 'Keller',
+            'profile_state': 'Texas',
+            'profile_role': 'broker',
+        })
+        self.assertEqual(profile.status_code, 200, profile.get_json())
+        self.assertFalse(profile.get_json().get('broker_checkout_required'))
+        person = profile.get_json()['user']
+        self.assertEqual(person['phone'], '555-0177')
+        self.assertEqual(person['broker_bio'], 'Based in Keller.')
+        self.assertEqual(person['profile_location'], 'Keller, Texas')
+        self.assertNotEqual(person['profile_role'], 'broker')
+        card = self.client.get('/profile')
+        self.assertIn(b'555-0177', card.data)
+        self.assertIn(b'Based in Keller.', card.data)
+        self._login('admin@example.com', 'admin-pass-1')
+        waiting = [row['id'] for row in self.client.get('/api/admin/approvals').get_json()['brokers']]
+        self.assertNotIn(person_id, waiting)
+
     def test_owner_can_delete_a_live_listing(self):
         self._login('seller@example.com', 'seller-pass-1')
         created = self.client.post('/api/listings', json=self._payload('Delete Jet', 'public'))
@@ -1388,8 +1442,14 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(unavailable.status_code, 503)
         page = self.client.get('/dashboard')
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'Manage billing', page.data)
+        self.assertIn(b'Manage payment', page.data)
+        self.assertIn(b'js-manage-broker-payment', page.data)
+        self.assertIn(b"purpose: 'broker'", page.data)
         self.assertIn(b'Subscription is active.', page.data)
+        active_at = page.data.find(b'Subscription is active.')
+        button_at = page.data.find(b'js-manage-broker-payment', active_at)
+        self.assertGreater(button_at, active_at)
+        self.assertLess(button_at - active_at, 500)
 
     def test_listing_fee_ignores_a_client_supplied_amount(self):
         from app import _listing_fee_cents
@@ -1400,6 +1460,35 @@ class ProductTests(unittest.TestCase):
         checkout = self.client.post(f'/api/listings/{listing_id}/checkout', json={'amount': 1, 'amount_cents': 1})
         self.assertEqual(checkout.status_code, 200)
         self.assertTrue(checkout.get_json().get('skip'))
+
+    def test_a_typed_city_and_state_lands_in_that_state(self):
+        import sections
+        keller = sections.resolve_place('Keller, Texas')
+        self.assertAlmostEqual(keller['lat'], 32.9346, delta=0.02)
+        self.assertAlmostEqual(keller['lon'], -97.2517, delta=0.02)
+        self.assertEqual(sections.resolve_place('Keller Texas')['lat'], keller['lat'])
+        self.assertEqual(sections.resolve_place('KTEB').get('icao'), 'KTEB')
+        self.assertEqual(sections.resolve_place('KEE').get('country'), 'CG')
+        person = self._signup('keller-pin@example.com', 'broker-pass-1', 'seller')
+        db_module.update_user_profile(person['id'], {
+            'first_name': 'Kellerpin',
+            'profile_location': 'Keller, Texas',
+            'company': 'Kellerpin Aviation',
+        })
+        from app import _grant_broker_account
+        _grant_broker_account(person['id'])
+        with db_module.get_session() as session:
+            session.query(db_module.User).filter(db_module.User.id == person['id']).update(
+                {'broker_lat': -0.083, 'broker_lon': 14.533}, synchronize_session=False,
+            )
+            session.query(db_module.BrokerTeam).filter(
+                db_module.BrokerTeam.admin_user_id == person['id'],
+            ).update({'latitude': -0.083, 'longitude': 14.533}, synchronize_session=False)
+        page = self.client.get('/brokers')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Kellerpin', page.data)
+        self.assertIn(b'32.9346', page.data)
+        self.assertNotIn(b'14.533', page.data)
 
     def test_approved_broker_gets_off_market_and_the_map(self):
         person = self._signup('map-broker@example.com', 'broker-pass-1', 'seller')

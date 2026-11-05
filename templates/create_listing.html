@@ -1223,16 +1223,14 @@
             if (submitBtn) {
                 submitBtn.innerHTML = sentBack && !waiting
                     ? '<i class="fas fa-paper-plane me-2"></i>Resubmit for review'
-                    : (waiting
-                    ? '<i class="fas fa-paper-plane me-2"></i>Submit for approval'
-                    : '<i class="fas fa-save me-2"></i>Save Changes');
+                    : '<i class="fas fa-save me-2"></i>Save';
             }
             if (waiting && submitBtn && !document.getElementById('edit-approval-note')) {
                 const note = document.createElement('p');
                 note.id = 'edit-approval-note';
                 note.style.margin = '0 0 0.8rem';
                 note.style.color = '#f4f4f4';
-                note.textContent = 'Submit for approval sends this update to review. Price, photos, and other changes go on the listing only after an admin approves them. Until then, the listing stays as it is.';
+                note.textContent = 'Notes, hours, location, and contact details save now. Price, the aircraft, and photos stay as they are until an admin approves them.';
                 submitBtn.parentNode.insertBefore(note, submitBtn);
             }
             const header = document.querySelector('.page-header h1, h1');
