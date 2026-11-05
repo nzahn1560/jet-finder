@@ -289,14 +289,14 @@
         {% if subscription %}
         <div class="subscription-status {{ 'active' if subscription.subscription_status == 'active' else '' }}" style="margin-top: 2rem; padding: 1.25rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-                <div>
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <strong style="color: #fff;">Subscription</strong>
-                    <span style="margin-left: 0.5rem; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
+                    <span style="padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; background: {{ '#28a745' if subscription.subscription_status == 'active' else ('#b45309' if subscription.subscription_status == 'past_due' else '#555') }}; color: #fff;">{{ subscription.subscription_status }}</span>
+                    {% if subscription.subscription_type in ['broker', 'broker_team'] and subscription.stripe_customer_id and subscription.subscription_status in ['active', 'past_due'] %}
+                    <button type="button" class="dash__btn dash__btn--secondary js-manage-broker-payment" style="border:0; cursor:pointer;">Manage payment</button>
+                    {% endif %}
                 </div>
                 <span style="color: #8e8e93;">{{ subscription.subscription_type.replace('_', ' ')|title }}</span>
-                {% if subscription.stripe_customer_id and subscription.subscription_status in ['active', 'past_due'] %}
-                <button type="button" class="dash__btn dash__btn--secondary" id="manage-billing" style="border:0; cursor:pointer;">Manage billing</button>
-                {% endif %}
             </div>
             {% if subscription.subscription_status == 'past_due' %}
             <p style="color:#f4d19b; margin:0.8rem 0 0;">The last payment failed. Update the card to keep broker access.</p>
@@ -304,14 +304,19 @@
         </div>
         <script>
         (function () {
-            const button = document.getElementById('manage-billing');
-            if (!button) return;
-            button.addEventListener('click', async function () {
-                button.disabled = true;
-                const response = await fetch('/api/account/billing-portal', { method: 'POST', credentials: 'include', headers: billingHeaders(false) });
-                const data = await response.json().catch(function () { return {}; });
-                if (data.url) { window.location = data.url; return; }
-                window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
+            document.querySelectorAll('.subscription-status .js-manage-broker-payment').forEach(function (button) {
+                button.addEventListener('click', async function () {
+                    button.disabled = true;
+                    const response = await fetch('/api/account/billing-portal', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: billingHeaders(true),
+                        body: JSON.stringify({ purpose: 'broker' }),
+                    });
+                    const data = await response.json().catch(function () { return {}; });
+                    if (data.url) { window.location = data.url; return; }
+                    window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
+                });
             });
         })();
         </script>

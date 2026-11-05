@@ -154,13 +154,20 @@
     }
     .broker-status {
         display: inline-block;
-        margin: 0.15rem 0 0.85rem;
+        margin: 0;
         padding: 0.4rem 0.85rem;
         border-radius: 999px;
         background: rgba(52, 168, 83, 0.16);
         color: #b7ebc4;
         font-weight: 700;
         white-space: nowrap;
+    }
+    .broker-pay-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin: 0.15rem 0 0.85rem;
     }
     .roster { list-style: none; padding: 0; margin: 0.85rem 0 0; display: grid; gap: 0.45rem; }
     .roster li {
@@ -322,20 +329,37 @@
         {% set paid_broker = subscription and subscription.subscription_status in ['active', 'past_due'] and subscription.subscription_type in ['broker', 'broker_team'] %}
         {% set broker_approved = (user.profile_role or '') == 'broker' and (user.broker_application_status or '') == 'approved' %}
         {% set broker_live = on_team or (paid_broker and broker_approved) %}
+        {% set manage_broker_payment = paid_broker and subscription and subscription.stripe_customer_id and subscription.subscription_type in ['broker', 'broker_team'] %}
         <div class="broker-panel">
                 {% if broker_live and membership and membership.is_admin %}
                 <p class="broker-panel__kicker">Brokerage</p>
                 <h2>{{ membership.name or brokerage or 'Your brokerage' }}</h2>
-                <p class="broker-status">Subscription is active.</p>
+                <div class="broker-pay-row">
+                    <p class="broker-status">Subscription is active.</p>
+                    {% if manage_broker_payment %}
+                    <button type="button" class="dash__btn dash__btn--secondary js-manage-broker-payment" style="border:0; cursor:pointer;">Manage payment</button>
+                    {% endif %}
+                </div>
                 <p>This account is the brokerage. It has the same access as a broker. Add brokers in Manage members. They do not pay.</p>
                 {% elif broker_live %}
                 <p class="broker-panel__kicker">Broker</p>
                 <h2>{{ membership.name or 'Your brokerage' }}</h2>
-                <p class="broker-status">Subscription is active.</p>
+                <div class="broker-pay-row">
+                    <p class="broker-status">Subscription is active.</p>
+                    {% if manage_broker_payment %}
+                    <button type="button" class="dash__btn dash__btn--secondary js-manage-broker-payment" style="border:0; cursor:pointer;">Manage payment</button>
+                    {% endif %}
+                </div>
                 <p>You are a broker on this brokerage. The brokerage pays. Your seat does not.</p>
                 {% elif paid_broker and not broker_approved %}
                 <p class="broker-panel__kicker">Brokerage</p>
                 <h2>Payment received</h2>
+                <div class="broker-pay-row">
+                    <p class="broker-status">Subscription is active.</p>
+                    {% if manage_broker_payment %}
+                    <button type="button" class="dash__btn dash__btn--secondary js-manage-broker-payment" style="border:0; cursor:pointer;">Manage payment</button>
+                    {% endif %}
+                </div>
                 <p>Payment received. This brokerage is waiting for approval.</p>
                 {% elif membership and membership.is_admin %}
                 <p class="broker-panel__kicker">Brokerage</p>
@@ -554,6 +578,20 @@
             if (resp.ok) setTimeout(function () { window.location.reload(); }, 500);
         });
     }
+    document.querySelectorAll('.js-manage-broker-payment').forEach(function (button) {
+        button.addEventListener('click', async function () {
+            button.disabled = true;
+            const response = await fetch('/api/account/billing-portal', {
+                method: 'POST',
+                credentials: 'include',
+                headers: billingHeaders(),
+                body: JSON.stringify({ purpose: 'broker' }),
+            });
+            const data = await response.json().catch(function () { return {}; });
+            if (data.url) { window.location = data.url; return; }
+            window.location = 'https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00';
+        });
+    });
     document.querySelectorAll('.allow-member').forEach(function (button) {
         button.addEventListener('click', async function () {
             const status = document.getElementById('profile-save-status');
