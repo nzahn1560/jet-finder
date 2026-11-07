@@ -1,0 +1,65 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 2489 >>
+stream
+BT /F1 16 Tf 48 750 Td (JetSchool SEO changelog) Tj ET
+BT /F1 11 Tf 48 728 Td (Page: Broker map \(/brokers\)) Tj ET
+BT /F1 11 Tf 48 714 Td (Date: 6 November 2026) Tj ET
+BT /F1 11 Tf 48 700 Td (Status: Done) Tj ET
+BT /F1 11 Tf 48 686 Td () Tj ET
+BT /F1 11 Tf 48 672 Td (Why this page) Tj ET
+BT /F1 11 Tf 48 658 Td (The broker map is a public sitemap URL. The title was Broker Map - Jet Finder.) Tj ET
+BT /F1 11 Tf 48 644 Td (The H1 repeated that label. There was no unique description, no social tags,) Tj ET
+BT /F1 11 Tf 48 630 Td (no structured data, and no record of searches or profile opens.) Tj ET
+BT /F1 11 Tf 48 616 Td () Tj ET
+BT /F1 11 Tf 48 602 Td (Technical) Tj ET
+BT /F1 11 Tf 48 588 Td (Title is now Find an Aircraft Broker | JetSchool.) Tj ET
+BT /F1 11 Tf 48 574 Td (Unique meta description explains the airport search and the area counts.) Tj ET
+BT /F1 11 Tf 48 560 Td (Canonical is /brokers. A query string such as /brokers?q= is noindex, follow.) Tj ET
+BT /F1 11 Tf 48 546 Td (Open Graph and Twitter summary tags use the JetSchool logo.) Tj ET
+BT /F1 11 Tf 48 532 Td (JSON-LD CollectionPage lists up to 24 public broker names and places.) Tj ET
+BT /F1 11 Tf 48 518 Td () Tj ET
+BT /F1 11 Tf 48 504 Td (Text) Tj ET
+BT /F1 11 Tf 48 490 Td (H1 is Find an aircraft broker.) Tj ET
+BT /F1 11 Tf 48 476 Td (The lead says to search by airport code or city, and that a number is how many brokerages) Tj ET
+BT /F1 11 Tf 48 462 Td (are in that area.) Tj ET
+BT /F1 11 Tf 48 448 Td (The account note says a brokerage pays $19.99 a month and an added broker does not pay.) Tj ET
+BT /F1 11 Tf 48 434 Td () Tj ET
+BT /F1 11 Tf 48 420 Td (Tracking) Tj ET
+BT /F1 11 Tf 48 406 Td (broker_area_search fires after a search returns, with result_count.) Tj ET
+BT /F1 11 Tf 48 392 Td (broker_profile_open fires when a brokerage or broker is selected.) Tj ET
+BT /F1 11 Tf 48 378 Td (Both go to dataLayer. gtag loads only when ANALYTICS_MEASUREMENT_ID is a GA4 id.) Tj ET
+BT /F1 11 Tf 48 364 Td (No measurement id is set here, so nothing is sent to Google.) Tj ET
+BT /F1 11 Tf 48 350 Td () Tj ET
+BT /F1 11 Tf 48 336 Td (Verified) Tj ET
+BT /F1 11 Tf 48 322 Td (The broker map test checks the title, H1, canonical, CollectionPage, the search event, and) Tj ET
+BT /F1 11 Tf 48 308 Td (noindex on a query string.) Tj ET
+BT /F1 11 Tf 48 294 Td (A browser check types an airport search and reads the dataLayer event.) Tj ET
+BT /F1 11 Tf 48 280 Td () Tj ET
+BT /F1 11 Tf 48 266 Td (Next page: /contact) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000002782 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+2852
+%%EOF

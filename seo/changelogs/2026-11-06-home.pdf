@@ -1,0 +1,73 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 2978 >>
+stream
+BT /F1 16 Tf 48 750 Td (JetSchool SEO changelog) Tj ET
+BT /F1 11 Tf 48 728 Td (Page: Home \(/\)) Tj ET
+BT /F1 11 Tf 48 714 Td (Date: 6 November 2026) Tj ET
+BT /F1 11 Tf 48 700 Td (Status: Done) Tj ET
+BT /F1 11 Tf 48 686 Td () Tj ET
+BT /F1 11 Tf 48 672 Td (Why this page) Tj ET
+BT /F1 11 Tf 48 658 Td (The homepage is the first public URL in the sitemap. The old title was Jet Finder -) Tj ET
+BT /F1 11 Tf 48 644 Td (JetSchool.) Tj ET
+BT /F1 11 Tf 48 630 Td (The page had no H1, no unique description, no Open Graph tags, no structured data, and no) Tj ET
+BT /F1 11 Tf 48 616 Td (analytics.) Tj ET
+BT /F1 11 Tf 48 602 Td (Filtered URLs such as /?budget= were the same indexable page. /jet-finder rendered a) Tj ET
+BT /F1 11 Tf 48 588 Td (second copy.) Tj ET
+BT /F1 11 Tf 48 574 Td () Tj ET
+BT /F1 11 Tf 48 560 Td (Technical) Tj ET
+BT /F1 11 Tf 48 546 Td (Title is now Compare Private Aircraft by Cost and Range | JetSchool.) Tj ET
+BT /F1 11 Tf 48 532 Td (Unique meta description says the figures are estimates.) Tj ET
+BT /F1 11 Tf 48 518 Td (Canonical is the clean homepage. Query-string versions use noindex, follow and the same) Tj ET
+BT /F1 11 Tf 48 504 Td (canonical.) Tj ET
+BT /F1 11 Tf 48 490 Td (Open Graph and Twitter summary tags point at the homepage and the JetSchool logo.) Tj ET
+BT /F1 11 Tf 48 476 Td (JSON-LD WebApplication names Jet Finder and JetSchool.) Tj ET
+BT /F1 11 Tf 48 462 Td (One H1, then H2s for Range Filter, Route Planning, Range Map, and Aircraft Selection) Tj ET
+BT /F1 11 Tf 48 448 Td (Parameters.) Tj ET
+BT /F1 11 Tf 48 434 Td (The empty marketplace state uses an H3.) Tj ET
+BT /F1 11 Tf 48 420 Td (/jet-finder now 301-redirects to /.) Tj ET
+BT /F1 11 Tf 48 406 Td () Tj ET
+BT /F1 11 Tf 48 392 Td (Text) Tj ET
+BT /F1 11 Tf 48 378 Td (Visible H1: Compare private aircraft by cost, range, and route.) Tj ET
+BT /F1 11 Tf 48 364 Td (Intro: Jet Finder ranks business jets and turboprops against routes, passengers, and) Tj ET
+BT /F1 11 Tf 48 350 Td (budget.) Tj ET
+BT /F1 11 Tf 48 336 Td (The intro says the figures are estimates and should be confirmed before a purchase.) Tj ET
+BT /F1 11 Tf 48 322 Td () Tj ET
+BT /F1 11 Tf 48 308 Td (Tracking) Tj ET
+BT /F1 11 Tf 48 294 Td (dataLayer events: jetfinder_home_airport_search and jetfinder_route_add.) Tj ET
+BT /F1 11 Tf 48 280 Td (If ANALYTICS_MEASUREMENT_ID is a GA4 id \(G-...\), gtag loads with anonymize_ip.) Tj ET
+BT /F1 11 Tf 48 266 Td (No measurement id is set here, so no Google tag is sent.) Tj ET
+BT /F1 11 Tf 48 252 Td (The variable is documented in .env.example.) Tj ET
+BT /F1 11 Tf 48 238 Td () Tj ET
+BT /F1 11 Tf 48 224 Td (Verified) Tj ET
+BT /F1 11 Tf 48 210 Td (Unit test checks title, H1, canonical, JSON-LD, the route event, noindex on filters, and) Tj ET
+BT /F1 11 Tf 48 196 Td (the 301.) Tj ET
+BT /F1 11 Tf 48 182 Td (Browser check on the local homepage confirms the H1 and a dataLayer event.) Tj ET
+BT /F1 11 Tf 48 168 Td () Tj ET
+BT /F1 11 Tf 48 154 Td (Next page: /brokers) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000003271 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+3341
+%%EOF

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app, Response
+from flask import Flask, render_template, request, jsonify, url_for, redirect, flash, session, current_app, Response, send_from_directory
 import os
 import io
 import json
@@ -615,7 +615,36 @@ def brokers_page():
             'leader': broker.get('name') or '',
             **geography,
         })
-    return render_template('brokers.html', map_points=people)
+    canonical = _public_base() + '/brokers'
+    site = _public_base() + '/'
+    return render_template(
+        'brokers.html',
+        map_points=people,
+        seo_canonical=canonical,
+        seo_noindex=bool(request.args),
+        analytics_id=_analytics_measurement_id(),
+        seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
+        seo_schema={
+            '@context': 'https://schema.org',
+            '@type': 'CollectionPage',
+            'name': 'Find an aircraft broker',
+            'url': canonical,
+            'description': 'Search aircraft brokers by airport or city.',
+            'isPartOf': {'@type': 'WebSite', 'name': 'JetSchool', 'url': site},
+            'mainEntity': {
+                '@type': 'ItemList',
+                'itemListElement': [
+                    {
+                        '@type': 'ListItem',
+                        'position': index,
+                        'name': person.get('display_name') or 'Broker',
+                        'description': person.get('place') or '',
+                    }
+                    for index, person in enumerate(people[:24], start=1)
+                ],
+            },
+        },
+    )
 
 
 @app.route('/api/broker-teams/<int:team_id>')
@@ -1226,8 +1255,22 @@ def _sheet_scale(rows):
     return scale
 
 
-@app.route('/')
 @app.route('/jet-finder')
+def jet_finder_alias():
+    """One public URL for Jet Finder. The old path stays as a permanent redirect."""
+    return redirect(url_for('home'), code=301)
+
+
+def _analytics_measurement_id():
+    """Google Analytics 4 measurement id, or nothing. A bad value is ignored."""
+    raw = (os.environ.get('ANALYTICS_MEASUREMENT_ID') or '').strip()
+    suffix = raw[2:] if raw.startswith('G-') else ''
+    if suffix and all(ch.isupper() or ch.isdigit() for ch in suffix):
+        return raw
+    return ''
+
+
+@app.route('/')
 def home():
     """Home route - Jet Finder with comprehensive scoring and pagination"""
     # Get query parameters for filtering
@@ -1449,6 +1492,10 @@ def home():
                          search_query=search_query,
                          user_priorities=user_priorities,
                          priority_selections=priority_selections,
+                         seo_canonical=_public_base() + '/',
+                         seo_noindex=bool(request.args),
+                         analytics_id=_analytics_measurement_id(),
+                         seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
                          current_criteria={
                              'budget': budget,
                              'range_requirement': range_requirement,
@@ -3382,10 +3429,22 @@ _ROBOTS_PRIVATE = (
 )
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Root icon Googlebot requests even before it reads the HTML links."""
+    return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+
 @app.route('/robots.txt')
 def robots_txt():
     base = request.url_root.rstrip('/')
-    lines = ['User-agent: *', 'Allow: /']
+    lines = [
+        'User-agent: *',
+        'Allow: /favicon.ico',
+        'Allow: /static/favicon-48.png',
+        'Allow: /static/favicon-192.png',
+        'Allow: /',
+    ]
     lines.extend(f'Disallow: {path}' for path in _ROBOTS_PRIVATE)
     lines.append(f'Sitemap: {base}/sitemap.xml')
     return Response('\n'.join(lines) + '\n', mimetype='text/plain')

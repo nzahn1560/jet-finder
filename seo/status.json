@@ -1,0 +1,23 @@
+{
+  "updated": "2026-11-06",
+  "pages": [
+    {
+      "path": "/",
+      "name": "Home",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-06-home.pdf"
+    },
+    {
+      "path": "/brokers",
+      "name": "Broker map",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-06-brokers.pdf"
+    },
+    {"path": "/contact", "name": "Contact", "status": "pending"},
+    {"path": "/privacy", "name": "Privacy", "status": "pending"},
+    {"path": "/terms", "name": "Terms", "status": "pending"},
+    {"path": "/refunds", "name": "Refunds", "status": "pending"},
+    {"path": "/listing/<id>", "name": "Public listing", "status": "pending"},
+    {"path": "/people/<id>", "name": "Public profile", "status": "pending"}
+  ]
+}

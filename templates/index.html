@@ -9,7 +9,40 @@
     </div>
 </div>
 
-{% block title %}Jet Finder - JetSchool{% endblock %}
+{% block title %}Compare Private Aircraft by Cost and Range | JetSchool{% endblock %}
+{% block meta_description %}Compare business jets and turboprops by price, range, passengers, and the routes you fly. Jet Finder estimates are a starting point. Confirm the numbers before you buy.{% endblock %}
+{% block canonical %}{{ seo_canonical }}{% endblock %}
+{% block extra_head %}
+{% if seo_noindex %}<meta name="robots" content="noindex, follow">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JetSchool">
+<meta property="og:title" content="Compare Private Aircraft by Cost and Range | JetSchool">
+<meta property="og:description" content="Compare business jets and turboprops by price, range, passengers, and the routes you fly. Jet Finder estimates are a starting point. Confirm the numbers before you buy.">
+<meta property="og:url" content="{{ seo_canonical }}">
+<meta property="og:image" content="{{ seo_image }}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Compare Private Aircraft by Cost and Range | JetSchool">
+<meta name="twitter:description" content="Compare business jets and turboprops by price, range, passengers, and the routes you fly.">
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Jet Finder",
+    "url": seo_canonical,
+    "description": "Compare business jets and turboprops by price, range, passengers, and the routes you fly.",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web",
+    "provider": {"@type": "Organization", "name": "JetSchool", "url": seo_canonical, "email": "support@jetschoolusa.com"}
+}|tojson }}</script>
+{% if analytics_id %}
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ analytics_id }}"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', {{ analytics_id|tojson }}, { anonymize_ip: true });
+</script>
+{% endif %}
+{% endblock %}
 
 {% block additional_css %}
 <!-- Leaflet CSS for maps -->
@@ -18,6 +51,20 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
 
 <style>
+    .finder-intro h1 {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 0.5rem;
+    }
+
+    .finder-intro p {
+        color: #d0d0d0;
+        max-width: 46rem;
+        margin-bottom: 0;
+    }
+
     /* Stock Ticker Styles */
     .stock-ticker {
         background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
@@ -3981,13 +4028,17 @@
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
+    <header class="finder-intro mb-4">
+        <h1>Compare private aircraft by cost, range, and route</h1>
+        <p>Jet Finder ranks business jets and turboprops against the routes you fly, the passengers you carry, and the budget you set. The figures are estimates. Confirm range, price, and operating cost before you buy.</p>
+    </header>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->
         <div class="col-md-6">
             <div class="card bg-black border border-secondary h-100">
                 <div class="card-header d-flex align-items-center">
-                    <h4 class="mb-0 me-auto">Range Filter Tool</h4>
+                    <h2 class="h4 mb-0 me-auto">Range Filter Tool</h2>
                 </div>
                 <div class="card-body">
                     <div class="mb-4">
@@ -4029,7 +4080,7 @@
         <div class="col-md-6">
             <div class="card bg-black border border-secondary h-100">
                 <div class="card-header d-flex align-items-center justify-content-between">
-                    <h4 class="mb-0">Route Planning Tool</h4>
+                    <h2 class="h4 mb-0">Route Planning Tool</h2>
                     <div class="d-flex gap-2">
                         <button id="clear-routes-btn" class="btn btn-sm btn-outline-danger">
                             <i class="fas fa-trash"></i> Clear All
@@ -4093,13 +4144,13 @@
         <div class="col-12">
             <div class="card bg-black border border-secondary map-card">
                 <div class="card-header">
-                    <h4 class="mb-0">
+                    <h2 class="h4 mb-0">
                         Range Map
                         <span class="aircraft-count-display ms-3">
                             <span class="aircraft-count-label">Aircraft Remaining</span>
                             <span class="aircraft-count-value" id="range-aircraft-remaining">0</span>
                         </span>
-                    </h4>
+                    </h2>
                 </div>
                 <div class="card-body p-0">
                     <div id="map" style="height: 500px;"></div>
@@ -4111,7 +4162,7 @@
         <div class="col-12">
                 <div class="card bg-black border border-secondary">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h4 class="mb-0">Aircraft Selection Parameters</h4>
+                        <h2 class="h4 mb-0">Aircraft Selection Parameters</h2>
                         <div class="text-muted small">
                             <i class="fas fa-calculator me-1"></i>
                             Configure your aircraft requirements and financial parameters
@@ -4881,6 +4932,20 @@
 </div>
 
 {% block additional_js %}
+<script>
+window.dataLayer = window.dataLayer || [];
+function trackFinder(name, params) {
+    var payload = Object.assign({ event: name }, params || {});
+    window.dataLayer.push(payload);
+    if (typeof window.gtag === 'function') window.gtag('event', name, params || {});
+}
+document.addEventListener('click', function (event) {
+    var button = event.target.closest('#search-home-btn, #add-route-btn');
+    if (!button) return;
+    if (button.id === 'search-home-btn') trackFinder('jetfinder_home_airport_search');
+    if (button.id === 'add-route-btn') trackFinder('jetfinder_route_add');
+});
+</script>
 <!-- Leaflet JS for maps -->
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <!-- Leaflet Geocoder -->
@@ -5850,7 +5915,7 @@
                 <div class="empty-state-card text-center w-100">
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
-                        <h4 class="mb-2" style="color:#f4f4f4;">No listings yet</h4>
+                        <h3 class="h4 mb-2" style="color:#f4f4f4;">No listings yet</h3>
                         <p class="mb-0" style="color:#d0d0d0;">Approved aircraft for sale show up here. Nothing is on the marketplace right now.</p>
                     </div>
                 </div>
