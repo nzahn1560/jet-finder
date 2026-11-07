@@ -3135,7 +3135,7 @@ def _billing_request_ok() -> bool:
 
 @app.context_processor
 def _inject_csrf():
-    return {'csrf_token': _csrf_token}
+    return {'csrf_token': _csrf_token, 'public_base': _public_base()}
 
 
 @app.route('/logout', methods=['GET', 'POST'])

@@ -82,8 +82,11 @@ class ProductTests(unittest.TestCase):
         for path in ('/', '/brokers', '/contact', '/no-such-favicon-page'):
             page = self.client.get(path)
             self.assertIn(b'favicon-48.png', page.data, path)
-            self.assertIn(b'favicon-192.png', page.data, path)
-            self.assertIn(b'favicon.ico', page.data, path)
+            self.assertIn(b'sizes="192x192" href="/static/favicon-192.png"', page.data, path)
+            self.assertIn(b'rel="shortcut icon" href="/favicon.ico"', page.data, path)
+        home = self.client.get('/')
+        self.assertIn(b'"logo": "http://localhost/static/favicon-192.png"', home.data)
+        self.assertIn(b'"@type": "Organization"', home.data)
         icon = self.client.get('/favicon.ico')
         self.assertEqual(icon.status_code, 200)
         self.assertIn('image/', icon.content_type)
