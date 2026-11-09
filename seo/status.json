@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-06",
+  "updated": "2026-11-09",
   "pages": [
     {
       "path": "/",
@@ -13,11 +13,31 @@
       "status": "done",
       "changelog": "seo/changelogs/2026-11-06-brokers.pdf"
     },
-    {"path": "/contact", "name": "Contact", "status": "pending"},
-    {"path": "/privacy", "name": "Privacy", "status": "pending"},
-    {"path": "/terms", "name": "Terms", "status": "pending"},
-    {"path": "/refunds", "name": "Refunds", "status": "pending"},
-    {"path": "/listing/<id>", "name": "Public listing", "status": "pending"},
+    {
+      "path": "/contact",
+      "name": "Contact",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-09-contact.pdf"
+    },
+    {
+      "path": "/privacy",
+      "name": "Privacy",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-09-privacy.pdf"
+    },
+    {
+      "path": "/terms",
+      "name": "Terms",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-09-terms.pdf"
+    },
+    {
+      "path": "/refunds",
+      "name": "Refunds",
+      "status": "done",
+      "changelog": "seo/changelogs/2026-11-09-refunds.pdf"
+    },
+    {"path": "/listing/<id>", "name": "Public listing", "status": "done", "changelog": "seo/changelogs/2026-11-09-listing.pdf"},
     {"path": "/people/<id>", "name": "Public profile", "status": "pending"}
   ]
 }

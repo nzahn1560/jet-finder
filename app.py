@@ -622,7 +622,6 @@ def brokers_page():
         map_points=people,
         seo_canonical=canonical,
         seo_noindex=bool(request.args),
-        analytics_id=_analytics_measurement_id(),
         seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
         seo_schema={
             '@context': 'https://schema.org',
@@ -1270,6 +1269,14 @@ def _analytics_measurement_id():
     return ''
 
 
+def _google_site_verification():
+    """Search Console HTML-tag token, or nothing. A bad value is ignored."""
+    raw = (os.environ.get('GOOGLE_SITE_VERIFICATION') or '').strip()
+    if 8 <= len(raw) <= 128 and all(ch.isalnum() or ch in '-_' for ch in raw):
+        return raw
+    return ''
+
+
 @app.route('/')
 def home():
     """Home route - Jet Finder with comprehensive scoring and pagination"""
@@ -1494,7 +1501,6 @@ def home():
                          priority_selections=priority_selections,
                          seo_canonical=_public_base() + '/',
                          seo_noindex=bool(request.args),
-                         analytics_id=_analytics_measurement_id(),
                          seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
                          current_criteria={
                              'budget': budget,
@@ -3135,7 +3141,12 @@ def _billing_request_ok() -> bool:
 
 @app.context_processor
 def _inject_csrf():
-    return {'csrf_token': _csrf_token, 'public_base': _public_base()}
+    return {
+        'csrf_token': _csrf_token,
+        'public_base': _public_base(),
+        'analytics_id': _analytics_measurement_id(),
+        'google_site_verification': _google_site_verification(),
+    }
 
 
 @app.route('/logout', methods=['GET', 'POST'])

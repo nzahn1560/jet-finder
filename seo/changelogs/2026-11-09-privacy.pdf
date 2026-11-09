@@ -1,0 +1,45 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1252 >>
+stream
+BT /F1 16 Tf 54 780 Td (JetSchool SEO changelog: Privacy) Tj ET
+BT /F1 11 Tf 54 754 Td (Date: November 9, 2026. Page: /privacy.) Tj ET
+BT /F1 11 Tf 54 729 Td (Technical) Tj ET
+BT /F1 11 Tf 54 714 Td (Title is Privacy Policy | JetSchool. Description states what is collected.) Tj ET
+BT /F1 11 Tf 54 699 Td (Canonical is the public /privacy URL. A query string is noindex, follow.) Tj ET
+BT /F1 11 Tf 54 684 Td (Open Graph, Twitter, and WebPage schema use that same URL.) Tj ET
+BT /F1 11 Tf 54 669 Td (Section headings are h2 elements so the outline sits under the one h1.) Tj ET
+BT /F1 11 Tf 54 644 Td (Text) Tj ET
+BT /F1 11 Tf 54 629 Td (The policy now says Google Analytics runs only when a measurement id is set.) Tj ET
+BT /F1 11 Tf 54 614 Td (It anonymizes the IP address. Contact-message text is not sent to Google.) Tj ET
+BT /F1 11 Tf 54 599 Td (Cookies now say Google may set its own visit cookies, separate from login.) Tj ET
+BT /F1 11 Tf 54 584 Td (Last updated is November 9, 2026. The other rules are unchanged.) Tj ET
+BT /F1 11 Tf 54 559 Td (Tracking) Tj ET
+BT /F1 11 Tf 54 544 Td (This page does not send a custom event. The sitewide tag covers the page view) Tj ET
+BT /F1 11 Tf 54 529 Td (after the measurement id is set on Railway.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001545 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1615
+%%EOF

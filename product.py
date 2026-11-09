@@ -315,10 +315,71 @@ def public_listing(listing_id):
         if not line.strip().lower().startswith('listing number:')
     ).strip()
     dollar_bars = _dollar_bars(profile, row.get('price'))
+    from app import _public_base
+    base = _public_base()
+    canonical = f"{base}/listing/{int(listing_id)}"
+    place = ', '.join(part for part in ((row.get('city') or '').strip(), (row.get('state') or '').strip()) if part)
+    if not place:
+        place = ' '.join(str(row.get('location') or '').split())
+    try:
+        price = float(row.get('price') or 0)
+    except (TypeError, ValueError):
+        price = 0
+    title = row['title']
+    description = f'{title} for sale' + (f' in {place}' if place else '') + '.'
+    facts = []
+    if price > 0:
+        facts.append(f'Listed at ${price:,.0f}')
+    if profile.get('range'):
+        facts.append(f'range {profile.get("range")} nm')
+    if facts:
+        description = f'{description} {" ".join(facts)}.'
+    description = description[:180]
+    images = []
+    for item in media:
+        if item.get('media_type') not in (None, 'photo'):
+            continue
+        url = (item.get('url') or item.get('thumbnail_url') or '').strip()
+        if not url:
+            continue
+        if url.startswith('http://') or url.startswith('https://'):
+            images.append(url)
+        elif url.startswith('/'):
+            images.append(base + url)
+        else:
+            images.append(base + '/' + url)
+    image = images[0] if images else base + '/static/images/jetschool-logo8.png'
+    schema = {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        'name': title,
+        'url': canonical,
+        'description': description,
+        'image': image,
+        'productID': str(listing_id),
+    }
+    maker = ' '.join(str(profile.get('manufacturer') or row.get('manufacturer') or '').split())
+    if maker:
+        schema['brand'] = {'@type': 'Brand', 'name': maker}
+    if price > 0:
+        schema['offers'] = {
+            '@type': 'Offer',
+            'price': int(price) if price == int(price) else price,
+            'priceCurrency': 'USD',
+            'availability': 'https://schema.org/InStock',
+            'url': canonical,
+        }
     return render_template(
         'listing_public.html', listing=row, profile=profile, media=media,
         seller_name=seller_name or 'Seller', brokers=brokers, seller_notes=seller_notes,
         dollar_bars=dollar_bars,
+        seo_title=f'{title} for sale | JetSchool',
+        seo_description=description,
+        seo_canonical=canonical,
+        seo_noindex=bool(request.args),
+        seo_image=image,
+        seo_place=place,
+        seo_schema=schema,
     )
 
 

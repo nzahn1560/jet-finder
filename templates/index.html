@@ -33,15 +33,6 @@
     "operatingSystem": "Web",
     "provider": {"@type": "Organization", "name": "JetSchool", "url": seo_canonical, "email": "support@jetschoolusa.com", "logo": seo_canonical ~ "static/favicon-192.png"}
 }|tojson }}</script>
-{% if analytics_id %}
-<script async src="https://www.googletagmanager.com/gtag/js?id={{ analytics_id }}"></script>
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', {{ analytics_id|tojson }}, { anonymize_ip: true });
-</script>
-{% endif %}
 {% endblock %}
 
 {% block additional_css %}
@@ -51,20 +42,6 @@ gtag('config', {{ analytics_id|tojson }}, { anonymize_ip: true });
 <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
 
 <style>
-    .finder-intro h1 {
-        font-family: 'Orbitron', sans-serif;
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #fff;
-        margin-bottom: 0.5rem;
-    }
-
-    .finder-intro p {
-        color: #d0d0d0;
-        max-width: 46rem;
-        margin-bottom: 0;
-    }
-
     /* Stock Ticker Styles */
     .stock-ticker {
         background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
@@ -4028,10 +4005,6 @@ gtag('config', {{ analytics_id|tojson }}, { anonymize_ip: true });
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
-    <header class="finder-intro mb-4">
-        <h1>Compare private aircraft by cost, range, and route</h1>
-        <p>Jet Finder ranks business jets and turboprops against the routes you fly, the passengers you carry, and the budget you set. The figures are estimates. Confirm range, price, and operating cost before you buy.</p>
-    </header>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->

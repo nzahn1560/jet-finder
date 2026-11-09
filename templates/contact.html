@@ -1,13 +1,46 @@
 {% extends "base.html" %}
 
-{% block title %}Contact - JetSchool{% endblock %}
+{% block title %}Contact JetSchool{% endblock %}
+{% block meta_description %}Send JetSchool a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration.{% endblock %}
+{% block canonical %}{{ public_base }}/contact{% endblock %}
+{% block extra_head %}
+{% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JetSchool">
+<meta property="og:title" content="Contact JetSchool">
+<meta property="og:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
+<meta property="og:url" content="{{ public_base }}/contact">
+<meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Contact JetSchool">
+<meta name="twitter:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "ContactPage",
+    "name": "Contact JetSchool",
+    "url": public_base ~ "/contact",
+    "description": "Send JetSchool a note about a listing, an account, or the information on this site.",
+    "mainEntity": {
+        "@type": "Organization",
+        "name": "JetSchool",
+        "url": public_base ~ "/",
+        "email": "support@jetschoolusa.com",
+        "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "customer support",
+            "email": "support@jetschoolusa.com",
+            "url": public_base ~ "/contact"
+        }
+    }
+}|tojson }}</script>
+{% endblock %}
 
 {% block content %}
 <div class="container py-5" style="max-width: 720px;">
     <article class="contact-card">
         <p class="contact-card__kicker">JetSchool</p>
-        <h1>Contact</h1>
-        <p class="contact-card__lead">Send a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration.</p>
+        <h1>Contact JetSchool</h1>
+        <p class="contact-card__lead">Send a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration. You can also email <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
         <form id="contact-form">
             <label for="contact-name">Name</label>
             <input id="contact-name" name="name" maxlength="120" required autocomplete="name">
@@ -52,6 +85,7 @@
         color: #d7d7d7;
         line-height: 1.5;
     }
+    .contact-card__lead a { color: #F05545; }
     .contact-card label {
         display: block;
         margin: 0.85rem 0 0.3rem;
@@ -116,10 +150,15 @@
             }),
         });
         const data = await response.json().catch(function () { return {}; });
+        window.dataLayer = window.dataLayer || [];
         if (!response.ok) {
+            window.dataLayer.push({ event: 'contact_message_failed' });
+            if (typeof window.gtag === 'function') window.gtag('event', 'contact_message_failed');
             status.textContent = data.error || 'Could not send that message.';
             return;
         }
+        window.dataLayer.push({ event: 'contact_message_sent' });
+        if (typeof window.gtag === 'function') window.gtag('event', 'contact_message_sent');
         form.reset();
         status.textContent = 'Message received. JetSchool will review it.';
     });
