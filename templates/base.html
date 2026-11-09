@@ -2,6 +2,7 @@
 <html lang="en">
 
 <head>
+    {% include '_google_tag.html' %}
     {% include '_favicon.html' %}
     <script type="application/ld+json">{{ {
         "@context": "https://schema.org",
@@ -15,6 +16,9 @@
     <title>{% block title %}JetSchool{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}JetSchool helps you find an aircraft, sell one, find a broker, or request a charter.{% endblock %}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {% if google_site_verification %}
+    <meta name="google-site-verification" content="{{ google_site_verification }}">
+    {% endif %}
     <link rel="canonical" href="{% block canonical %}{{ request.base_url }}{% endblock %}">
     {% block extra_head %}{% endblock %}
     <!-- Bootstrap CSS -->

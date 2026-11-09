@@ -1,6 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}Refunds - JetSchool{% endblock %}
+{% block title %}Refunds | JetSchool{% endblock %}
+{% block meta_description %}Listing fees are non-refundable once a listing is approved and published. Broker fees stop at the next renewal. A review is not a promise of a refund.{% endblock %}
+{% block canonical %}{{ public_base }}/refunds{% endblock %}
+{% block extra_head %}
+{% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JetSchool">
+<meta property="og:title" content="Refunds | JetSchool">
+<meta property="og:description" content="Listing fees are non-refundable once a listing is approved and published. Broker fees stop at the next renewal.">
+<meta property="og:url" content="{{ public_base }}/refunds">
+<meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Refunds | JetSchool">
+<meta name="twitter:description" content="Listing fees are non-refundable once a listing is approved and published.">
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Refunds",
+    "url": public_base ~ "/refunds",
+    "description": "Listing fees are non-refundable once a listing is approved and published. Broker fees stop at the next renewal.",
+    "isPartOf": {"@type": "WebSite", "name": "JetSchool", "url": public_base ~ "/"},
+    "publisher": {"@type": "Organization", "name": "JetSchool", "email": "support@jetschoolusa.com"}
+}|tojson }}</script>
+{% endblock %}
 
 {% block content %}
 <div class="container py-5" style="max-width: 860px; color: #ddd;">
@@ -10,7 +33,7 @@
     <p>Payments on JetSchool are processed by Stripe. This page states the same refund rule as the
         <a href="{{ url_for('terms') }}" style="color:#F05545;">Terms of Service</a>.</p>
 
-    <h4 style="color:#fff;">Listing fees</h4>
+    <h2 class="h4" style="color:#fff;">Listing fees</h2>
     <ul>
         <li>Listing fees are non-refundable once a listing has been approved and published.</li>
         <li>Submitting a listing, or paying the listing fee, does not by itself publish the listing.
@@ -20,12 +43,12 @@
             and ask for a review. A review is not a promise that a refund will be issued.</li>
     </ul>
 
-    <h4 style="color:#fff;">Broker access</h4>
+    <h2 class="h4" style="color:#fff;">Broker access</h2>
     <p>Broker and brokerage fees are billed for the period you selected and continue until the
         subscription is cancelled. Cancelling stops the next renewal. A charge that has already
         been collected is not automatically refunded.</p>
 
-    <h4 style="color:#fff;">What this page does not do</h4>
+    <h2 class="h4" style="color:#fff;">What this page does not do</h2>
     <p>JetSchool does not treat a question, a failed card, or an unpublished listing as a refund
         that is already owed. Stripe is the record of whether money was captured or returned.
         When Stripe reports that a captured charge was refunded, that payment record is updated.

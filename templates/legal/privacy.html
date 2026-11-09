@@ -1,17 +1,40 @@
 {% extends "base.html" %}
 
-{% block title %}Privacy Policy - JetSchool{% endblock %}
+{% block title %}Privacy Policy | JetSchool{% endblock %}
+{% block meta_description %}What JetSchool collects, how that information is used, and which services process it. JetSchool does not sell personal information.{% endblock %}
+{% block canonical %}{{ public_base }}/privacy{% endblock %}
+{% block extra_head %}
+{% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JetSchool">
+<meta property="og:title" content="Privacy Policy | JetSchool">
+<meta property="og:description" content="What JetSchool collects, how that information is used, and which services process it.">
+<meta property="og:url" content="{{ public_base }}/privacy">
+<meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Privacy Policy | JetSchool">
+<meta name="twitter:description" content="What JetSchool collects and which services process it.">
+<script type="application/ld+json">{{ {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Privacy Policy",
+    "url": public_base ~ "/privacy",
+    "description": "What JetSchool collects, how that information is used, and which services process it.",
+    "isPartOf": {"@type": "WebSite", "name": "JetSchool", "url": public_base ~ "/"},
+    "publisher": {"@type": "Organization", "name": "JetSchool", "email": "support@jetschoolusa.com"}
+}|tojson }}</script>
+{% endblock %}
 
 {% block content %}
 <div class="container py-5" style="max-width: 860px; color: #ddd;">
     <h1 class="mb-1" style="color:#fff;">Privacy Policy</h1>
-    <p class="text-muted mb-4">Last updated: February 2026</p>
+    <p class="text-muted mb-4">Last updated: November 9, 2026</p>
 
-    <h4 style="color:#fff;">Who we are</h4>
+    <h2 class="h4" style="color:#fff;">Who we are</h2>
     <p>JetSchool ("we", "us") operates jetschoolusa.com, an aviation marketplace and aircraft
         performance platform.</p>
 
-    <h4 style="color:#fff;">Information we collect</h4>
+    <h2 class="h4" style="color:#fff;">Information we collect</h2>
     <ul>
         <li><strong>Account information:</strong> email address, name, company, phone number, and a
             hashed password when you create an account. If you sign in with Google, we receive your
@@ -26,7 +49,7 @@
             through the contact form, so we can read and respond to it.</li>
     </ul>
 
-    <h4 style="color:#fff;">How we use it</h4>
+    <h2 class="h4" style="color:#fff;">How we use it</h2>
     <ul>
         <li>To operate your account, listings, and purchases.</li>
         <li>To send transactional emails (e.g. password resets, listing status updates).</li>
@@ -34,29 +57,31 @@
     </ul>
     <p>We do not sell your personal information.</p>
 
-    <h4 style="color:#fff;">Third-party services</h4>
+    <h2 class="h4" style="color:#fff;">Third-party services</h2>
     <ul>
         <li><strong>Google</strong> — optional sign-in (OAuth).</li>
+        <li><strong>Google</strong> — a tag for container GTM-TVGS9R2S loads on every page. It can record page views and the named events this site sends. The words typed into a contact message are not sent to Google.</li>
         <li><strong>Stripe</strong> — payment processing.</li>
         <li><strong>Cloudflare</strong> — DNS, CDN, and media storage (R2).</li>
         <li><strong>Railway</strong> — application and database hosting.</li>
     </ul>
 
-    <h4 style="color:#fff;">Your choices</h4>
+    <h2 class="h4" style="color:#fff;">Your choices</h2>
     <p>Signed-in account holders can open Settings to turn off optional emails, change a password,
         download a copy of their account information, or delete the account. Password resets,
         payment problems, and decisions about your own account still arrive by email. We do not
         sell your personal information.</p>
 
-    <h4 style="color:#fff;">Data retention &amp; deletion</h4>
+    <h2 class="h4" style="color:#fff;">Data retention &amp; deletion</h2>
     <p>We keep your account data while your account is active. Delete the account from Settings,
         or write to the email below.</p>
 
-    <h4 style="color:#fff;">Cookies</h4>
+    <h2 class="h4" style="color:#fff;">Cookies</h2>
     <p>We use a session cookie (<code>jet_session</code>) to keep you logged in. It is HttpOnly and
-        not used for advertising or cross-site tracking.</p>
+        not used for advertising or cross-site tracking. The Google tag may set its own cookies
+        to count visits. Those cookies are separate from the login cookie.</p>
 
-    <h4 style="color:#fff;">Contact</h4>
+    <h2 class="h4" style="color:#fff;">Contact</h2>
     <p>Questions about this policy: <a href="mailto:support@jetschoolusa.com"
             style="color:#F05545;">support@jetschoolusa.com</a></p>
 </div>

@@ -15,15 +15,6 @@
 <meta name="twitter:title" content="Find an Aircraft Broker | JetSchool">
 <meta name="twitter:description" content="Search aircraft brokers by airport or city.">
 <script type="application/ld+json">{{ seo_schema|tojson }}</script>
-{% if analytics_id %}
-<script async src="https://www.googletagmanager.com/gtag/js?id={{ analytics_id }}"></script>
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', {{ analytics_id|tojson }}, { anonymize_ip: true });
-</script>
-{% endif %}
 {% endblock %}
 {% block additional_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sections.css') }}">

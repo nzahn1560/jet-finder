@@ -1,0 +1,47 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1430 >>
+stream
+BT /F1 16 Tf 54 780 Td (JetSchool SEO changelog: Contact) Tj ET
+BT /F1 11 Tf 54 754 Td (Date: November 9, 2026. Page: /contact.) Tj ET
+BT /F1 11 Tf 54 729 Td (Technical) Tj ET
+BT /F1 11 Tf 54 714 Td (Title is Contact JetSchool. Description names listings, accounts, and site information.) Tj ET
+BT /F1 11 Tf 54 699 Td (Canonical is the public /contact URL. A query string is noindex, follow.) Tj ET
+BT /F1 11 Tf 54 684 Td (Open Graph and Twitter cards point at the same URL and the square wordmark.) Tj ET
+BT /F1 11 Tf 54 669 Td (ContactPage schema names JetSchool and support@jetschoolusa.com.) Tj ET
+BT /F1 11 Tf 54 644 Td (Text) Tj ET
+BT /F1 11 Tf 54 629 Td (The heading is Contact JetSchool. The form is unchanged.) Tj ET
+BT /F1 11 Tf 54 614 Td (The lead now also shows the support email.) Tj ET
+BT /F1 11 Tf 54 589 Td (Tracking) Tj ET
+BT /F1 11 Tf 54 574 Td (A successful send records contact_message_sent. A failed send records contact_message_failed.) Tj ET
+BT /F1 11 Tf 54 559 Td (The event does not include the name, email, phone, or message.) Tj ET
+BT /F1 11 Tf 54 544 Td (The Google tag itself stays off until ANALYTICS_MEASUREMENT_ID is set.) Tj ET
+BT /F1 11 Tf 54 519 Td (Still needs the owner) Tj ET
+BT /F1 11 Tf 54 504 Td (Google Analytics is not active. Add the GA4 measurement id on Railway.) Tj ET
+BT /F1 11 Tf 54 489 Td (Search Console is not verified. Add the HTML-tag token as GOOGLE_SITE_VERIFICATION.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001723 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1793
+%%EOF

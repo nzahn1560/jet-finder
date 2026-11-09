@@ -62,7 +62,8 @@ class ProductTests(unittest.TestCase):
         home = self.client.get('/')
         self.assertEqual(home.status_code, 200)
         self.assertIn(b'Compare Private Aircraft by Cost and Range | JetSchool', home.data)
-        self.assertIn(b'<h1>Compare private aircraft by cost, range, and route</h1>', home.data)
+        self.assertNotIn(b'Compare private aircraft by cost, range, and route', home.data)
+        self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
         self.assertIn(b'rel="canonical" href="http://localhost/"', home.data)
         self.assertIn(b'WebApplication', home.data)
         self.assertIn(b'jetfinder_route_add', home.data)
@@ -1140,15 +1141,38 @@ class ProductTests(unittest.TestCase):
     def test_refunds_page_matches_the_terms(self):
         page = self.client.get('/refunds')
         self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Refunds | JetSchool', page.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/refunds"', page.data)
+        self.assertIn(b'"@type": "WebPage"', page.data)
+        self.assertIn(b'<h2 class="h4" style="color:#fff;">Listing fees</h2>', page.data)
         self.assertIn(b'non-refundable once a listing has been approved and published', page.data)
         self.assertIn(b'not a promise that a refund will be issued', page.data)
+        self.assertNotIn(b'noindex', page.data)
+        filtered = self.client.get('/refunds?utm_source=test')
+        self.assertIn(b'noindex, follow', filtered.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/refunds"', filtered.data)
         terms = self.client.get('/terms')
+        self.assertIn(b'Terms of Service | JetSchool', terms.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/terms"', terms.data)
         self.assertIn(b'href="/refunds"', terms.data)
+        self.assertIn(b'analytics, hosting, and media storage', terms.data)
+        self.assertNotIn(b'<h4', terms.data)
+        queried = self.client.get('/terms?ref=footer')
+        self.assertIn(b'noindex, follow', queried.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/terms"', queried.data)
 
     def test_contact_message_reaches_admin_alerts(self):
         page = self.client.get('/contact')
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'Contact', page.data)
+        self.assertIn(b'<h1>Contact JetSchool</h1>', page.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/contact"', page.data)
+        self.assertIn(b'ContactPage', page.data)
+        self.assertIn(b'contact_message_sent', page.data)
+        self.assertIn(b'support@jetschoolusa.com', page.data)
+        self.assertNotIn(b'noindex', page.data)
+        filtered = self.client.get('/contact?sent=1')
+        self.assertIn(b'noindex, follow', filtered.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/contact"', filtered.data)
         token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
         sent = self.client.post('/api/contact', json={
             'name': 'Ada Buyer',
@@ -1168,6 +1192,37 @@ class ProductTests(unittest.TestCase):
         notes = self.client.get('/api/notifications')
         titles = [note['title'] for note in notes.get_json()['notifications']]
         self.assertIn('Contact from Ada Buyer', titles)
+
+    def test_privacy_page_names_analytics_and_keeps_one_canonical(self):
+        page = self.client.get('/privacy')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Privacy Policy | JetSchool', page.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/privacy"', page.data)
+        self.assertIn(b'"@type": "WebPage"', page.data)
+        self.assertIn(b'The words typed into a contact message are not sent to Google.', page.data)
+        self.assertNotIn(b'noindex', page.data)
+        filtered = self.client.get('/privacy?utm_source=test')
+        self.assertIn(b'noindex, follow', filtered.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/privacy"', filtered.data)
+
+    def test_one_google_tag_is_on_every_page(self):
+        os.environ['ANALYTICS_MEASUREMENT_ID'] = 'G-TEST1234'
+        os.environ['GOOGLE_SITE_VERIFICATION'] = 'bad token'
+        try:
+            for path in ('/', '/contact', '/brokers', '/privacy', '/no-such-page'):
+                page = self.client.get(path)
+                self.assertEqual(page.data.count(b'https://www.googletagmanager.com/gtm.js?id=GTM-TVGS9R2S'), 1, path)
+                self.assertNotIn(b'gtag/js', page.data)
+                self.assertNotIn(b'google-site-verification', page.data)
+                head = page.data.split(b'<head>', 1)[1][:220]
+                self.assertIn(b'GTM-TVGS9R2S', head)
+            os.environ['GOOGLE_SITE_VERIFICATION'] = 'verifytoken123'
+            home = self.client.get('/')
+            self.assertEqual(home.data.count(b'GTM-TVGS9R2S'), 1)
+            self.assertIn(b'google-site-verification" content="verifytoken123"', home.data)
+        finally:
+            os.environ.pop('ANALYTICS_MEASUREMENT_ID', None)
+            os.environ.pop('GOOGLE_SITE_VERIFICATION', None)
 
     def test_robots_and_sitemap_skip_private_listings(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -1708,6 +1763,15 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'showroom', page.data)
         self.assertIn(b'Seller notes', page.data)
         self.assertIn(b'showroom-prev', page.data)
+        self.assertIn(b'for sale | JetSchool', page.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/listing/' + str(listing_id).encode() + b'"', page.data)
+        self.assertIn(b'"@type": "Product"', page.data)
+        self.assertIn(b'listing_view', page.data)
+        self.assertIn(b'listing_broker_send', page.data)
+        self.assertNotIn(b'noindex', page.data)
+        queried = self.client.get(f'/listing/{listing_id}?ref=share')
+        self.assertIn(b'noindex, follow', queried.data)
+        self.assertIn(b'rel="canonical" href="http://localhost/listing/' + str(listing_id).encode() + b'"', queried.data)
         self._login('broker@example.com', 'broker-pass-1')
         inbox = self.client.get('/api/broker/messages')
         self.assertEqual(inbox.status_code, 200)
