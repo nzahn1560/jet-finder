@@ -1,0 +1,45 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1246 >>
+stream
+BT /F1 16 Tf 54 780 Td (JetSchool SEO changelog: City for sale) Tj ET
+BT /F1 11 Tf 54 754 Td (Date: November 10, 2026. Page: /aircraft-for-sale/in/<city>.) Tj ET
+BT /F1 11 Tf 54 729 Td (Technical) Tj ET
+BT /F1 11 Tf 54 714 Td (A city page exists only when a live public listing names that city.) Tj ET
+BT /F1 11 Tf 54 699 Td (The URL includes the state, such as /aircraft-for-sale/in/teterboro-nj.) Tj ET
+BT /F1 11 Tf 54 684 Td (An unknown city returns 404. An airport code alone does not get a page.) Tj ET
+BT /F1 11 Tf 54 669 Td (The sitemap lists a city only while it has a listing.) Tj ET
+BT /F1 11 Tf 54 654 Td (A query string is noindex. The canonical URL has no query.) Tj ET
+BT /F1 11 Tf 54 629 Td (Text) Tj ET
+BT /F1 11 Tf 54 614 Td (The title is Jetschool: Aircraft for Sale in the city.) Tj ET
+BT /F1 11 Tf 54 599 Td (The heading states how many live listings are in that city.) Tj ET
+BT /F1 11 Tf 54 584 Td (Each listing links to its city. The sale index links to every city with a listing.) Tj ET
+BT /F1 11 Tf 54 559 Td (Tracking) Tj ET
+BT /F1 11 Tf 54 544 Td (aircraft_for_sale_view records the city slug and the result count.) Tj ET
+BT /F1 11 Tf 54 529 Td (aircraft_listing_open records the listing id when a card is opened.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001539 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1609
+%%EOF

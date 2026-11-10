@@ -9,29 +9,29 @@
     </div>
 </div>
 
-{% block title %}Compare Private Aircraft by Cost and Range | JetSchool{% endblock %}
-{% block meta_description %}Compare business jets and turboprops by price, range, passengers, and the routes you fly. Jet Finder estimates are a starting point. Confirm the numbers before you buy.{% endblock %}
+{% block title %}Jet Finder{% endblock %}
+{% block meta_description %}Jet Finder lines up every data point for the aircraft on the page at the same time. The figures are estimates. Confirm them before you buy.{% endblock %}
 {% block canonical %}{{ seo_canonical }}{% endblock %}
 {% block extra_head %}
 {% if seo_noindex %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="JetSchool">
-<meta property="og:title" content="Compare Private Aircraft by Cost and Range | JetSchool">
-<meta property="og:description" content="Compare business jets and turboprops by price, range, passengers, and the routes you fly. Jet Finder estimates are a starting point. Confirm the numbers before you buy.">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: Jet Finder">
+<meta property="og:description" content="Jet Finder lines up every data point for the aircraft on the page at the same time. The figures are estimates. Confirm them before you buy.">
 <meta property="og:url" content="{{ seo_canonical }}">
 <meta property="og:image" content="{{ seo_image }}">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Compare Private Aircraft by Cost and Range | JetSchool">
-<meta name="twitter:description" content="Compare business jets and turboprops by price, range, passengers, and the routes you fly.">
+<meta name="twitter:title" content="Jetschool: Jet Finder">
+<meta name="twitter:description" content="Jet Finder lines up every data point for the aircraft on the page at the same time.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    "name": "Jet Finder",
+    "name": "Jetschool: Jet Finder",
     "url": seo_canonical,
-    "description": "Compare business jets and turboprops by price, range, passengers, and the routes you fly.",
+    "description": "Jet Finder lines up every data point for the aircraft on the page at the same time.",
     "applicationCategory": "BusinessApplication",
     "operatingSystem": "Web",
-    "provider": {"@type": "Organization", "name": "JetSchool", "url": seo_canonical, "email": "support@jetschoolusa.com", "logo": seo_canonical ~ "static/favicon-192.png"}
+    "provider": {"@type": "Organization", "name": "Jetschool", "url": seo_canonical, "email": "support@jetschoolusa.com", "logo": seo_canonical ~ "static/favicon-192.png"}
 }|tojson }}</script>
 {% endblock %}
 
@@ -42,6 +42,17 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
 
 <style>
+    .finder-title {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0 0 0.35rem;
+    }
+
+    .finder-sale { margin: 0 0 1rem; }
+    .finder-sale a { color: #F05545; }
+
     /* Stock Ticker Styles */
     .stock-ticker {
         background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
@@ -4005,6 +4016,8 @@
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
+    <h1 class="finder-title">Jet Finder</h1>
+    <p class="finder-sale"><a href="{{ url_for('aircraft_for_sale') }}">Aircraft for sale</a></p>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->

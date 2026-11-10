@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Find an Aircraft Broker | JetSchool{% endblock %}
+{% block title %}Broker Map{% endblock %}
 {% block meta_description %}Search aircraft brokers by airport or city. The map shows how many brokerages are in each area. Open a profile to see who is there.{% endblock %}
 {% block canonical %}{{ seo_canonical }}{% endblock %}
 {% block extra_head %}
 {% if seo_noindex %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="JetSchool">
-<meta property="og:title" content="Find an Aircraft Broker | JetSchool">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: Broker Map">
 <meta property="og:description" content="Search aircraft brokers by airport or city. The map shows how many brokerages are in each area.">
 <meta property="og:url" content="{{ seo_canonical }}">
 <meta property="og:image" content="{{ seo_image }}">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Find an Aircraft Broker | JetSchool">
+<meta name="twitter:title" content="Jetschool: Broker Map">
 <meta name="twitter:description" content="Search aircraft brokers by airport or city.">
 <script type="application/ld+json">{{ seo_schema|tojson }}</script>
 {% endblock %}

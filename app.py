@@ -626,10 +626,10 @@ def brokers_page():
         seo_schema={
             '@context': 'https://schema.org',
             '@type': 'CollectionPage',
-            'name': 'Find an aircraft broker',
+            'name': 'Jetschool: Broker Map',
             'url': canonical,
             'description': 'Search aircraft brokers by airport or city.',
-            'isPartOf': {'@type': 'WebSite', 'name': 'JetSchool', 'url': site},
+            'isPartOf': {'@type': 'WebSite', 'name': 'Jetschool', 'url': site},
             'mainEntity': {
                 '@type': 'ItemList',
                 'itemListElement': [
@@ -1270,8 +1270,20 @@ def _analytics_measurement_id():
 
 
 def _google_site_verification():
-    """Search Console HTML-tag token, or nothing. A bad value is ignored."""
-    raw = (os.environ.get('GOOGLE_SITE_VERIFICATION') or '').strip()
+    """Search Console HTML-tag token, or nothing. A bad value is ignored.
+
+    Railway may hold the token alone or the whole meta tag Google shows.
+    """
+    raw = (os.environ.get('GOOGLE_SITE_VERIFICATION') or '').strip().strip('"').strip("'")
+    marker = 'content='
+    lowered = raw.lower()
+    if marker in lowered:
+        rest = raw[lowered.find(marker) + len(marker):].lstrip()
+        if rest[:1] in ('"', "'"):
+            end = rest.find(rest[0], 1)
+            raw = rest[1:end] if end > 1 else ''
+        else:
+            raw = rest.split()[0].strip(' />')
     if 8 <= len(raw) <= 128 and all(ch.isalnum() or ch in '-_' for ch in raw):
         return raw
     return ''
@@ -1725,6 +1737,7 @@ def public_profile(user_id):
     if not is_owner:
         pending_members = []
         teams = []
+    seo = _public_profile_seo(person)
     return render_template(
         'profile_public.html',
         user=person,
@@ -1735,6 +1748,12 @@ def public_profile(user_id):
         team_people=team_people,
         broker_number=_broker_subscription_number(person['id']) if is_owner else None,
         subscription=_account_subscription(person['id']) if is_owner else None,
+        seo_title=seo['title'],
+        seo_description=seo['description'],
+        seo_canonical=seo['canonical'],
+        seo_noindex=seo['noindex'] or bool(request.args),
+        seo_image=seo['image'],
+        seo_schema=seo['schema'],
     )
 
 
@@ -3440,6 +3459,315 @@ _ROBOTS_PRIVATE = (
 )
 
 
+def _sitemap_day(value):
+    """YYYY-MM-DD for a sitemap lastmod, or nothing."""
+    if value is None:
+        return ''
+    if hasattr(value, 'strftime'):
+        try:
+            return value.strftime('%Y-%m-%d')
+        except Exception:
+            return ''
+    text = str(value).strip()
+    if len(text) >= 10 and text[4] == '-' and text[7] == '-':
+        return text[:10]
+    return ''
+
+
+def _public_person_id(user_id):
+    """The profile URL Google should keep. A team member points at the brokerage."""
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    team = db_module.user_on_active_team(user_id)
+    main_id = team.get('admin_user_id') if team else None
+    if main_id:
+        return int(main_id)
+    return user_id
+
+
+def _person_has_public_listing(user_id):
+    for row in db_module.get_active_user_listings():
+        if sections_module.normalize_market(row.get('market')) != 'public':
+            continue
+        if row.get('paused'):
+            continue
+        try:
+            if int(row.get('user_id') or 0) == int(user_id):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _profile_is_indexable(person):
+    """Approved brokerages and sellers with a live public listing. Empty accounts stay out."""
+    if not person or person.get('is_suspended'):
+        return False
+    user_id = person.get('id')
+    if person.get('broker_application_status') == 'approved':
+        return _public_person_id(user_id) == int(user_id)
+    return _person_has_public_listing(user_id)
+
+
+def _public_profile_seo(person):
+    from urllib.parse import quote
+    name = ' '.join(part for part in (person.get('first_name'), person.get('last_name')) if part).strip() or 'Profile'
+    place = ' '.join(str(person.get('profile_location') or '').split())
+    broker = person.get('broker_application_status') == 'approved' and _public_person_id(person.get('id')) == int(person['id'])
+    selling = _person_has_public_listing(person.get('id'))
+    if broker:
+        description = f'{name} is an aircraft broker on JetSchool.'
+        title = f'{name}, Aircraft Broker'
+    elif selling:
+        description = f'{name} lists aircraft for sale on JetSchool.'
+        title = name
+    else:
+        description = f'{name} on JetSchool.'
+        title = name
+    if place:
+        description += f' Based in {place}.'
+    specialties = ' '.join(str(person.get('broker_specialties') or '').split())
+    if broker and specialties and len(specialties) <= 80:
+        description += f' Aircraft: {specialties}.'
+    description = description[:180]
+    base = _public_base()
+    canonical = f"{base}/people/{int(person['id'])}"
+    photo = ' '.join(str(person.get('profile_photo_url') or '').split())
+    if photo.startswith('http://') or photo.startswith('https://'):
+        image = photo
+    elif photo.startswith('/'):
+        image = base + photo
+    elif photo:
+        image = base + '/' + quote(photo)
+    else:
+        image = base + '/static/images/jetschool-logo8.png'
+    schema = {
+        '@context': 'https://schema.org',
+        '@type': 'ProfilePage',
+        'name': f'Jetschool: {title}',
+        'url': canonical,
+        'description': description,
+        'mainEntity': {
+            '@type': 'Person',
+            'name': name,
+            'url': canonical,
+        },
+    }
+    if broker:
+        schema['mainEntity']['jobTitle'] = 'Aircraft broker'
+    if image:
+        schema['mainEntity']['image'] = image
+    return {
+        'title': title,
+        'description': description,
+        'canonical': canonical,
+        'noindex': not _profile_is_indexable(person),
+        'image': image,
+        'schema': schema,
+    }
+
+
+def _sale_name(name):
+    """Readable name. All-caps words become title case. A model code keeps its digits."""
+    name = ' '.join(str(name or '').split())
+    if not name.isupper():
+        return name
+    words = []
+    for word in name.split(' '):
+        short = len(word) <= 2 and word.isalpha()
+        words.append(word if any(ch.isdigit() for ch in word) or short else word.title())
+    return ' '.join(words)
+
+
+def _sale_model(maker, model):
+    """The catalog model Google can rank. A blank model has no page."""
+    model = _sale_name(model)
+    maker = _sale_name(maker)
+    if not model:
+        return '', ''
+    if maker and not model.lower().startswith(maker.lower()):
+        label = f'{maker} {model}'
+    else:
+        label = model
+    return label, _sale_slug(label)
+
+
+def _sale_slug(name):
+    """A stable URL piece. Empty when the name is blank."""
+    parts = []
+    for ch in str(name or '').strip().lower():
+        parts.append(ch if ch.isalnum() else '-')
+    slug = ''.join(parts)
+    while '--' in slug:
+        slug = slug.replace('--', '-')
+    return slug.strip('-')
+
+
+def _sale_place(city, state):
+    """A city label and URL slug. A blank city has no page. A two-letter state stays uppercase."""
+    city = ' '.join(str(city or '').split())
+    state = ' '.join(str(state or '').split())
+    if not city:
+        return '', ''
+    city_label = city.title() if city.isupper() else city
+    if len(state) == 2:
+        state_label = state.upper()
+    elif state.isupper():
+        state_label = state.title()
+    else:
+        state_label = state
+    label = ', '.join(part for part in (city_label, state_label) if part)
+    slug = _sale_slug(city_label)
+    if state_label:
+        slug = f'{slug}-{_sale_slug(state_label)}'
+    return label, slug
+
+
+def _public_sale_rows():
+    """Approved public aircraft that are for sale. Wanted and off-market rows stay out."""
+    profiles = {item.get('id'): item for item in db_module.get_all_aircraft_profiles()}
+    rows = []
+    for row in db_module.get_active_user_listings():
+        if sections_module.normalize_market(row.get('market')) != 'public' or row.get('paused'):
+            continue
+        if str(row.get('listing_intent') or 'sale').strip().lower() == 'wanted':
+            continue
+        profile = profiles.get(row.get('profile_id')) or {}
+        maker = _sale_name(profile.get('manufacturer') or row.get('manufacturer'))
+        model_name, model_slug = _sale_model(maker, profile.get('aircraft_name') or profile.get('name'))
+        title = _listing_title(
+            row.get('year'),
+            profile.get('aircraft_name') or profile.get('name'),
+            row.get('title'),
+            maker,
+        )
+        place_name, place_slug = _sale_place(row.get('city'), row.get('state'))
+        place = place_name or ' '.join(str(row.get('location') or '').split())
+        try:
+            price = float(row.get('price') or 0)
+        except (TypeError, ValueError):
+            price = 0
+        image = ''
+        for url in str(row.get('images') or '').split(','):
+            url = url.strip()
+            if url:
+                image = url
+                break
+        rows.append({
+            'id': int(row['id']),
+            'title': title,
+            'manufacturer': maker,
+            'slug': _sale_slug(maker),
+            'model_name': model_name,
+            'model_slug': model_slug,
+            'place': place,
+            'place_name': place_name,
+            'place_slug': place_slug,
+            'price_text': f'${price:,.0f}' if price > 0 else '',
+            'image': image,
+            'updated': _sitemap_day(row.get('updated_at') or row.get('created_at')),
+        })
+    rows.sort(key=lambda item: item['title'].lower())
+    return rows
+
+
+def _sale_makers(rows):
+    seen = set()
+    makers = []
+    for row in rows:
+        if not row.get('slug') or row['slug'] in seen:
+            continue
+        seen.add(row['slug'])
+        makers.append({'name': row['manufacturer'], 'slug': row['slug']})
+    makers.sort(key=lambda item: item['name'].lower())
+    return makers
+
+
+def _sale_places(rows):
+    seen = set()
+    places = []
+    for row in rows:
+        if not row.get('place_slug') or row['place_slug'] in seen:
+            continue
+        seen.add(row['place_slug'])
+        places.append({'name': row['place_name'], 'slug': row['place_slug']})
+    places.sort(key=lambda item: item['name'].lower())
+    return places
+
+
+def _sale_models(rows):
+    seen = set()
+    models = []
+    for row in rows:
+        if not row.get('model_slug') or row['model_slug'] in seen:
+            continue
+        seen.add(row['model_slug'])
+        models.append({'name': row['model_name'], 'slug': row['model_slug']})
+    models.sort(key=lambda item: item['name'].lower())
+    return models
+
+
+def _sitemap_entries():
+    """Public URLs worth submitting. Private accounts and off-market listings stay out."""
+    base = _public_base()
+    entries = []
+    for path in _SITEMAP_PAGES:
+        loc = base + '/' if path == '/' else base + path
+        entries.append((loc, ''))
+    sale_rows = _public_sale_rows()
+    if sale_rows:
+        latest = max((row['updated'] for row in sale_rows if row['updated']), default='')
+        entries.append((base + '/aircraft-for-sale', latest))
+        by_slug = {}
+        for row in sale_rows:
+            if not row['slug']:
+                continue
+            if row['updated'] > by_slug.get(row['slug'], ''):
+                by_slug[row['slug']] = row['updated']
+        for slug, day in sorted(by_slug.items()):
+            entries.append((f'{base}/aircraft-for-sale/{slug}', day))
+        by_place = {}
+        for row in sale_rows:
+            if not row['place_slug']:
+                continue
+            if row['updated'] > by_place.get(row['place_slug'], ''):
+                by_place[row['place_slug']] = row['updated']
+        for slug, day in sorted(by_place.items()):
+            entries.append((f'{base}/aircraft-for-sale/in/{slug}', day))
+        by_model = {}
+        for row in sale_rows:
+            if not row['model_slug']:
+                continue
+            if row['updated'] > by_model.get(row['model_slug'], ''):
+                by_model[row['model_slug']] = row['updated']
+        for slug, day in sorted(by_model.items()):
+            entries.append((f'{base}/aircraft-for-sale/model/{slug}', day))
+    people = set()
+    for row in db_module.get_active_user_listings():
+        if sections_module.normalize_market(row.get('market')) != 'public' or row.get('paused'):
+            continue
+        listing_id = int(row['id'])
+        entries.append((f'{base}/listing/{listing_id}', _sitemap_day(row.get('updated_at') or row.get('created_at'))))
+        person_id = _public_person_id(row.get('user_id'))
+        if person_id:
+            people.add(person_id)
+    for broker in db_module.list_approved_brokers():
+        person_id = _public_person_id(broker.get('id'))
+        if person_id:
+            people.add(person_id)
+    for person_id in sorted(people):
+        person = db_module.get_user_by_id(person_id)
+        if not _profile_is_indexable(person):
+            continue
+        entries.append((
+            f'{base}/people/{person_id}',
+            _sitemap_day((person or {}).get('updated_at')),
+        ))
+    return entries
+
+
 @app.route('/favicon.ico')
 def favicon():
     """Root icon Googlebot requests even before it reads the HTML links."""
@@ -3448,7 +3776,7 @@ def favicon():
 
 @app.route('/robots.txt')
 def robots_txt():
-    base = request.url_root.rstrip('/')
+    base = _public_base()
     lines = [
         'User-agent: *',
         'Allow: /favicon.ico',
@@ -3463,18 +3791,138 @@ def robots_txt():
 
 @app.route('/sitemap.xml')
 def sitemap_xml():
-    """Public pages and approved public listings. Broker-only rows stay out."""
-    base = request.url_root.rstrip('/')
-    locs = [base + '/' if path == '/' else base + path for path in _SITEMAP_PAGES]
-    for row in db_module.get_active_user_listings():
-        if sections_module.normalize_market(row.get('market')) != 'public':
-            continue
-        locs.append(f"{base}/listing/{int(row['id'])}")
+    """Public pages, live listings, and the people behind them. Off-market rows stay out."""
     body = ['<?xml version="1.0" encoding="UTF-8"?>',
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-    body.extend(f'<url><loc>{html_escape(loc)}</loc></url>' for loc in locs)
+    for loc, day in _sitemap_entries():
+        line = f'<url><loc>{html_escape(loc)}</loc>'
+        if day:
+            line += f'<lastmod>{day}</lastmod>'
+        body.append(line + '</url>')
     body.append('</urlset>')
     return Response('\n'.join(body) + '\n', mimetype='application/xml')
+
+
+def _render_sale_catalog(rows, heading, title, description, canonical, current_slug='', current_place='', current_model=''):
+    catalog = _public_sale_rows()
+    base = _public_base()
+    schema = {
+        '@context': 'https://schema.org',
+        '@type': 'CollectionPage',
+        'name': f'Jetschool: {title}',
+        'url': canonical,
+        'description': description,
+        'isPartOf': {'@type': 'WebSite', 'name': 'Jetschool', 'url': base + '/'},
+        'mainEntity': {
+            '@type': 'ItemList',
+            'numberOfItems': len(rows),
+            'itemListElement': [
+                {
+                    '@type': 'ListItem',
+                    'position': index,
+                    'url': f"{base}/listing/{row['id']}",
+                    'name': row['title'],
+                }
+                for index, row in enumerate(rows, start=1)
+            ],
+        },
+    }
+    return render_template(
+        'aircraft_for_sale.html',
+        heading=heading,
+        seo_title=title,
+        seo_description=description[:180],
+        seo_canonical=canonical,
+        seo_noindex=bool(request.args) or not rows,
+        seo_schema=schema,
+        rows=rows,
+        makers=_sale_makers(catalog),
+        places=_sale_places(catalog),
+        models=_sale_models(catalog),
+        current_slug=current_slug,
+        current_place=current_place,
+        current_model=current_model,
+    )
+
+
+@app.route('/aircraft-for-sale/model/<slug>')
+def aircraft_for_sale_model(slug):
+    """Listings of one catalog model. A model with nothing listed returns 404."""
+    catalog = _public_sale_rows()
+    chosen = next((item for item in _sale_models(catalog) if item['slug'] == slug), None)
+    if not chosen:
+        return render_template('error.html', error_code=404, message='No aircraft of that model are for sale'), 404
+    rows = [row for row in catalog if row['model_slug'] == slug]
+    name = chosen['name']
+    noun = 'listing' if len(rows) == 1 else 'listings'
+    return _render_sale_catalog(
+        rows,
+        f'{name} for sale',
+        f'{name} for Sale',
+        (
+            f'{name} for sale on JetSchool. {len(rows)} live {noun}. '
+            'Open one to see price, range, and the other data.'
+        ),
+        _public_base() + f'/aircraft-for-sale/model/{slug}',
+        current_model=slug,
+    )
+
+
+@app.route('/aircraft-for-sale/in/<slug>')
+def aircraft_for_sale_in(slug):
+    """Listings in one city. A city with nothing listed returns 404."""
+    catalog = _public_sale_rows()
+    chosen = next((item for item in _sale_places(catalog) if item['slug'] == slug), None)
+    if not chosen:
+        return render_template('error.html', error_code=404, message='No aircraft in that city are for sale'), 404
+    rows = [row for row in catalog if row['place_slug'] == slug]
+    name = chosen['name']
+    noun = 'listing' if len(rows) == 1 else 'listings'
+    return _render_sale_catalog(
+        rows,
+        f'Aircraft for sale in {name}',
+        f'Aircraft for Sale in {name}',
+        (
+            f'Aircraft for sale in {name}. {len(rows)} live {noun}. '
+            'Open one to see price, range, and the other data.'
+        ),
+        _public_base() + f'/aircraft-for-sale/in/{slug}',
+        current_place=slug,
+    )
+
+
+@app.route('/aircraft-for-sale')
+@app.route('/aircraft-for-sale/<slug>')
+def aircraft_for_sale(slug=None):
+    """One index of live listings, plus a page for each make that has one."""
+    rows = _public_sale_rows()
+    makers = _sale_makers(rows)
+    if slug is not None:
+        chosen = next((item for item in makers if item['slug'] == slug), None)
+        if not chosen:
+            return render_template('error.html', error_code=404, message='No aircraft of that make are for sale'), 404
+        rows = [row for row in rows if row['slug'] == slug]
+        name = chosen['name']
+        noun = 'listing' if len(rows) == 1 else 'listings'
+        heading = f'{name} for sale'
+        title = f'{name} for Sale'
+        description = (
+            f'{name} aircraft for sale on JetSchool. {len(rows)} live {noun}. '
+            'Open one to see price, range, and the other data.'
+        )
+        canonical = _public_base() + f'/aircraft-for-sale/{slug}'
+    else:
+        heading = 'Aircraft for sale'
+        title = 'Aircraft for Sale'
+        noun = 'listing' if len(rows) == 1 else 'listings'
+        description = (
+            f'Aircraft for sale on JetSchool. {len(rows)} live {noun}. '
+            'Open one to compare price, range, and the other data.'
+        )
+        canonical = _public_base() + '/aircraft-for-sale'
+    return _render_sale_catalog(
+        rows, heading, title, description, canonical, current_slug=slug or '',
+    )
 
 
 # =============================================================================

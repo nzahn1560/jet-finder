@@ -1,27 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}Privacy Policy | JetSchool{% endblock %}
+{% block title %}Privacy{% endblock %}
 {% block meta_description %}What JetSchool collects, how that information is used, and which services process it. JetSchool does not sell personal information.{% endblock %}
 {% block canonical %}{{ public_base }}/privacy{% endblock %}
 {% block extra_head %}
 {% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="JetSchool">
-<meta property="og:title" content="Privacy Policy | JetSchool">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: Privacy">
 <meta property="og:description" content="What JetSchool collects, how that information is used, and which services process it.">
 <meta property="og:url" content="{{ public_base }}/privacy">
 <meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Privacy Policy | JetSchool">
+<meta name="twitter:title" content="Jetschool: Privacy">
 <meta name="twitter:description" content="What JetSchool collects and which services process it.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "WebPage",
-    "name": "Privacy Policy",
+    "name": "Jetschool: Privacy",
     "url": public_base ~ "/privacy",
     "description": "What JetSchool collects, how that information is used, and which services process it.",
-    "isPartOf": {"@type": "WebSite", "name": "JetSchool", "url": public_base ~ "/"},
-    "publisher": {"@type": "Organization", "name": "JetSchool", "email": "support@jetschoolusa.com"}
+    "isPartOf": {"@type": "WebSite", "name": "Jetschool", "url": public_base ~ "/"},
+    "publisher": {"@type": "Organization", "name": "Jetschool", "email": "support@jetschoolusa.com"}
 }|tojson }}</script>
 {% endblock %}
 

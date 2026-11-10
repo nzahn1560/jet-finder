@@ -7,13 +7,13 @@
     <script type="application/ld+json">{{ {
         "@context": "https://schema.org",
         "@type": "Organization",
-        "name": "JetSchool",
+        "name": "Jetschool",
         "url": public_base ~ "/",
         "logo": public_base ~ "/static/favicon-192.png"
     }|tojson }}</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}JetSchool{% endblock %}</title>
+    <title>Jetschool: {% block title %}Jet Finder{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}JetSchool helps you find an aircraft, sell one, find a broker, or request a charter.{% endblock %}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     {% if google_site_verification %}
@@ -353,6 +353,11 @@
                             </a>
                         </li>
                         <li>
+                            <a class="dropdown-item" href="{{ url_for('aircraft_for_sale') }}">
+                                <i class="fas fa-tags me-2"></i>Aircraft for sale
+                            </a>
+                        </li>
+                        <li>
                             <a class="dropdown-item" href="{{ url_for('create_listing') }}">
                                 <i class="fas fa-plus-circle me-2"></i>Create Listing
                             </a>
@@ -481,6 +486,7 @@
         {% block content %}{% endblock %}
 
         <footer class="py-4 text-center">
+            <a href="{{ url_for('aircraft_for_sale') }}" class="small me-3" style="color:#F05545;">Aircraft for sale</a>
             <a href="{{ url_for('contact') }}" class="small me-3" style="color:#F05545;">Contact</a>
             <a href="{{ url_for('privacy') }}" class="small me-3" style="color:#F05545;">Privacy</a>
             <a href="{{ url_for('terms') }}" class="small me-3" style="color:#F05545;">Terms</a>

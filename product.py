@@ -315,7 +315,7 @@ def public_listing(listing_id):
         if not line.strip().lower().startswith('listing number:')
     ).strip()
     dollar_bars = _dollar_bars(profile, row.get('price'))
-    from app import _public_base
+    from app import _public_base, _sale_model, _sale_name, _sale_place, _sale_slug
     base = _public_base()
     canonical = f"{base}/listing/{int(listing_id)}"
     place = ', '.join(part for part in ((row.get('city') or '').strip(), (row.get('state') or '').strip()) if part)
@@ -329,11 +329,11 @@ def public_listing(listing_id):
     description = f'{title} for sale' + (f' in {place}' if place else '') + '.'
     facts = []
     if price > 0:
-        facts.append(f'Listed at ${price:,.0f}')
+        facts.append(f'Listed at ${price:,.0f}.')
     if profile.get('range'):
-        facts.append(f'range {profile.get("range")} nm')
+        facts.append(f'Range {profile.get("range")} nm.')
     if facts:
-        description = f'{description} {" ".join(facts)}.'
+        description = f'{description} {" ".join(facts)}'
     description = description[:180]
     images = []
     for item in media:
@@ -352,13 +352,15 @@ def public_listing(listing_id):
     schema = {
         '@context': 'https://schema.org',
         '@type': 'Product',
-        'name': title,
+        'name': f'Jetschool: {title} for Sale',
         'url': canonical,
         'description': description,
         'image': image,
         'productID': str(listing_id),
     }
-    maker = ' '.join(str(profile.get('manufacturer') or row.get('manufacturer') or '').split())
+    maker = _sale_name(profile.get('manufacturer') or row.get('manufacturer'))
+    sale_place, sale_place_slug = _sale_place(row.get('city'), row.get('state'))
+    sale_model, sale_model_slug = _sale_model(maker, profile.get('aircraft_name') or profile.get('name'))
     if maker:
         schema['brand'] = {'@type': 'Brand', 'name': maker}
     if price > 0:
@@ -373,13 +375,19 @@ def public_listing(listing_id):
         'listing_public.html', listing=row, profile=profile, media=media,
         seller_name=seller_name or 'Seller', brokers=brokers, seller_notes=seller_notes,
         dollar_bars=dollar_bars,
-        seo_title=f'{title} for sale | JetSchool',
+        seo_title=f'{title} for Sale',
         seo_description=description,
         seo_canonical=canonical,
         seo_noindex=bool(request.args),
         seo_image=image,
         seo_place=place,
         seo_schema=schema,
+        sale_maker=maker,
+        sale_slug=_sale_slug(maker),
+        sale_model=sale_model,
+        sale_model_slug=sale_model_slug,
+        sale_place=sale_place,
+        sale_place_slug=sale_place_slug,
     )
 
 
