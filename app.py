@@ -10818,6 +10818,66 @@ def api_admin_approvals():
     })
 
 
+@app.route('/api/admin/subscriptions/<int:user_id>/revoke', methods=['POST'])
+@require_admin
+def api_admin_revoke_subscription(user_id):
+    """End this account's broker subscription. The user account stays."""
+    person = get_user_by_id(user_id)
+    if not person:
+        return jsonify({'error': 'not_found'}), 404
+    result, error = _revoke_broker_subscription(user_id)
+    if error:
+        body, status = error
+        return jsonify(body), status
+    return jsonify(result)
+
+
+def _revoke_broker_subscription(user_id):
+    """Cancel the broker charge and turn broker access off. Listings and the account stay."""
+    row = _live_broker_subscription(user_id)
+    if not row:
+        return None, ({
+            'error': 'not_found',
+            'message': 'There is no broker subscription on this account.',
+        }, 404)
+    subscription_id = row.get('stripe_subscription_id')
+    if subscription_id and _stripe_configured():
+        try:
+            stripe.Subscription.delete(subscription_id)
+        except Exception:
+            logger.exception('Could not revoke Stripe subscription %s', subscription_id)
+            return None, ({
+                'error': 'stripe_error',
+                'message': 'Stripe did not cancel the subscription. The account was not changed.',
+            }, 502)
+    if subscription_id:
+        _apply_broker_subscription_state(
+            subscription_id,
+            'canceled',
+            customer_id=row.get('stripe_customer_id'),
+        )
+    else:
+        update_user_subscription(
+            user_id,
+            row.get('subscription_type'),
+            subscription_status='canceled',
+        )
+        membership = db_module.team_membership(user_id)
+        if membership and membership.get('is_admin'):
+            db_module.set_team_subscription(membership['id'], 'inactive')
+    if row.get('id'):
+        db_module.set_subscription_cancel_request(row['id'], False)
+    people = [int(user_id)]
+    membership = db_module.team_membership(user_id)
+    if row.get('subscription_type') == 'broker_team' and membership and membership.get('is_admin'):
+        for member in db_module.list_team_members(membership['id'], status='active'):
+            if member.get('user_id'):
+                people.append(int(member['user_id']))
+    for person_id in dict.fromkeys(people):
+        _release_team_seat(person_id)
+    return {'ok': True, 'subscription_status': 'canceled'}, None
+
+
 @app.route('/api/admin/subscriptions/<int:user_id>/cancel-request/clear', methods=['POST'])
 @require_admin
 def api_admin_clear_cancel_request(user_id):
