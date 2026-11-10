@@ -42,12 +42,55 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
 
 <style>
+    .finder-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
+        gap: 1rem 1.5rem;
+        flex-wrap: wrap;
+        margin: 0 0 1rem;
+    }
+
     .finder-title {
         font-family: 'Orbitron', sans-serif;
         font-size: 1.75rem;
         font-weight: 700;
         color: #fff;
-        margin: 0 0 1rem;
+        margin: 0;
+    }
+
+    .finder-discounts {
+        max-width: 36rem;
+        background: #7f1d1d;
+        border: 1px solid #ef4444;
+        color: #fff;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 1.05rem;
+        line-height: 1.35;
+    }
+
+    .finder-discounts__label {
+        margin: 0 0 0.4rem;
+        color: #fecaca;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .finder-discounts p {
+        margin: 0 0 0.35rem;
+    }
+
+    .finder-discounts p:last-child {
+        margin-bottom: 0;
+    }
+
+    .finder-discounts strong {
+        font-family: 'Orbitron', sans-serif;
+        letter-spacing: 0.03em;
     }
 
     /* Stock Ticker Styles */
@@ -4013,7 +4056,14 @@
 {% endblock %}
 {% block content %}
 <div class="container py-4 position-relative">
-    <h1 class="finder-title">Jet Finder</h1>
+    <div class="finder-heading">
+        <h1 class="finder-title">Jet Finder</h1>
+        <aside class="finder-discounts" aria-label="Discounts through Dec. 31st">
+            <p class="finder-discounts__label">Discounts through Dec. 31st</p>
+            <p><strong>70OFF</strong> is for listings. It is 70% off and stays on that listing until the listing is deleted.</p>
+            <p><strong>100OFF</strong> is for the broker subscription. It is 100% off and lasts indefinitely.</p>
+        </aside>
+    </div>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
         <!-- Range Filter Tool (Left Column) -->
