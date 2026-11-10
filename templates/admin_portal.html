@@ -915,16 +915,27 @@ async function loadAdminBrokers() {
     if (!brokers.length) { target.innerHTML = '<div class="ap__empty">No brokers yet. A person appears here after a main account pays and adds them.</div>'; return; }
     target.innerHTML = brokers.map(function (broker) {
         const place = [broker.team_name, broker.place].filter(Boolean).join(' · ');
+        const revoke = broker.is_main
+            ? '<button class="ap__btn ap__btn--reject" data-revoke-broker="' + broker.id + '">Revoke subscription</button>'
+            : '';
         return '<div class="ap__card" data-user="' + broker.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">'
             + '<strong>' + esc(broker.name) + '</strong> ' + (broker.is_main ? '<span class="ap__badge" style="background:#22c55e22;color:#22c55e;">MAIN</span>' : '<span class="ap__badge">TEAM</span>')
             + '<br>' + esc(broker.email) + (place ? '<br>' + esc(place) : '')
             + (broker.team_name ? '<br>' + esc(broker.team_name) : '')
             + '</div><div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+            + revoke
             + '<button class="ap__btn ap__btn--approve" data-user-message="' + broker.id + '">Message</button>'
             + '<a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a>'
             + '</div></div></div>';
     }).join('');
     bindAccountMessages(target);
+    target.querySelectorAll('[data-revoke-broker]').forEach(function (btn) {
+        btn.addEventListener('click', async function (event) {
+            event.stopPropagation();
+            if (!confirm('Revoke this broker subscription? The account stays. Broker access ends.')) return;
+            if (await postAdmin('/api/admin/subscriptions/' + btn.getAttribute('data-revoke-broker') + '/revoke')) loadAdminBrokers();
+        });
+    });
     target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
         card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
     });
