@@ -1652,8 +1652,9 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(match['subscription_number'], 'sub_end_ask')
         self.assertEqual(match['subscription_status'], 'active')
         portal = self.client.get('/admin')
+        self.assertIn(b'data-revoke-subscription', portal.data)
+        self.assertIn(b'Revoke subscription', portal.data)
         self.assertIn(b'data-clear-cancel', portal.data)
-        self.assertIn(b'End it in Stripe yourself.', portal.data)
         import app as app_module
         with patch.object(app_module.stripe.Subscription, 'delete', side_effect=AssertionError('stripe cancel')):
             cleared = self.client.post(f"/api/admin/subscriptions/{person['id']}/cancel-request/clear")
@@ -1684,6 +1685,56 @@ class ProductTests(unittest.TestCase):
         plain_row = db_module.get_user_subscription(plain['id'], 'broker')
         self.assertEqual(plain_row['subscription_status'], 'active')
         self.assertIsNotNone(plain_row.get('cancel_requested_at'))
+
+    def test_admin_revoke_ends_the_broker_subscription_and_keeps_the_account(self):
+        import app as app_module
+        person = self._paid_broker('revoke-broker@example.com', 'sub_revoke_broker')
+        self._login(person['email'], 'broker-pass-1')
+        self.assertEqual(self.client.post('/api/account/broker-subscription/cancel-request').status_code, 200)
+        self.assertEqual(self.client.get('/off-market').status_code, 200)
+        self._login('admin@example.com', 'admin-pass-1')
+        deleted = []
+
+        def fake_delete(subscription_id):
+            deleted.append(subscription_id)
+            return {'id': subscription_id, 'status': 'canceled'}
+
+        with patch.dict(os.environ, {'STRIPE_SECRET_KEY': 'sk_test_revoke_broker'}), \
+             patch.object(app_module.stripe.Subscription, 'delete', side_effect=fake_delete):
+            revoked = self.client.post(f"/api/admin/subscriptions/{person['id']}/revoke")
+        self.assertEqual(revoked.status_code, 200, revoked.get_json())
+        self.assertEqual(deleted, ['sub_revoke_broker'])
+        kept = db_module.get_user_by_id(person['id'])
+        self.assertEqual(kept['email'], person['email'])
+        self.assertNotEqual(kept.get('broker_application_status'), 'approved')
+        row = db_module.get_user_subscription(person['id'], 'broker')
+        self.assertEqual(row['subscription_status'], 'canceled')
+        self.assertIsNone(row.get('cancel_requested_at'))
+        self._login(person['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        waiting = self.client.get('/api/admin/approvals').get_json()['subscription_deletes']
+        self.assertNotIn(person['id'], [item['user_id'] for item in waiting])
+
+        leader = self._paid_broker('revoke-lead@example.com', 'sub_revoke_team', kind='broker_team')
+        team_id = db_module.create_broker_team(leader['id'], 'Revoke Co', 'Dallas', 'TX', active=True)
+        member = self._signup('revoke-member@example.com', 'broker-pass-1', 'buyer')
+        self._login(member['email'], 'broker-pass-1')
+        self.assertEqual(self.client.post(f'/api/broker-teams/{team_id}/join').status_code, 200)
+        self._login(leader['email'], 'broker-pass-1')
+        allowed = self.client.post(f"/api/broker-teams/{team_id}/members/{member['id']}/allow")
+        self.assertEqual(allowed.status_code, 200, allowed.get_json())
+        self._login('admin@example.com', 'admin-pass-1')
+        with patch.dict(os.environ, {'STRIPE_SECRET_KEY': 'sk_test_revoke_broker'}), \
+             patch.object(app_module.stripe.Subscription, 'delete', side_effect=fake_delete):
+            team_revoked = self.client.post(f"/api/admin/subscriptions/{leader['id']}/revoke")
+        self.assertEqual(team_revoked.status_code, 200, team_revoked.get_json())
+        self.assertEqual(deleted[-1], 'sub_revoke_team')
+        self.assertEqual(db_module.get_broker_team(team_id)['subscription_status'], 'inactive')
+        self.assertEqual(db_module.get_user_by_id(leader['id'])['email'], leader['email'])
+        self.assertEqual(db_module.get_user_by_id(member['id'])['email'], member['email'])
+        self._login(member['email'], 'broker-pass-1')
+        self.assertEqual(self.client.get('/off-market').status_code, 403)
 
     def test_listing_fee_ignores_a_client_supplied_amount(self):
         from app import _listing_fee_cents
