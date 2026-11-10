@@ -1693,6 +1693,9 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/account/broker-subscription/cancel-request').status_code, 200)
         self.assertEqual(self.client.get('/off-market').status_code, 200)
         self._login('admin@example.com', 'admin-pass-1')
+        listed = self.client.get('/api/admin/brokers').get_json()['brokers']
+        self.assertIn(person['id'], [row['id'] for row in listed if row.get('is_main')])
+        self.assertIn(b'data-revoke-broker', self.client.get('/admin').data)
         deleted = []
 
         def fake_delete(subscription_id):
@@ -1715,6 +1718,8 @@ class ProductTests(unittest.TestCase):
         self._login('admin@example.com', 'admin-pass-1')
         waiting = self.client.get('/api/admin/approvals').get_json()['subscription_deletes']
         self.assertNotIn(person['id'], [item['user_id'] for item in waiting])
+        remaining = self.client.get('/api/admin/brokers').get_json()['brokers']
+        self.assertNotIn(person['id'], [row['id'] for row in remaining])
 
         leader = self._paid_broker('revoke-lead@example.com', 'sub_revoke_team', kind='broker_team')
         team_id = db_module.create_broker_team(leader['id'], 'Revoke Co', 'Dallas', 'TX', active=True)
