@@ -353,11 +353,6 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('aircraft_for_sale') }}">
-                                <i class="fas fa-tags me-2"></i>Aircraft for sale
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('create_listing') }}">
                                 <i class="fas fa-plus-circle me-2"></i>Create Listing
                             </a>
@@ -486,7 +481,6 @@
         {% block content %}{% endblock %}
 
         <footer class="py-4 text-center">
-            <a href="{{ url_for('aircraft_for_sale') }}" class="small me-3" style="color:#F05545;">Aircraft for sale</a>
             <a href="{{ url_for('contact') }}" class="small me-3" style="color:#F05545;">Contact</a>
             <a href="{{ url_for('privacy') }}" class="small me-3" style="color:#F05545;">Privacy</a>
             <a href="{{ url_for('terms') }}" class="small me-3" style="color:#F05545;">Terms</a>
