@@ -1,28 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Contact JetSchool{% endblock %}
+{% block title %}Contact{% endblock %}
 {% block meta_description %}Send JetSchool a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration.{% endblock %}
 {% block canonical %}{{ public_base }}/contact{% endblock %}
 {% block extra_head %}
 {% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="JetSchool">
-<meta property="og:title" content="Contact JetSchool">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: Contact">
 <meta property="og:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
 <meta property="og:url" content="{{ public_base }}/contact">
 <meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Contact JetSchool">
+<meta name="twitter:title" content="Jetschool: Contact">
 <meta name="twitter:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "ContactPage",
-    "name": "Contact JetSchool",
+    "name": "Jetschool: Contact",
     "url": public_base ~ "/contact",
     "description": "Send JetSchool a note about a listing, an account, or the information on this site.",
     "mainEntity": {
         "@type": "Organization",
-        "name": "JetSchool",
+        "name": "Jetschool",
         "url": public_base ~ "/",
         "email": "support@jetschoolusa.com",
         "contactPoint": {

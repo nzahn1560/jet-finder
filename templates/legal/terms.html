@@ -1,27 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}Terms of Service | JetSchool{% endblock %}
+{% block title %}Terms{% endblock %}
 {% block meta_description %}The terms for using JetSchool: estimates, listings, fees, and the limits on what the site provides. JetSchool is not your broker.{% endblock %}
 {% block canonical %}{{ public_base }}/terms{% endblock %}
 {% block extra_head %}
 {% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="JetSchool">
-<meta property="og:title" content="Terms of Service | JetSchool">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: Terms">
 <meta property="og:description" content="The terms for using JetSchool: estimates, listings, fees, and the limits on what the site provides.">
 <meta property="og:url" content="{{ public_base }}/terms">
 <meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Terms of Service | JetSchool">
+<meta name="twitter:title" content="Jetschool: Terms">
 <meta name="twitter:description" content="The terms for using JetSchool, including estimates, listings, and fees.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "WebPage",
-    "name": "Terms of Service",
+    "name": "Jetschool: Terms",
     "url": public_base ~ "/terms",
     "description": "The terms for using JetSchool: estimates, listings, fees, and the limits on what the site provides.",
-    "isPartOf": {"@type": "WebSite", "name": "JetSchool", "url": public_base ~ "/"},
-    "publisher": {"@type": "Organization", "name": "JetSchool", "email": "support@jetschoolusa.com"}
+    "isPartOf": {"@type": "WebSite", "name": "Jetschool", "url": public_base ~ "/"},
+    "publisher": {"@type": "Organization", "name": "Jetschool", "email": "support@jetschoolusa.com"}
 }|tojson }}</script>
 {% endblock %}
 

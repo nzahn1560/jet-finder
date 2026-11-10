@@ -1,0 +1,45 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1226 >>
+stream
+BT /F1 16 Tf 54 780 Td (JetSchool SEO changelog: Public profile) Tj ET
+BT /F1 11 Tf 54 754 Td (Date: November 10, 2026. Page: /people/<id>.) Tj ET
+BT /F1 11 Tf 54 729 Td (Technical) Tj ET
+BT /F1 11 Tf 54 714 Td (Title is the person name and JetSchool. Brokers add aircraft broker.) Tj ET
+BT /F1 11 Tf 54 699 Td (Description names the role and the saved place. It does not include email.) Tj ET
+BT /F1 11 Tf 54 684 Td (Canonical is the public profile URL. A query string is noindex, follow.) Tj ET
+BT /F1 11 Tf 54 669 Td (ProfilePage schema names the person. A broker gets the job title.) Tj ET
+BT /F1 11 Tf 54 654 Td (An account with no live listing and no brokerage is noindex.) Tj ET
+BT /F1 11 Tf 54 639 Td (The sitemap includes those public profiles and a lastmod date.) Tj ET
+BT /F1 11 Tf 54 614 Td (Text) Tj ET
+BT /F1 11 Tf 54 599 Td (A line under the profile card repeats that description.) Tj ET
+BT /F1 11 Tf 54 584 Td (The homepage now has one heading: Jet Finder.) Tj ET
+BT /F1 11 Tf 54 569 Td (Listing descriptions separate the price and the range into sentences.) Tj ET
+BT /F1 11 Tf 54 544 Td (Tracking) Tj ET
+BT /F1 11 Tf 54 529 Td (profile_view records the profile id. It does not record the name or email.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001519 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1589
+%%EOF

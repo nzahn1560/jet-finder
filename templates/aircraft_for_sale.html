@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}{{ seo_title }}{% endblock %}
+{% block meta_description %}{{ seo_description }}{% endblock %}
+{% block canonical %}{{ seo_canonical }}{% endblock %}
+{% block extra_head %}
+{% if seo_noindex %}<meta name="robots" content="noindex, follow">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Jetschool">
+<meta property="og:title" content="Jetschool: {{ seo_title }}">
+<meta property="og:description" content="{{ seo_description }}">
+<meta property="og:url" content="{{ seo_canonical }}">
+<meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Jetschool: {{ seo_title }}">
+<meta name="twitter:description" content="{{ seo_description }}">
+<script type="application/ld+json">{{ seo_schema|tojson }}</script>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 860px;">
+    <h1 class="sale-index__title">{{ heading }}</h1>
+    <p class="sale-index__lead">{{ seo_description }}</p>
+    {% if makers %}
+    <nav class="sale-index__makes" aria-label="Manufacturers for sale">
+        <a href="{{ url_for('aircraft_for_sale') }}" {% if not current_slug and not current_place and not current_model %}aria-current="page"{% endif %}>All</a>
+        {% for maker in makers %}
+        <a href="{{ url_for('aircraft_for_sale', slug=maker.slug) }}" {% if current_slug == maker.slug %}aria-current="page"{% endif %}>{{ maker.name }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+    {% if places %}
+    <nav class="sale-index__makes" aria-label="Cities with aircraft for sale">
+        {% for place in places %}
+        <a href="{{ url_for('aircraft_for_sale_in', slug=place.slug) }}" {% if current_place == place.slug %}aria-current="page"{% endif %}>{{ place.name }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+    {% if models %}
+    <nav class="sale-index__makes" aria-label="Models for sale">
+        {% for model in models %}
+        <a href="{{ url_for('aircraft_for_sale_model', slug=model.slug) }}" {% if current_model == model.slug %}aria-current="page"{% endif %}>{{ model.name }}</a>
+        {% endfor %}
+    </nav>
+    {% endif %}
+    {% if rows %}
+    <ul class="sale-index__list">
+        {% for row in rows %}
+        <li>
+            <a href="{{ url_for('product.public_listing', listing_id=row.id) }}">
+                <strong>{{ row.title }}</strong>
+                <span>{{ row.place }}{% if row.price_text %} · {{ row.price_text }}{% endif %}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="sale-index__empty">No aircraft are listed for sale yet.</p>
+    {% endif %}
+</div>
+<style>
+    .sale-index__title { color: #fff; font-family: Georgia, 'Times New Roman', serif; font-size: 2.1rem; margin: 0 0 0.4rem; }
+    .sale-index__lead { color: #d7d7d7; max-width: 40rem; }
+    .sale-index__makes { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin: 0.8rem 0 1.2rem; }
+    .sale-index__makes a { color: #F05545; }
+    .sale-index__makes a[aria-current="page"] { color: #fff; text-decoration: none; }
+    .sale-index__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; }
+    .sale-index__list a {
+        display: block; background: #161616; color: #fff; text-decoration: none;
+        border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 0.9rem 1rem;
+    }
+    .sale-index__list a:hover { border-color: #F05545; }
+    .sale-index__list strong { display: block; font-size: 1.15rem; }
+    .sale-index__list span { color: #c8c8c8; }
+    .sale-index__empty { color: #c8c8c8; }
+</style>
+<script>
+(function () {
+    window.dataLayer = window.dataLayer || [];
+    var params = { result_count: {{ rows|length }}, make: {{ (current_slug or 'all')|tojson }}, model: {{ (current_model or 'all')|tojson }}, place: {{ (current_place or 'all')|tojson }} };
+    window.dataLayer.push(Object.assign({ event: 'aircraft_for_sale_view' }, params));
+    if (typeof window.gtag === 'function') window.gtag('event', 'aircraft_for_sale_view', params);
+    document.querySelectorAll('.sale-index__list a').forEach(function (link) {
+        link.addEventListener('click', function () {
+            var id = (link.getAttribute('href') || '').split('/').pop();
+            window.dataLayer.push({ event: 'aircraft_listing_open', listing_id: id });
+            if (typeof window.gtag === 'function') window.gtag('event', 'aircraft_listing_open', { listing_id: id });
+        });
+    });
+})();
+</script>
+{% endblock %}

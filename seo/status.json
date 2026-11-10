@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-09",
+  "updated": "2026-11-10",
   "pages": [
     {
       "path": "/",
@@ -38,6 +38,9 @@
       "changelog": "seo/changelogs/2026-11-09-refunds.pdf"
     },
     {"path": "/listing/<id>", "name": "Public listing", "status": "done", "changelog": "seo/changelogs/2026-11-09-listing.pdf"},
-    {"path": "/people/<id>", "name": "Public profile", "status": "pending"}
+    {"path": "/people/<id>", "name": "Public profile", "status": "done", "changelog": "seo/changelogs/2026-11-10-people.pdf"},
+    {"path": "/aircraft-for-sale", "name": "Aircraft for sale", "status": "done", "changelog": "seo/changelogs/2026-11-10-aircraft-for-sale.pdf"},
+    {"path": "/aircraft-for-sale/in/<city>", "name": "Aircraft for sale in a city", "status": "done", "changelog": "seo/changelogs/2026-11-10-city.pdf"},
+    {"path": "/aircraft-for-sale/model/<model>", "name": "Aircraft model for sale", "status": "done", "changelog": "seo/changelogs/2026-11-10-model.pdf"}
   ]
 }
