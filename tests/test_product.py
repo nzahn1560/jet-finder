@@ -64,9 +64,9 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'<title>Jetschool: Jet Finder</title>', home.data)
         self.assertIn(b'<h1 class="finder-title">Jet Finder</h1>', home.data)
         self.assertIn(b'Discounts through Dec. 31st', home.data)
-        self.assertIn(b'70OFF', home.data)
+        self.assertNotIn(b'70OFF', home.data)
         self.assertIn(b'100OFF', home.data)
-        self.assertIn(b'is for listings', home.data)
+        self.assertIn(b'is for listings. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.', home.data)
         self.assertIn(b'is for the broker subscription', home.data)
         self.assertNotIn(b'Compare private aircraft by cost, range, and route', home.data)
         self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
@@ -115,13 +115,35 @@ class ProductTests(unittest.TestCase):
         chicago = ZoneInfo('America/Chicago')
         promo = datetime(2026, 12, 31, 23, 59, 59, tzinfo=chicago)
         after = datetime(2027, 1, 1, 0, 0, tzinfo=chicago)
-        self.assertEqual(pricing.listing_price_cents(promo), 1499)
+        self.assertEqual(pricing.listing_price_cents(promo), 0)
         self.assertEqual(pricing.listing_price_cents(after), 4999)
-        self.assertTrue(pricing.listing_price(promo)['promotional'])
-        self.assertFalse(pricing.listing_price(after)['promotional'])
-        self.assertIn('does not expire', pricing.listing_price(promo)['label'])
-        self.assertIn('No price change will come', pricing.listing_price(promo)['label'])
-        self.assertIn('1-5 business days', pricing.listing_price(promo)['label'])
+        self.assertTrue(pricing.listing_price(promo)['free'])
+        self.assertEqual(pricing.listing_price(promo)['expires_on'], '2027-12-31')
+        self.assertFalse(pricing.listing_price(after)['free'])
+        self.assertIn('free through December 31, 2026', pricing.listing_price(promo)['label'])
+        self.assertIn('expires December 31, 2027', pricing.listing_price(promo)['label'])
+        self.assertEqual(pricing.free_listing_expires_at().year, 2028)
+        self.assertEqual(pricing.free_listing_expires_at().month, 1)
+
+    def test_a_public_listing_is_free_and_expires_at_the_end_of_2027(self):
+        self._login('seller@example.com', 'seller-pass-1')
+        created = self.client.post('/api/listings', json=self._payload('Free Year Jet', 'public'))
+        self.assertEqual(created.status_code, 201, created.get_json())
+        self.assertFalse(created.get_json()['payment_required'])
+        self.assertEqual(created.get_json()['status'], 'pending')
+        listing_id = created.get_json()['id']
+        stored = db_module.get_user_listing_by_id(listing_id, active_only=False)
+        self.assertEqual(stored['payment_status'], 'free')
+        self.assertEqual(stored['expires_at'], pricing.free_listing_expires_at())
+        db_module.admin_approve_listing_any(listing_id, self.admin['id'])
+        self.assertIn(listing_id, {row['id'] for row in db_module.get_active_user_listings()})
+        self.assertEqual(self.client.get(f'/listing/{listing_id}').status_code, 200)
+        with db_module.get_session() as session:
+            session.query(db_module.UserListing).filter(db_module.UserListing.id == listing_id).update(
+                {'expires_at': datetime(2020, 1, 1)}, synchronize_session=False,
+            )
+        self.assertNotIn(listing_id, {row['id'] for row in db_module.get_active_user_listings()})
+        self.assertEqual(self.client.get(f'/listing/{listing_id}').status_code, 404)
 
     def test_login_logout_and_wrong_password(self):
         bad = self.client.post('/api/auth/login', json={'email': 'buyer@example.com', 'password': 'nope-nope'})
@@ -393,31 +415,32 @@ class ProductTests(unittest.TestCase):
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallonly'
         try:
             self._login('seller@example.com', 'seller-pass-1')
-            public = self.client.post('/api/listings', json=self._payload('Paywall Jet', 'public'))
-            self.assertEqual(public.status_code, 201, public.get_json())
-            self.assertTrue(public.get_json()['payment_required'])
-            self.assertEqual(public.get_json()['status'], 'unpaid')
-            stored = db_module.get_user_listing_by_id(public.get_json()['id'], active_only=False)
-            self.assertTrue(stored['description'].endswith(f"Listing number: {public.get_json()['id']}"))
+            with patch.object(pricing, 'listing_price_cents', return_value=1499):
+                public = self.client.post('/api/listings', json=self._payload('Paywall Jet', 'public'))
+                self.assertEqual(public.status_code, 201, public.get_json())
+                self.assertTrue(public.get_json()['payment_required'])
+                self.assertEqual(public.get_json()['status'], 'unpaid')
+                stored = db_module.get_user_listing_by_id(public.get_json()['id'], active_only=False)
+                self.assertTrue(stored['description'].endswith(f"Listing number: {public.get_json()['id']}"))
+                page = self.client.get('/create-listing')
+                token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+                blocked = self.client.post(
+                    f"/api/listings/{public.get_json()['id']}/checkout",
+                    headers={'Origin': 'http://localhost'},
+                )
+                self.assertEqual(blocked.status_code, 403, blocked.get_json())
+                pay = self.client.post(
+                    f"/api/listings/{public.get_json()['id']}/checkout",
+                    json={'amount_cents': 1},
+                    headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
+                )
+                self.assertEqual(pay.status_code, 200, pay.get_json())
+                url = pay.get_json().get('url') or ''
+                self.assertTrue(url.startswith('https://buy.stripe.com/'))
+                self.assertIn(f"listing-{public.get_json()['id']}-user-{self.seller['id']}-sn-5501", url)
+                self.assertNotIn('amount_cents=1', url)
             page = self.client.get('/create-listing')
-            token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
-            blocked = self.client.post(
-                f"/api/listings/{public.get_json()['id']}/checkout",
-                headers={'Origin': 'http://localhost'},
-            )
-            self.assertEqual(blocked.status_code, 403, blocked.get_json())
-            pay = self.client.post(
-                f"/api/listings/{public.get_json()['id']}/checkout",
-                json={'amount_cents': 1},
-                headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
-            )
-            self.assertEqual(pay.status_code, 200, pay.get_json())
-            url = pay.get_json().get('url') or ''
-            self.assertTrue(url.startswith('https://buy.stripe.com/'))
-            self.assertIn(f"listing-{public.get_json()['id']}-user-{self.seller['id']}-sn-5501", url)
-            self.assertNotIn('amount_cents=1', url)
-            page = self.client.get('/create-listing')
-            self.assertIn(b'does not expire', page.data)
+            self.assertIn(b'The listing expires December 31, 2027.', page.data)
             self.assertNotIn(b'opens checkout', page.data)
             self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
             self.assertIn(b'X-CSRF-Token', page.data)
@@ -461,27 +484,28 @@ class ProductTests(unittest.TestCase):
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallreason'
         try:
             self._login('seller@example.com', 'seller-pass-1')
-            public = self.client.post('/api/listings', json=self._payload('Reason Jet', 'public'))
-            self.assertEqual(public.status_code, 201, public.get_json())
-            import app as app_module
+            with patch.object(pricing, 'listing_price_cents', return_value=1499):
+                public = self.client.post('/api/listings', json=self._payload('Reason Jet', 'public'))
+                self.assertEqual(public.status_code, 201, public.get_json())
+                import app as app_module
 
-            def refuse(**kwargs):
-                raise app_module.stripe.error.InvalidRequestError(
-                    'Your account cannot currently make live charges.', 'mode',
-                )
+                def refuse(**kwargs):
+                    raise app_module.stripe.error.InvalidRequestError(
+                        'Your account cannot currently make live charges.', 'mode',
+                    )
 
-            page = self.client.get('/create-listing')
-            token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
-            with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
-                 patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_reason'}), \
-                 patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_reason'}), \
-                 patch.object(app_module.stripe.checkout.Session, 'create', side_effect=refuse):
-                pay = self.client.post(
-                    f"/api/listings/{public.get_json()['id']}/checkout",
-                    headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
-                )
-            self.assertEqual(pay.status_code, 200, pay.get_json())
-            self.assertTrue((pay.get_json().get('url') or '').startswith('https://buy.stripe.com/'))
+                page = self.client.get('/create-listing')
+                token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+                with patch.object(app_module.stripe.Customer, 'list', return_value=type('Page', (), {'data': []})()), \
+                     patch.object(app_module.stripe.Customer, 'create', return_value={'id': 'cus_reason'}), \
+                     patch.object(app_module.stripe.Customer, 'modify', return_value={'id': 'cus_reason'}), \
+                     patch.object(app_module.stripe.checkout.Session, 'create', side_effect=refuse):
+                    pay = self.client.post(
+                        f"/api/listings/{public.get_json()['id']}/checkout",
+                        headers={'Origin': 'http://localhost', 'X-CSRF-Token': token},
+                    )
+                self.assertEqual(pay.status_code, 200, pay.get_json())
+                self.assertTrue((pay.get_json().get('url') or '').startswith('https://buy.stripe.com/'))
         finally:
             if previous_flag is None:
                 os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
@@ -1258,7 +1282,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(sitemap.status_code, 200)
         self.assertIn(f'/listing/{public_id}'.encode(), sitemap.data)
         self.assertIn(f'/people/{self.seller["id"]}'.encode(), sitemap.data)
-        self.assertNotIn(f'/people/{self.buyer["id"]}'.encode(), sitemap.data)
+        self.assertNotIn(f'/people/{self.buyer["id"]}</loc>'.encode(), sitemap.data)
         self.assertIn(b'<lastmod>', sitemap.data)
         self.assertNotIn(f'/listing/{hidden_id}'.encode(), sitemap.data)
         self.assertNotIn(b'/off-market', sitemap.data)
@@ -2237,12 +2261,13 @@ class ProductTests(unittest.TestCase):
         os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paylink'
         try:
-            first = self.client.post('/api/listings', json=self._payload('One Customer Jet', 'public'))
-            second = self.client.post('/api/listings', json=self._payload('Second Customer Jet', 'public'))
-            first_id = first.get_json()['id']
-            second_id = second.get_json()['id']
-            pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
-            pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
+            with patch.object(pricing, 'listing_price_cents', return_value=1499):
+                first = self.client.post('/api/listings', json=self._payload('One Customer Jet', 'public'))
+                second = self.client.post('/api/listings', json=self._payload('Second Customer Jet', 'public'))
+                first_id = first.get_json()['id']
+                second_id = second.get_json()['id']
+                pay1 = self.client.post(f'/api/listings/{first_id}/checkout')
+                pay2 = self.client.post(f'/api/listings/{second_id}/checkout')
             self.assertEqual(pay1.status_code, 200, pay1.get_json())
             self.assertEqual(pay2.status_code, 200, pay2.get_json())
             self.assertIn(f'listing-{first_id}-user-{person["id"]}', pay1.get_json().get('url') or '')
