@@ -66,7 +66,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Discounts through Dec. 31st', home.data)
         self.assertNotIn(b'70OFF', home.data)
         self.assertIn(b'100OFF', home.data)
-        self.assertIn(b'is for listings. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.', home.data)
+        self.assertIn(b'is for listings. Enter it at checkout. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.', home.data)
         self.assertIn(b'is for the broker subscription', home.data)
         self.assertNotIn(b'Compare private aircraft by cost, range, and route', home.data)
         self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
@@ -115,23 +115,47 @@ class ProductTests(unittest.TestCase):
         chicago = ZoneInfo('America/Chicago')
         promo = datetime(2026, 12, 31, 23, 59, 59, tzinfo=chicago)
         after = datetime(2027, 1, 1, 0, 0, tzinfo=chicago)
-        self.assertEqual(pricing.listing_price_cents(promo), 0)
+        self.assertEqual(pricing.listing_price_cents(promo), 4999)
         self.assertEqual(pricing.listing_price_cents(after), 4999)
-        self.assertTrue(pricing.listing_price(promo)['free'])
+        self.assertFalse(pricing.listing_price(promo)['free'])
+        self.assertEqual(pricing.listing_price(promo)['amount_dollars'], 49.99)
+        self.assertEqual(pricing.listing_price(promo)['promo_code'], '100OFF')
         self.assertEqual(pricing.listing_price(promo)['expires_on'], '2027-12-31')
-        self.assertFalse(pricing.listing_price(after)['free'])
-        self.assertIn('free through December 31, 2026', pricing.listing_price(promo)['label'])
+        self.assertIsNone(pricing.listing_price(after)['promo_code'])
+        self.assertIn('Enter code 100OFF at checkout', pricing.listing_price(promo)['label'])
         self.assertIn('expires December 31, 2027', pricing.listing_price(promo)['label'])
+        self.assertNotIn('100OFF', pricing.listing_price(after)['label'])
         self.assertEqual(pricing.free_listing_expires_at().year, 2028)
         self.assertEqual(pricing.free_listing_expires_at().month, 1)
 
-    def test_a_public_listing_is_free_and_expires_at_the_end_of_2027(self):
+    def test_a_public_listing_is_free_only_after_the_promo_checkout(self):
+        import app as app_module
         self._login('seller@example.com', 'seller-pass-1')
-        created = self.client.post('/api/listings', json=self._payload('Free Year Jet', 'public'))
+        created = self.client.post('/api/listings', json=self._payload('Promo Jet', 'public'))
         self.assertEqual(created.status_code, 201, created.get_json())
         self.assertFalse(created.get_json()['payment_required'])
-        self.assertEqual(created.get_json()['status'], 'pending')
         listing_id = created.get_json()['id']
+        stored = db_module.get_user_listing_by_id(listing_id, active_only=False)
+        self.assertNotEqual(stored['payment_status'], 'free')
+        self.assertIsNone(stored.get('expires_at'))
+        full_price = {
+            'amount_total': 4999,
+            'amount_subtotal': 4999,
+            'total_details': {'amount_discount': 0},
+        }
+        self.assertFalse(app_module._grant_free_listing_if_promo(listing_id, full_price))
+        stored = db_module.get_user_listing_by_id(listing_id, active_only=False)
+        self.assertNotEqual(stored['payment_status'], 'free')
+        self.assertFalse(app_module._grant_free_listing_if_promo(listing_id, {
+            'amount_total': 0, 'total_details': {'amount_discount': 0},
+        }))
+        comped = {
+            'amount_total': 0,
+            'amount_subtotal': 4999,
+            'total_details': {'amount_discount': 4999},
+            'discounts': [{'promotion_code': 'promo_100off'}],
+        }
+        self.assertTrue(app_module._grant_free_listing_if_promo(listing_id, comped))
         stored = db_module.get_user_listing_by_id(listing_id, active_only=False)
         self.assertEqual(stored['payment_status'], 'free')
         self.assertEqual(stored['expires_at'], pricing.free_listing_expires_at())

@@ -590,7 +590,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">Listing is free through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.</p>
+                        <p id="listing-next-step" class="text-white mb-3">The listing fee is $49.99 per month. Enter code 100OFF at checkout for a free listing through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -637,7 +637,7 @@
             } else {
                 next.textContent = off
                     ? 'Off-market listings go to an admin for approval. There is no listing fee.'
-                    : 'Listing is free through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.';
+                    : 'The listing fee is $49.99 per month. Enter code 100OFF at checkout for a free listing through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.';
             }
         }
         const submitLink = document.getElementById('listing-submit');
@@ -651,14 +651,9 @@
         const box = document.getElementById('listing-price-box');
         const note = document.getElementById('listing-price-note');
         if (!box || !price) return;
-        const current = price.free ? 'Free' : '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
-        const regular = '$' + Number(price.regular_dollars).toFixed(2);
-        box.innerHTML = price.free
-            ? '<strong style="font-size:2rem;">Free</strong>'
-            : (price.promotional
-                ? '<span style="text-decoration:line-through;color:#888;font-size:1.2rem;">' + regular + '</span> <strong style="font-size:2rem;margin-left:0.5rem;">' + current + '</strong>'
-                : '<strong style="font-size:2rem;">' + current + '</strong>');
-        if (note) note.textContent = price.free ? 'The listing expires December 31, 2027.' : '';
+        const current = '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
+        box.innerHTML = '<strong style="font-size:2rem;">' + current + '</strong>';
+        if (note) note.textContent = price.note || '';
         const next = document.getElementById('listing-next-step');
         const picked = document.querySelector('[name="market"]:checked');
         const editingNow = !!new URLSearchParams(window.location.search).get('edit');

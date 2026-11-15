@@ -4060,7 +4060,7 @@
         <h1 class="finder-title">Jet Finder</h1>
         <aside class="finder-discounts" aria-label="Discounts through Dec. 31st">
             <p class="finder-discounts__label">Discounts through Dec. 31st</p>
-            <p><strong>100OFF</strong> is for listings. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.</p>
+            <p><strong>100OFF</strong> is for listings. Enter it at checkout. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.</p>
             <p><strong>100OFF</strong> is for the broker subscription. It is 100% off and lasts indefinitely.</p>
         </aside>
     </div>
@@ -4724,12 +4724,12 @@
                             <script>
                             fetch('/api/pricing/listing').then(function (response) { return response.json(); }).then(function (price) {
                                 if (!price || price.amount_dollars == null) return;
-                                window.LISTING_IS_FREE = !!price.free;
-                                const amount = price.free ? 'Free until Dec. 31, 2027' : '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
+                                window.LISTING_IS_FREE = false;
+                                const amount = '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
                                 const label = document.getElementById('home-listing-price-amount');
                                 const submit = document.getElementById('home-listing-submit-label');
                                 if (label) label.textContent = amount;
-                                if (submit) submit.textContent = price.free ? 'Submit listing' : 'Submit listing — ' + amount;
+                                if (submit) submit.textContent = 'Submit listing — ' + amount;
                             }).catch(function () {});
                             </script>
                         </div>

@@ -1773,7 +1773,9 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, s
             )
             if same_subscription or not subscription_id:
                 return lid
-        updates: dict = {'payment_status': 'paid'}
+        updates: dict = {}
+        if row.payment_status != 'free':
+            updates['payment_status'] = 'paid'
         if payment_intent_id:
             updates['stripe_payment_intent_id'] = str(payment_intent_id)[:255]
         if session_id:
@@ -1786,7 +1788,8 @@ def mark_listing_fee_paid(listing_id, payment_intent_id=None, session_id=None, s
             updates['status'] = 'pending'
         elif row.status == 'suspended' and row.payment_status == 'canceled':
             updates['status'] = 'pending'
-        s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
+        if updates:
+            s.query(UserListing).filter(UserListing.id == lid).update(updates, synchronize_session=False)
         return lid
 
 
