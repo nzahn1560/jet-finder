@@ -8221,8 +8221,6 @@ def _create_listing_for_user(user, data):
             details=data,
         )
         _store_listing_number(listing_id, data.get('description') or '')
-        if not needs_payment and not off_market and pricing_module.listing_price_cents() == 0:
-            db_module.set_free_listing_term(listing_id, pricing_module.free_listing_expires_at())
         if not needs_payment:
             _notify_admins_new_listing(
                 listing_id, title, data.get('email') or user.get('email'),
@@ -8631,12 +8629,9 @@ def _payment_required() -> bool:
 def _listing_needs_checkout(market) -> bool:
     """The monthly fee applies to public listings. Off-market sale and wanted listings are free.
 
-    A public listing is also free through December 31, 2026. Production uses the
-    public listing Payment Link once that free window ends.
+    A public listing opens Stripe checkout. Code 100OFF is entered there.
     """
     if sections_module.normalize_market(market) == 'broker_only':
-        return False
-    if pricing_module.listing_price_cents() == 0:
         return False
     if db_module.is_production():
         return True
@@ -8931,6 +8926,7 @@ def api_listing_confirm_payment(listing_id: int):
     was_waiting = row.get('status') in ('unpaid', 'draft')
     if not db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id):
         return jsonify({'error': 'not_confirmed', 'message': 'Payment was not confirmed. The listing stays unpaid.'}), 400
+    _grant_free_listing_if_promo(listing_id, sess)
     db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
     amount, interval, period = _subscription_price_fields(subscription if isinstance(subscription, dict) else {})
     db_module.save_listing_subscription(
@@ -9193,6 +9189,46 @@ def _checkout_collected(sess) -> bool:
     return status in ('active', 'trialing')
 
 
+def _session_cents(sess, key):
+    try:
+        value = _stripe_field(sess, key)
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _listing_checkout_comped(sess) -> bool:
+    """True when a promotion code took this listing checkout to zero."""
+    total = _session_cents(sess, 'amount_total')
+    details = _stripe_field(sess, 'total_details') or {}
+    try:
+        discount = int(_stripe_field(details, 'amount_discount') or 0)
+    except (TypeError, ValueError):
+        discount = 0
+    if total == 0 and discount > 0:
+        return True
+    discounts = _stripe_field(sess, 'discounts') or []
+    if total == 0 and discounts:
+        return True
+    subscription = _stripe_field(sess, 'subscription')
+    if isinstance(subscription, dict):
+        discount_obj = subscription.get('discount') or {}
+        coupon = discount_obj.get('coupon') if isinstance(discount_obj, dict) else None
+        percent = coupon.get('percent_off') if isinstance(coupon, dict) else None
+        if percent is not None and float(percent) >= 100 and total in (0, None):
+            return True
+    return False
+
+
+def _grant_free_listing_if_promo(listing_id, sess):
+    """A finished checkout is free only when the buyer used a promotion code."""
+    if not listing_id or not sess or not _listing_checkout_comped(sess):
+        return False
+    if not pricing_module.listing_promo_open():
+        return False
+    return db_module.set_free_listing_term(listing_id, pricing_module.free_listing_expires_at())
+
+
 def _payment_amount(sess):
     """Dollars Stripe collected, in cents. A coupon or a blank amount does not match."""
     for key in ('amount_total', 'amount_subtotal'):
@@ -9404,6 +9440,7 @@ def _record_listing_checkout(sess):
     customer_id = _stripe_ref(_stripe_field(sess, 'customer'))
     listing_id = db_module.mark_listing_paid_by_session(session_id, intent_id, subscription_id, customer_id)
     if listing_id:
+        _grant_free_listing_if_promo(listing_id, sess)
         owner = db_module.get_listing_with_owner(listing_id) or {}
         db_module.set_user_stripe_customer(owner.get('user_id'), customer_id)
         return listing_id
@@ -9419,6 +9456,7 @@ def _record_listing_checkout(sess):
         return None
     paid = db_module.mark_listing_fee_paid(listing_id, intent_id, session_id, subscription_id, customer_id)
     if paid:
+        _grant_free_listing_if_promo(listing_id, sess)
         db_module.set_user_stripe_customer(row.get('user_id'), customer_id)
         amount, interval, period = _subscription_price_fields(subscription if isinstance(subscription, dict) else {})
         db_module.save_listing_subscription(
