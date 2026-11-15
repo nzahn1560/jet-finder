@@ -218,6 +218,8 @@ class UserListing(Base):
     pending_changes = Column(Text)
     # Hidden from the public site while the monthly fee keeps billing.
     paused = Column(Boolean, default=False, nullable=False)
+    # A free listing comes off the public site after this time. A paid subscription leaves this empty.
+    expires_at = Column(DateTime)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -1095,6 +1097,7 @@ def _upgrade_billing_columns():
         ('listing_subscriptions', 'match_class', 'VARCHAR(40)'),
         ('listing_subscriptions', 'checkout_url', 'TEXT'),
         ('user_listings', 'paused', paused),
+        ('user_listings', 'expires_at', 'TIMESTAMP'),
     ]
     with engine.connect() as conn:
         for table, col, typ in specs:
@@ -1627,6 +1630,23 @@ def _listing_not_paused():
     return or_(UserListing.paused.is_(None), UserListing.paused.is_(False))
 
 
+def _listing_not_expired():
+    """A free listing stays public through its expiration, then comes off the site."""
+    from sqlalchemy import or_
+    return or_(UserListing.expires_at.is_(None), UserListing.expires_at >= datetime.utcnow())
+
+
+def set_free_listing_term(listing_id, expires_at):
+    """Record a free listing. It stays up through expires_at and does not bill Stripe."""
+    with get_session() as s:
+        n = s.query(UserListing).filter(UserListing.id == int(listing_id)).update({
+            'payment_status': 'free',
+            'expires_at': expires_at,
+            'pricing_plan': 'free',
+        }, synchronize_session=False)
+        return n > 0
+
+
 def _stored_market(value) -> str:
     raw = str(value or '').strip().lower().replace('-', '_')
     if raw in ('off_market', 'broker_only'):
@@ -1670,7 +1690,7 @@ def get_active_user_listings():
     with get_session() as s:
         rows = (
             s.query(UserListing)
-            .filter(UserListing.status == 'active', _public_market_clause(), _listing_not_paused())
+            .filter(UserListing.status == 'active', _public_market_clause(), _listing_not_paused(), _listing_not_expired())
             .order_by(UserListing.created_at.desc())
             .all()
         )
@@ -2445,7 +2465,7 @@ def billing_problem_rows():
                 UserListing.status == 'active',
                 _public_market_clause(),
                 _listing_not_paused(),
-                UserListing.payment_status.notin_(('paid', 'past_due')),
+                UserListing.payment_status.notin_(('paid', 'past_due', 'free')),
             )
             .limit(100)
             .all()
@@ -2677,7 +2697,7 @@ def get_user_listing_by_id(listing_id, active_only=True):
     with get_session() as s:
         q = s.query(UserListing).filter(UserListing.id == listing_id)
         if active_only:
-            q = q.filter(UserListing.status == 'active')
+            q = q.filter(UserListing.status == 'active', _listing_not_expired())
         row = q.first()
         return row.to_dict() if row else None
 
@@ -2692,7 +2712,7 @@ def delete_user_listing_soft(listing_id):
 def search_user_listings(search_query=None, category=None, min_price=None, max_price=None, min_year=None, max_year=None, location=None):
     """Return list of active listing dicts matching filters."""
     with get_session() as s:
-        q = s.query(UserListing).filter(UserListing.status == 'active', _public_market_clause(), _listing_not_paused())
+        q = s.query(UserListing).filter(UserListing.status == 'active', _public_market_clause(), _listing_not_paused(), _listing_not_expired())
         # Simple filters (expand as needed)
         if min_price is not None:
             q = q.filter(UserListing.price >= min_price)

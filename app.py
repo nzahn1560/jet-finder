@@ -8221,6 +8221,8 @@ def _create_listing_for_user(user, data):
             details=data,
         )
         _store_listing_number(listing_id, data.get('description') or '')
+        if not needs_payment and not off_market and pricing_module.listing_price_cents() == 0:
+            db_module.set_free_listing_term(listing_id, pricing_module.free_listing_expires_at())
         if not needs_payment:
             _notify_admins_new_listing(
                 listing_id, title, data.get('email') or user.get('email'),
@@ -8629,9 +8631,12 @@ def _payment_required() -> bool:
 def _listing_needs_checkout(market) -> bool:
     """The monthly fee applies to public listings. Off-market sale and wanted listings are free.
 
-    Production always uses the public listing Payment Link. A local test can turn that off.
+    A public listing is also free through December 31, 2026. Production uses the
+    public listing Payment Link once that free window ends.
     """
     if sections_module.normalize_market(market) == 'broker_only':
+        return False
+    if pricing_module.listing_price_cents() == 0:
         return False
     if db_module.is_production():
         return True
