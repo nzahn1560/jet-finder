@@ -353,13 +353,8 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('aircraft_catalog') }}">
-                                <i class="fas fa-th-large me-2"></i>Browse Aircraft
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('charter_search') }}">
-                                <i class="fas fa-plane-departure me-2"></i>Charter Finder
+                                <i class="fas fa-plane-departure me-2"></i>Charter Tool
                             </a>
                         </li>
                         <li>
@@ -369,7 +364,7 @@
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('contact') }}">
-                                <i class="fas fa-phone me-2"></i>Free Advising Call
+                                <i class="fas fa-phone me-2"></i>Free Advisory Session
                             </a>
                         </li>
                         {% if current_user and current_user.is_admin %}
@@ -436,7 +431,7 @@
                 <div class="d-flex gap-2">
                     <a href="{{ url_for('contact') }}" class="login-btn">
                         <i class="fas fa-phone"></i>
-                        <span>Free Advising</span>
+                        <span>Free Advisory</span>
                     </a>
                 </div>
                 {% endif %}

@@ -63,9 +63,10 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(home.status_code, 200)
         self.assertIn(b'<title>Jetschool: Jet Finder</title>', home.data)
         self.assertIn(b'Find the Right Aircraft. Backed by Data.', home.data)
-        self.assertIn(b'Find My Aircraft to Buy', home.data)
-        self.assertIn(b'Find My Aircraft to Charter', home.data)
-        self.assertIn(b'Browse All Aircraft', home.data)
+        self.assertIn(b'Inquire to Buy', home.data)
+        self.assertIn(b'Inquire to Charter', home.data)
+        self.assertIn(b'Free Advisory Session', home.data)
+        self.assertNotIn(b'Browse All Aircraft', home.data)
         self.assertNotIn(b'>Create Listing<', home.data)
         self.assertNotIn(b'Broker Map', home.data)
         self.assertNotIn(b'>Register<', home.data)
@@ -412,7 +413,7 @@ class ProductTests(unittest.TestCase):
         for path in ('/charter', '/charter-search'):
             page = self.client.get(path)
             self.assertEqual(page.status_code, 200, path)
-            self.assertIn(b'Charter Finder', page.data)
+            self.assertIn(b'Charter Tool', page.data)
             self.assertNotIn(b'Coming soon', page.data)
         for path in ('/mechanics', '/charter/fleet'):
             page = self.client.get(path)

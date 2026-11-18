@@ -1,46 +1,92 @@
 {% extends "base.html" %}
-{% block title %}Charter Finder{% endblock %}
+{% block title %}Charter Tool{% endblock %}
 {% block meta_description %}Compare aircraft for a charter mission using range, passengers, runway data, fuel stops, and spreadsheet charter rates.{% endblock %}
 {% block canonical %}{{ public_base }}/charter{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+    .charter-panel { background:#111; border:1px solid #333; border-radius:16px; padding:1.5rem; margin-bottom:1.5rem; }
+    .charter-panel .form-label { color:#e8e8e8; margin-bottom:0.35rem; }
+    .airport-field { position:relative; }
+    .airport-menu { position:absolute; z-index:20; left:0; right:0; top:100%; background:#1a1a1a; border:1px solid #444; border-radius:8px; max-height:240px; overflow:auto; margin-top:4px; }
+    .airport-menu button { display:block; width:100%; text-align:left; background:transparent; color:#fff; border:0; padding:0.55rem 0.75rem; }
+    .airport-menu button:hover { background:#2a2a2a; }
+    #charter-map { height:420px; background:#111; border-radius:12px; margin:1.25rem 0 1.5rem; border:1px solid #333; }
+    .charter-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1.25rem; }
+    .aircraft-card { background:#141414; border:1px solid #333; border-radius:14px; padding:0.9rem; display:flex; flex-direction:column; }
+    .aircraft-card h2 { font-size:1.15rem; margin:0 0 0.6rem; }
+    .aircraft-price { background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0 10px; }
+    .aircraft-price .amount { font-size:1.85rem; font-weight:900; letter-spacing:0.3px; color:#F05545; }
+    .aircraft-price .caption { font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8; }
+    .stat-box { background:#2a2a2a; color:#fff; border-radius:8px; margin:0.22rem 0; padding:0.28rem 0.55rem; display:flex; align-items:baseline; justify-content:space-between; gap:0.5rem; }
+    .stat-box__label { font-size:0.68rem; letter-spacing:0.06em; text-transform:uppercase; color:#c8c8c8; }
+    .stat-box.is-scored .stat-box__label, .stat-box.is-scored .stat-box__value { color:#fff; }
+    .stat-box__value { font-size:1.15rem; font-weight:800; line-height:1.1; color:#F05545; }
+    .aircraft-card .listing-actions { display:grid; grid-template-columns:1fr; gap:8px; padding:8px 0 0; border-top:1px solid #404040; }
+    .aircraft-card .listing-actions .btn { width:100%; height:64px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1px solid #F05545; border-radius:8px; background:#1a1a1a; color:#fff; font-size:0.78rem; font-weight:700; }
+    .aircraft-card .listing-actions .btn:hover { background:#F05545; color:#fff; }
+</style>
 {% endblock %}
 {% block content %}
 <div class="container py-4">
     <p class="text-uppercase mb-1" style="color:#F05545;">Free charter planning</p>
-    <h1>Charter Finder</h1>
-    <p style="max-width:46rem;color:#d0d0d0;">Enter a mission. Jetschool compares aircraft models already in the database. Results are estimates. Jetschool arranges charters through authorized operators and is not itself the operator.</p>
-    <form id="charter-mission" class="row g-2 mb-3">
-        <div class="col-md-3"><input class="form-control bg-dark text-white border-secondary" name="departure" placeholder="Departure airport" required value="{{ request.args.get('departure', '') }}"></div>
-        <div class="col-md-3"><input class="form-control bg-dark text-white border-secondary" name="arrival" placeholder="Destination airport" required value="{{ request.args.get('arrival', '') }}"></div>
-        <div class="col-md-2"><input class="form-control bg-dark text-white border-secondary" name="departure_date" type="date"></div>
-        <div class="col-md-2"><input class="form-control bg-dark text-white border-secondary" name="departure_time" type="time"></div>
-        <div class="col-6 col-md-1"><input class="form-control bg-dark text-white border-secondary" name="passengers" type="number" min="1" value="1"></div>
-        <div class="col-6 col-md-1"><button class="btn btn-danger w-100" type="submit">Compare</button></div>
-        <div class="col-md-4">
-            <select class="form-select bg-dark text-white border-secondary" name="trip">
-                <option value="one_way">One-way</option>
-                <option value="round_trip">Round-trip</option>
-            </select>
-        </div>
-        <div class="col-md-4"><input class="form-control bg-dark text-white border-secondary" name="return_date" type="date" placeholder="Return date"></div>
-        <div class="col-md-4">
-            <select id="charter-sort" class="form-select bg-dark text-white border-secondary">
-                <option value="stops">Fuel stops</option>
-                <option value="price">Estimated price</option>
-                <option value="hours">Flight duration</option>
-                <option value="speed">Cruise speed</option>
-                <option value="seats">Passengers</option>
-            </select>
+    <h1>Charter Tool</h1>
+    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Every aircraft model that can fly the mission in two fuel stops or fewer is listed below in the same card format as Jet Finder. Estimates use the spreadsheet charter rate. Jetschool arranges charters through authorized operators and is not itself the operator.</p>
+    <form id="charter-mission" class="charter-panel">
+        <div class="row g-3">
+            <div class="col-md-6 airport-field">
+                <label class="form-label" for="departure-search">Departure airport</label>
+                <input class="form-control bg-dark text-white border-secondary" id="departure-search" name="departure" placeholder="City, airport, or code" required autocomplete="off" value="{{ request.args.get('departure', '') }}">
+                <div class="airport-menu d-none" id="departure-menu"></div>
+            </div>
+            <div class="col-md-6 airport-field">
+                <label class="form-label" for="arrival-search">Destination airport</label>
+                <input class="form-control bg-dark text-white border-secondary" id="arrival-search" name="arrival" placeholder="City, airport, or code" required autocomplete="off" value="{{ request.args.get('arrival', '') }}">
+                <div class="airport-menu d-none" id="arrival-menu"></div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="departure-date">Departure date</label>
+                <input class="form-control bg-dark text-white border-secondary" id="departure-date" name="departure_date" type="date">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="departure-time">Departure time</label>
+                <input class="form-control bg-dark text-white border-secondary" id="departure-time" name="departure_time" type="time">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label" for="passenger-count">Passengers</label>
+                <input class="form-control bg-dark text-white border-secondary" id="passenger-count" name="passengers" type="number" min="1" value="1">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="trip-type">Trip</label>
+                <select class="form-select bg-dark text-white border-secondary" id="trip-type" name="trip">
+                    <option value="one_way">One-way</option>
+                    <option value="round_trip">Round-trip</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="return-date">Return date</label>
+                <input class="form-control bg-dark text-white border-secondary" id="return-date" name="return_date" type="date">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="charter-sort">Sort results</label>
+                <select id="charter-sort" class="form-select bg-dark text-white border-secondary">
+                    <option value="stops">Fuel stops</option>
+                    <option value="price">Estimated price</option>
+                    <option value="hours">Flight duration</option>
+                    <option value="speed">Cruise speed</option>
+                    <option value="seats">Passengers</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <button class="btn btn-danger px-4" type="submit">Search aircraft</button>
+            </div>
         </div>
     </form>
-    <p id="charter-notice" style="color:#ccc;"></p>
-    <div class="row g-3">
-        <div class="col-lg-7"><div id="charter-results"></div></div>
-        <div class="col-lg-5"><div id="charter-map" style="height:420px;background:#111;border-radius:12px;"></div></div>
-    </div>
-    <form id="charter-inquiry" class="mt-4 p-3" hidden style="background:#141414;border:1px solid #333;border-radius:12px;">
-        <h2>Inquire for Charter</h2>
+    <p id="charter-notice" class="mb-3" style="color:#ccc;"></p>
+    <div id="charter-map"></div>
+    <div class="charter-grid" id="charter-results"></div>
+    <form id="charter-inquiry" class="mt-4 p-4" hidden style="background:#141414;border:1px solid #333;border-radius:12px;max-width:40rem;">
+        <h2 class="h4">Inquire to Charter</h2>
         <input type="hidden" name="inquiry_type" value="charter">
         <input type="hidden" name="aircraft_name">
         <input type="hidden" name="aircraft_id">
@@ -80,12 +126,64 @@
     let line;
     let markers = [];
     let latest = null;
+    const chosen = {departure: '', arrival: ''};
+
+    function bindAirport(inputId, menuId, key) {
+        const input = document.getElementById(inputId);
+        const menu = document.getElementById(menuId);
+        let timer;
+        input.addEventListener('input', function () {
+            chosen[key] = '';
+            clearTimeout(timer);
+            const query = input.value.trim();
+            if (query.length < 2) { menu.classList.add('d-none'); menu.innerHTML = ''; return; }
+            timer = setTimeout(function () {
+                fetch('/api/airports?q=' + encodeURIComponent(query))
+                    .then(function (response) { return response.json(); })
+                    .then(function (airports) {
+                        menu.innerHTML = '';
+                        (Array.isArray(airports) ? airports : []).forEach(function (airport) {
+                            const code = airport.iata || airport.icao || '';
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.textContent = code + ' — ' + (airport.name || '') + (airport.city ? ', ' + airport.city : '');
+                            button.addEventListener('click', function () {
+                                chosen[key] = code;
+                                input.value = button.textContent;
+                                menu.classList.add('d-none');
+                            });
+                            menu.appendChild(button);
+                        });
+                        menu.classList.toggle('d-none', !menu.children.length);
+                    });
+            }, 180);
+        });
+        document.addEventListener('click', function (event) {
+            if (!input.parentElement.contains(event.target)) menu.classList.add('d-none');
+        });
+    }
+    bindAirport('departure-search', 'departure-menu', 'departure');
+    bindAirport('arrival-search', 'arrival-menu', 'arrival');
+
     function money(value) { return value ? ('$' + Number(value).toLocaleString()) : 'Rate unavailable'; }
     function hours(value) {
         if (!value) return 'Unavailable';
         const whole = Math.floor(value);
         const minutes = Math.round((value - whole) * 60);
-        return whole + ' hours ' + minutes + ' minutes';
+        return whole + 'h ' + minutes + 'm';
+    }
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+        });
+    }
+    function barColor(score) {
+        const amount = Math.max(0, Math.min(100, Number(score) || 0)) / 100;
+        return 'rgb(' + Math.round(240 - 200 * amount) + ',' + Math.round(69 + 111 * amount) + ',' + Math.round(69 + amount) + ')';
+    }
+    function specBar(label, value, score) {
+        const scored = score != null;
+        return '<div class="stat-box' + (scored ? ' is-scored' : '') + '"' + (scored ? ' style="background:' + barColor(score) + '"' : '') + '><div class="stat-box__label">' + esc(label) + '</div><div class="stat-box__value">' + esc(value) + '</div></div>';
     }
     function draw(card) {
         markers.forEach(function (marker) { map.removeLayer(marker); });
@@ -116,30 +214,40 @@
             results.innerHTML = '<p>No aircraft can be planned for this mission with two or fewer fuel stops and the recorded runway lengths.</p>';
             return;
         }
+        const maxSeats = Math.max.apply(null, cards.map(function (card) { return card.passengers || 0; })) || 1;
+        const maxSpeed = Math.max.apply(null, cards.map(function (card) { return card.speed_kts || 0; })) || 1;
         cards.forEach(function (card) {
             const article = document.createElement('article');
-            article.className = 'p-3 mb-3';
-            article.style.cssText = 'background:#141414;border:1px solid #333;border-radius:14px;';
-            article.innerHTML = '<h2 class="h4">' + card.name + '</h2>'
-                + '<p>' + card.stop_label + ' · ' + card.runway_status + '</p>'
-                + '<p>Estimated charter cost: ' + money(card.estimated_total) + '</p>'
-                + '<p>Flight time: ' + hours(card.flight_hours) + ' · Passengers: ' + card.passengers + ' · ' + card.speed_kts + ' kt</p>'
-                + '<p style="color:#bbb;">' + card.price_note + ' ' + card.fuel_status + '.</p>'
-                + '<button class="btn btn-outline-light me-2" type="button">Show route</button>'
-                + '<button class="btn btn-danger" type="button">Inquire for Charter</button>';
-            article.querySelector('.btn-outline-light').addEventListener('click', function () { draw(card); });
-            article.querySelector('.btn-danger').addEventListener('click', function () { openInquiry(card); });
+            article.className = 'aircraft-card';
+            const stopScore = card.fuel_stops === 0 ? 100 : (card.fuel_stops === 1 ? 55 : 25);
+            article.innerHTML = '<h2>' + esc(card.name) + '</h2>'
+                + '<div class="aircraft-price"><div class="caption">Estimated charter cost</div><div class="amount">' + esc(money(card.estimated_total)) + '</div></div>'
+                + specBar('Fuel stops', card.stop_label, stopScore)
+                + specBar('Passengers', card.passengers, Math.round((card.passengers / maxSeats) * 100))
+                + specBar('Cruise speed', card.speed_kts + ' kt', Math.round((card.speed_kts / maxSpeed) * 100))
+                + specBar('Flight time', hours(card.flight_hours), null)
+                + '<p style="color:#bbb;font-size:0.85rem;margin:0.6rem 0 0;">' + esc(card.runway_status) + '. ' + esc(card.fuel_status) + '. ' + esc(card.price_note) + '</p>'
+                + '<div class="listing-actions"><button class="btn" type="button"><i class="fas fa-paper-plane"></i><span>Inquire to Charter</span></button></div>';
+            article.querySelector('button').addEventListener('click', function () { openInquiry(card); });
+            article.addEventListener('click', function (event) {
+                if (event.target.closest('button')) return;
+                draw(card);
+            });
             results.appendChild(article);
         });
         draw(cards[0]);
+        notice.textContent = latest.notice + ' Great-circle route about ' + Math.round(latest.distance_nm) + ' nm. Showing all ' + cards.length + ' aircraft that fit this mission.';
+    }
+    function airportValue(key, inputId) {
+        return chosen[key] || document.getElementById(inputId).value.trim();
     }
     function openInquiry(card) {
         const mission = new FormData(form);
         inquiry.hidden = false;
         inquiry.aircraft_name.value = card.name;
         inquiry.aircraft_id.value = card.id || '';
-        inquiry.departure_airport.value = mission.get('departure');
-        inquiry.arrival_airport.value = mission.get('arrival');
+        inquiry.departure_airport.value = airportValue('departure', 'departure-search');
+        inquiry.arrival_airport.value = airportValue('arrival', 'arrival-search');
         inquiry.departure_date.value = mission.get('departure_date') || '';
         inquiry.departure_time.value = mission.get('departure_time') || '';
         inquiry.return_date.value = mission.get('return_date') || '';
@@ -153,15 +261,17 @@
     form.addEventListener('submit', function (event) {
         event.preventDefault();
         notice.textContent = 'Comparing aircraft…';
+        const payload = Object.fromEntries(new FormData(form).entries());
+        payload.departure = airportValue('departure', 'departure-search');
+        payload.arrival = airportValue('arrival', 'arrival-search');
         fetch('/api/charter/plan', {
             method: 'POST', credentials: 'same-origin',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+            body: JSON.stringify(payload),
         }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
           .then(function (result) {
-              if (!result.ok) { notice.textContent = result.body.error || 'That route could not be planned.'; return; }
+              if (!result.ok) { notice.textContent = result.body.error || 'That route could not be planned.'; results.innerHTML = ''; return; }
               latest = result.body;
-              notice.textContent = result.body.notice + ' Great-circle route about ' + Math.round(result.body.distance_nm) + ' nm.';
               paint();
           });
     });
