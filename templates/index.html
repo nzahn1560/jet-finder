@@ -4057,12 +4057,15 @@
 {% block content %}
 <div class="container py-4 position-relative">
     <div class="finder-heading">
-        <h1 class="finder-title">Jet Finder</h1>
-        <aside class="finder-discounts" aria-label="Discounts through Dec. 31st">
-            <p class="finder-discounts__label">Discounts through Dec. 31st</p>
-            <p><strong>100OFF</strong> is for listings. Enter it at checkout. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.</p>
-            <p><strong>100OFF</strong> is for the broker subscription. It is 100% off and lasts indefinitely.</p>
-        </aside>
+        <div>
+            <h1 class="finder-title">Find the Right Aircraft. Backed by Data.</h1>
+            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps buyers and charter customers compare aircraft using performance, operating cost, and mission data. The tools are free. No account is required.</p>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a class="btn btn-danger" href="#aircraft-selection">Find My Aircraft to Buy</a>
+                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Aircraft to Charter</a>
+                <a class="btn btn-outline-light" href="{{ url_for('aircraft_catalog') }}">Browse All Aircraft</a>
+            </div>
+        </div>
     </div>
     <!-- Route Planning Tools Section -->
     <div class="row mb-4">
@@ -4194,7 +4197,7 @@
         <div class="col-12">
                 <div class="card bg-black border border-secondary">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h2 class="h4 mb-0">Aircraft Selection Parameters</h2>
+                        <h2 class="h4 mb-0" id="aircraft-selection">Aircraft Selection Parameters</h2>
                         <div class="text-muted small">
                             <i class="fas fa-calculator me-1"></i>
                             Configure your aircraft requirements and financial parameters
@@ -4525,7 +4528,7 @@
                 <div class="loading-placeholder"
                     style="text-align: center; padding: 40px; color: #f4f4f4; background: rgba(18, 19, 24, 0.92); border: 1px dashed rgba(240, 85, 69, 0.4); border-radius: 10px;">
                     <i class="fas fa-plane fa-2x mb-3" style="color: #F05545;"></i>
-                    <p class="mb-1">Loading aircraft listings...</p>
+                    <p class="mb-1">Loading aircraft...</p>
                 </div>
             </div>
 

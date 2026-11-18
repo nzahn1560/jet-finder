@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Inquiries{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <h1>Inquiries</h1>
+    <p>Existing Stripe subscriptions were not changed. Review any active billing in Stripe before ending it. Financial records stay in the database.</p>
+    <p><a href="{{ url_for('admin_inquiries_export') }}" style="color:#F05545;">Export CSV</a> · <a href="{{ url_for('admin_index') }}" style="color:#F05545;">Admin</a></p>
+    <p>{{ missing_images }} aircraft models are missing one or more gallery images. Place WebP files in Cloudflare R2 at <code>aircraft/&lt;slug&gt;/exterior.webp</code>, <code>cabin.webp</code>, <code>cockpit.webp</code>, and <code>cabin-extra.webp</code>.</p>
+    {% for inquiry in inquiries %}
+    <article class="p-3 mb-3" style="background:#141414;border:1px solid #333;border-radius:12px;">
+        <p class="mb-1"><strong>#{{ inquiry.id }}</strong> {{ inquiry.inquiry_type }} · {{ inquiry.status }} · {{ inquiry.created_at }}</p>
+        <p class="mb-1">{{ inquiry.name }} · {{ inquiry.email }} · {{ inquiry.phone or '' }}</p>
+        <p class="mb-1">{{ inquiry.aircraft_name or 'No aircraft selected' }}</p>
+        <p class="mb-1">{{ inquiry.departure_airport or '' }} {{ inquiry.arrival_airport or '' }} {{ inquiry.route_notes or '' }}</p>
+        <p class="mb-2">{{ inquiry.notes or inquiry.mission or '' }}</p>
+        <form method="post" action="{{ url_for('admin_inquiry_update', inquiry_id=inquiry.id) }}" class="row g-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-3">
+                <select class="form-select bg-dark text-white border-secondary" name="status">
+                    {% for status in ['new', 'contacted', 'active', 'completed', 'closed'] %}
+                    <option {% if inquiry.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6"><input class="form-control bg-dark text-white border-secondary" name="internal_notes" value="{{ inquiry.internal_notes or '' }}" placeholder="Internal note"></div>
+            <div class="col-md-2"><button class="btn btn-outline-light" type="submit">Save</button></div>
+        </form>
+    </article>
+    {% else %}
+    <p>No inquiries yet.</p>
+    {% endfor %}
+</div>
+{% endblock %}

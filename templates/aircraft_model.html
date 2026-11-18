@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ aircraft.aircraft_name }}{% endblock %}
+{% block meta_description %}{{ aircraft.manufacturer }} {{ aircraft.aircraft_name }} performance, average market purchase price, ownership cost, and charter planning data.{% endblock %}
+{% block canonical %}{{ public_base }}/aircraft/{{ slug }}{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:980px;">
+    <p class="mb-2"><a href="{{ url_for('aircraft_catalog') }}" style="color:#F05545;">Browse Aircraft</a></p>
+    <p class="text-uppercase mb-1" style="color:#F05545;">{{ aircraft.manufacturer }} · {{ aircraft.category }}</p>
+    <h1>{{ aircraft.aircraft_name }}</h1>
+    <p style="color:#ccc;">{{ aircraft.date_range or 'Year range unavailable' }}. This is a model profile, not a specific airplane offered for sale.</p>
+    <div class="d-flex gap-2 my-3">
+        <button class="btn btn-danger" type="button" id="show-purchase">Purchase / Ownership</button>
+        <button class="btn btn-outline-light" type="button" id="show-charter">Charter</button>
+    </div>
+    <div class="row g-3 mb-4">
+        {% for image in images %}
+        <div class="col-6 col-md-3">
+            <div class="p-3 h-100" style="background:#141414;border:1px solid #333;border-radius:12px;">
+                {% if image.present %}
+                <img src="{{ image.url }}" alt="{{ image.label }} of {{ aircraft.aircraft_name }}" loading="lazy" style="width:100%;height:140px;object-fit:cover;border-radius:8px;">
+                {% else %}
+                <div style="height:140px;border:1px dashed #555;border-radius:8px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0.5rem;color:#aaa;">{{ image.label }} not on file</div>
+                {% endif %}
+                <p class="mb-0 mt-2">{{ image.label }}</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <section id="purchase-view">
+        <h2>Purchase / Ownership</h2>
+        <p><strong>Average Market Purchase Price:</strong> {{ price }}</p>
+        <p>This is a representative value from the aircraft database. It is not an asking price.</p>
+        <ul>
+            <li>Passengers: {{ aircraft.passengers or 'Unavailable' }}</li>
+            <li>Crew required: {{ aircraft.min_crew or 'Unavailable' }}</li>
+            <li>Range: {{ aircraft.range or 'Unavailable' }} nm</li>
+            <li>Cruise speed: {{ aircraft.speed or 'Unavailable' }} kt</li>
+            <li>Balanced field length: {{ aircraft.runway_length or 'Unavailable' }} ft</li>
+            <li>Max altitude: {{ aircraft.max_altitude or 'Unavailable' }} ft</li>
+            <li>Cabin: {{ aircraft.cabin_height or 'Unavailable' }} ft high, {{ aircraft.cabin_width or 'Unavailable' }} ft wide, {{ aircraft.cabin_length or 'Unavailable' }} ft long</li>
+            <li>Cabin volume: {{ aircraft.cabin_volume or 'Unavailable' }} cu ft</li>
+            <li>Engines: {{ aircraft.multi_engine or 'Unavailable' }}</li>
+            <li>Ownership hourly cost: {{ hourly }}</li>
+            <li>Annual ownership budget: {{ annual }}</li>
+            <li>Cost per mile: {{ mile }}</li>
+            <li>Best all-around score: {{ aircraft.best_all_around_dollar or 'Unavailable' }}</li>
+        </ul>
+        <p>Landing distance is not stored separately from balanced field length, so runway suitability for a specific airport is not confirmed here.</p>
+        <a class="btn btn-danger me-2" href="#purchase-form">Inquire for Aircraft Purchase</a>
+        <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising&aircraft={{ aircraft.aircraft_name|urlencode }}">Schedule a Free Advising Call</a>
+        <form id="purchase-form" class="mt-4 p-3" style="background:#141414;border:1px solid #333;border-radius:12px;">
+            <h3>Inquire for Aircraft Purchase</h3>
+            <input type="hidden" name="inquiry_type" value="purchase">
+            <input type="hidden" name="aircraft_name" value="{{ aircraft.aircraft_name }}">
+            <input type="hidden" name="aircraft_id" value="{{ aircraft.id }}">
+            <label class="form-label">Name</label>
+            <input class="form-control bg-dark text-white border-secondary mb-2" name="name" required>
+            <label class="form-label">Email</label>
+            <input class="form-control bg-dark text-white border-secondary mb-2" name="email" type="email" required>
+            <label class="form-label">Phone</label>
+            <input class="form-control bg-dark text-white border-secondary mb-2" name="phone" required>
+            <label class="form-label">Purchase timeline</label>
+            <input class="form-control bg-dark text-white border-secondary mb-2" name="timeline">
+            <label class="form-label">Approximate budget, optional</label>
+            <input class="form-control bg-dark text-white border-secondary mb-2" name="budget">
+            <label class="form-label">Comments</label>
+            <textarea class="form-control bg-dark text-white border-secondary mb-2" name="notes" rows="3"></textarea>
+            <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
+            <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> I agree that Jetschool may contact me about this inquiry. This is not a purchase order.</label>
+            <button class="btn btn-danger" type="submit">Send purchase inquiry</button>
+            <p class="inquiry-status mt-2" role="status"></p>
+        </form>
+    </section>
+
+    <section id="charter-view" hidden>
+        <h2>Charter</h2>
+        <p>The model shown here is not reserved and may not be available on a chosen date. Availability and the final price have to be confirmed with an authorized charter operator. Jetschool is not the aircraft operator.</p>
+        <ul>
+            <li>Representative hourly charter rate: {{ charter }}</li>
+            <li>Passengers: {{ aircraft.passengers or 'Unavailable' }}</li>
+            <li>Range: {{ aircraft.range or 'Unavailable' }} nm</li>
+            <li>Cruise speed: {{ aircraft.speed or 'Unavailable' }} kt</li>
+            <li>Cabin volume: {{ aircraft.cabin_volume or 'Unavailable' }} cu ft</li>
+        </ul>
+        <a class="btn btn-danger" href="{{ url_for('charter_search') }}?aircraft={{ slug }}">Plan this model in Charter Finder</a>
+    </section>
+</div>
+<script>
+(function () {
+    const purchase = document.getElementById('purchase-view');
+    const charter = document.getElementById('charter-view');
+    document.getElementById('show-purchase').addEventListener('click', function () {
+        purchase.hidden = false; charter.hidden = true;
+    });
+    document.getElementById('show-charter').addEventListener('click', function () {
+        purchase.hidden = true; charter.hidden = false;
+    });
+    document.getElementById('purchase-form').addEventListener('submit', function (event) {
+        event.preventDefault();
+        submitInquiry(event.target);
+    });
+    function submitInquiry(form) {
+        const status = form.querySelector('.inquiry-status');
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.consent = form.consent.checked;
+        const token = document.querySelector('meta[name="csrf-token"]');
+        status.textContent = 'Sending…';
+        fetch('/api/inquiries', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : ''},
+            body: JSON.stringify(data),
+        }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
+          .then(function (result) {
+              status.textContent = result.ok ? ('Inquiry ' + result.body.id + ' received.') : (result.body.error || 'Could not save that inquiry.');
+              if (result.ok) form.reset();
+          }).catch(function () { status.textContent = 'Could not save that inquiry.'; });
+    }
+})();
+</script>
+{% endblock %}
