@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Browse Aircraft{% endblock %}
+{% block meta_description %}Compare every aircraft model in the Jetschool database. Average market purchase prices, performance, and operating costs are free to research.{% endblock %}
+{% block canonical %}{{ public_base }}/aircraft{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <p class="text-uppercase mb-1" style="color:#F05545;letter-spacing:.14em;">Free aircraft research</p>
+    <h1 class="mb-2">Browse Aircraft</h1>
+    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Every model below comes from the Jetschool aircraft database. The price is an average market purchase price for that model, not an asking price for a specific airplane that is for sale.</p>
+    <div class="row g-2 mb-4">
+        <div class="col-md-4"><input id="catalog-search" class="form-control bg-dark text-white border-secondary" placeholder="Search manufacturer or model"></div>
+        <div class="col-md-3">
+            <select id="catalog-sort" class="form-select bg-dark text-white border-secondary">
+                <option value="name">Name</option>
+                <option value="price">Average price: low to high</option>
+                <option value="price-desc">Average price: high to low</option>
+                <option value="range">Range</option>
+                <option value="speed">Cruise speed</option>
+                <option value="seats">Passengers</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select id="catalog-type" class="form-select bg-dark text-white border-secondary">
+                <option value="">All categories</option>
+                {% for category in categories %}<option>{{ category }}</option>{% endfor %}
+            </select>
+        </div>
+    </div>
+    <div class="row g-3" id="catalog-grid">
+        {% for aircraft in aircraft %}
+        <div class="col-md-6 col-xl-4 catalog-card" data-name="{{ aircraft.name|lower }} {{ aircraft.manufacturer|lower }}" data-category="{{ aircraft.category }}" data-price="{{ aircraft.price or 0 }}" data-range="{{ aircraft.range_nm or 0 }}" data-speed="{{ aircraft.speed_kts or 0 }}" data-seats="{{ aircraft.passengers or 0 }}">
+            <article class="h-100 p-3" style="background:#141414;border:1px solid #333;border-radius:14px;">
+                <p class="mb-1" style="color:#F05545;">{{ aircraft.manufacturer }} · {{ aircraft.category }}</p>
+                <h2 class="h4"><a href="{{ url_for('aircraft_model', slug=aircraft.slug) }}" style="color:#fff;">{{ aircraft.name }}</a></h2>
+                <p class="mb-2" style="color:#bbb;">{{ aircraft.years or 'Years unavailable' }}</p>
+                <p class="mb-1"><strong>Average Market Purchase Price</strong><br>{{ aircraft.price_label }}</p>
+                <p class="mb-1">Passengers {{ aircraft.passengers or 'Unavailable' }} · Range {{ aircraft.range_nm or 'Unavailable' }} nm · {{ aircraft.speed_kts or 'Unavailable' }} kt</p>
+                <p class="mb-3" style="color:#bbb;">Ownership hourly cost {{ aircraft.hourly_label }}</p>
+                <a class="btn btn-outline-light me-2 mb-2" href="{{ url_for('aircraft_model', slug=aircraft.slug) }}">View Aircraft Details</a>
+                <a class="btn btn-danger mb-2" href="{{ url_for('aircraft_model', slug=aircraft.slug) }}#purchase">Inquire for Aircraft Purchase</a>
+            </article>
+        </div>
+        {% endfor %}
+    </div>
+    <p id="catalog-empty" class="mt-4" hidden>No aircraft match that search.</p>
+</div>
+<script>
+(function () {
+    const cards = Array.from(document.querySelectorAll('.catalog-card'));
+    const grid = document.getElementById('catalog-grid');
+    const search = document.getElementById('catalog-search');
+    const sort = document.getElementById('catalog-sort');
+    const type = document.getElementById('catalog-type');
+    const empty = document.getElementById('catalog-empty');
+    function render() {
+        const query = (search.value || '').trim().toLowerCase();
+        const category = type.value;
+        const visible = cards.filter(function (card) {
+            return (!query || card.dataset.name.indexOf(query) >= 0) && (!category || card.dataset.category === category);
+        });
+        const key = sort.value;
+        visible.sort(function (a, b) {
+            if (key === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+            const av = Number(a.dataset[key === 'price-desc' ? 'price' : key] || 0);
+            const bv = Number(b.dataset[key === 'price-desc' ? 'price' : key] || 0);
+            return key === 'price-desc' ? bv - av : av - bv;
+        });
+        visible.forEach(function (card) { grid.appendChild(card); card.hidden = false; });
+        cards.forEach(function (card) { if (visible.indexOf(card) < 0) card.hidden = true; });
+        empty.hidden = visible.length > 0;
+    }
+    [search, sort, type].forEach(function (el) { el.addEventListener('input', render); el.addEventListener('change', render); });
+})();
+</script>
+{% endblock %}

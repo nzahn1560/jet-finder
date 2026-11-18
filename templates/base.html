@@ -349,35 +349,27 @@
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('home') }}">
-                                <i class="fas fa-calculator me-2"></i>Jet Finder
+                                <i class="fas fa-calculator me-2"></i>Aircraft Finder
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('create_listing') }}">
-                                <i class="fas fa-plus-circle me-2"></i>Create Listing
+                            <a class="dropdown-item" href="{{ url_for('aircraft_catalog') }}">
+                                <i class="fas fa-th-large me-2"></i>Browse Aircraft
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('charter_search') }}">
-                                <i class="fas fa-plane-departure me-2"></i>Charter
-                                <span class="nav-tag">Coming soon</span>
+                                <i class="fas fa-plane-departure me-2"></i>Charter Finder
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('service_providers') }}">
-                                <i class="fas fa-wrench me-2"></i>Maintenance
-                                <span class="nav-tag">Coming soon</span>
+                            <a class="dropdown-item" href="{{ url_for('about_page') }}">
+                                <i class="fas fa-info-circle me-2"></i>About
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('brokers_page') }}">
-                                <i class="fas fa-map-marked-alt me-2"></i>Broker Map
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('off_market_page') }}">
-                                <i class="fas fa-lock me-2"></i>Off Market
-                                <span class="nav-tag">Brokers only</span>
+                            <a class="dropdown-item" href="{{ url_for('contact') }}">
+                                <i class="fas fa-phone me-2"></i>Free Advising Call
                             </a>
                         </li>
                         {% if current_user and current_user.is_admin %}
@@ -415,35 +407,15 @@
                                 current_user.last_name }}
                             </h6>
                         </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('dashboard') }}">
-                                <i class="fas fa-user me-2"></i>My profile
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('create_listing') }}">
-                                <i class="fas fa-plus me-2"></i>Create listing
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#messages">
-                                <i class="fas fa-envelope me-2"></i>Messages <span id="nav-message-count"></span>
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#alerts">
-                                <i class="fas fa-bell me-2"></i>Alerts <span id="nav-alert-count"></span>
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('account_settings') }}">
-                                <i class="fas fa-cog me-2"></i>Settings
-                            </a>
-                        </li>
                         {% if current_user.is_admin %}
                         <li>
                             <a class="dropdown-item" href="{{ url_for('admin_index') }}">
                                 <i class="fas fa-user-shield me-2"></i>Approvals
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('admin_inquiries') }}">
+                                <i class="fas fa-inbox me-2"></i>Inquiries
                             </a>
                         </li>
                         {% endif %}
@@ -462,13 +434,9 @@
                 </div>
                 {% else %}
                 <div class="d-flex gap-2">
-                    <a href="{{ url_for('register') }}" class="login-btn">
-                        <i class="fas fa-user-plus"></i>
-                        <span>Register</span>
-                    </a>
-                    <a href="{{ url_for('login') }}" class="login-btn">
-                        <i class="fas fa-user"></i>
-                        <span>Login</span>
+                    <a href="{{ url_for('contact') }}" class="login-btn">
+                        <i class="fas fa-phone"></i>
+                        <span>Free Advising</span>
                     </a>
                 </div>
                 {% endif %}

@@ -40,7 +40,27 @@
     <article class="contact-card">
         <p class="contact-card__kicker">JetSchool</p>
         <h1>Contact JetSchool</h1>
-        <p class="contact-card__lead">Send a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration. You can also email <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
+        <p class="contact-card__lead">Ask for a free advising call or send a question. No account is required. You can also email <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
+        <form id="advising-form" class="mb-4">
+            <h2>Schedule a Free Advising Call</h2>
+            <p>This request is not a confirmed appointment. Jetschool will follow up.</p>
+            <label for="advise-name">Name</label>
+            <input id="advise-name" name="name" required>
+            <label for="advise-email">Email</label>
+            <input id="advise-email" name="email" type="email" required>
+            <label for="advise-phone">Phone</label>
+            <input id="advise-phone" name="phone" required>
+            <label for="advise-aircraft">Aircraft of interest</label>
+            <input id="advise-aircraft" name="aircraft_name" value="{{ request.args.get('aircraft', '') }}">
+            <label for="advise-mission">Mission</label>
+            <textarea id="advise-mission" name="mission" rows="3"></textarea>
+            <label for="advise-time">Preferred time to speak</label>
+            <input id="advise-time" name="preferred_time">
+            <input class="contact-card__trap" tabindex="-1" autocomplete="off" name="company_url" aria-hidden="true">
+            <label class="form-check mt-2"><input id="advise-consent" type="checkbox" required> Jetschool may contact me about this request.</label>
+            <button type="submit">Request a call</button>
+            <p id="advise-status" role="status"></p>
+        </form>
         <form id="contact-form">
             <label for="contact-name">Name</label>
             <input id="contact-name" name="name" maxlength="120" required autocomplete="name">
@@ -128,6 +148,37 @@
 </style>
 <script>
 (function () {
+    const advise = document.getElementById('advising-form');
+    if (advise) {
+        advise.addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const status = document.getElementById('advise-status');
+            status.textContent = 'Sending…';
+            const token = document.querySelector('meta[name="csrf-token"]');
+            const response = await fetch('/api/inquiries', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': token ? token.getAttribute('content') : '',
+                },
+                body: JSON.stringify({
+                    inquiry_type: 'advising',
+                    name: document.getElementById('advise-name').value,
+                    email: document.getElementById('advise-email').value,
+                    phone: document.getElementById('advise-phone').value,
+                    aircraft_name: document.getElementById('advise-aircraft').value,
+                    mission: document.getElementById('advise-mission').value,
+                    preferred_time: document.getElementById('advise-time').value,
+                    company_url: advise.company_url.value,
+                    consent: document.getElementById('advise-consent').checked,
+                }),
+            });
+            const data = await response.json().catch(function () { return {}; });
+            status.textContent = response.ok && data.id ? ('Request ' + data.id + ' received. This is not a confirmed appointment.') : (data.error || 'Could not save that request.');
+            if (response.ok && data.id) advise.reset();
+        });
+    }
     const form = document.getElementById('contact-form');
     const status = document.getElementById('contact-status');
     form.addEventListener('submit', async function (event) {

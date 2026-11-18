@@ -187,6 +187,12 @@ def _city_place(city: str, region: str | None) -> dict | None:
     }
 
 
+def airports() -> list[dict]:
+    """Airports already loaded for place search. Coordinates only; no fuel inventory."""
+    _load_indexes()
+    return list(_AIRPORTS or [])
+
+
 def haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in nautical miles."""
     radius = 3440.065

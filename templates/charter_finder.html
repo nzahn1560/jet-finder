@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Charter Finder{% endblock %}
+{% block meta_description %}Compare aircraft for a charter mission using range, passengers, runway data, fuel stops, and spreadsheet charter rates.{% endblock %}
+{% block canonical %}{{ public_base }}/charter{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <p class="text-uppercase mb-1" style="color:#F05545;">Free charter planning</p>
+    <h1>Charter Finder</h1>
+    <p style="max-width:46rem;color:#d0d0d0;">Enter a mission. Jetschool compares aircraft models already in the database. Results are estimates. Jetschool arranges charters through authorized operators and is not itself the operator.</p>
+    <form id="charter-mission" class="row g-2 mb-3">
+        <div class="col-md-3"><input class="form-control bg-dark text-white border-secondary" name="departure" placeholder="Departure airport" required value="{{ request.args.get('departure', '') }}"></div>
+        <div class="col-md-3"><input class="form-control bg-dark text-white border-secondary" name="arrival" placeholder="Destination airport" required value="{{ request.args.get('arrival', '') }}"></div>
+        <div class="col-md-2"><input class="form-control bg-dark text-white border-secondary" name="departure_date" type="date"></div>
+        <div class="col-md-2"><input class="form-control bg-dark text-white border-secondary" name="departure_time" type="time"></div>
+        <div class="col-6 col-md-1"><input class="form-control bg-dark text-white border-secondary" name="passengers" type="number" min="1" value="1"></div>
+        <div class="col-6 col-md-1"><button class="btn btn-danger w-100" type="submit">Compare</button></div>
+        <div class="col-md-4">
+            <select class="form-select bg-dark text-white border-secondary" name="trip">
+                <option value="one_way">One-way</option>
+                <option value="round_trip">Round-trip</option>
+            </select>
+        </div>
+        <div class="col-md-4"><input class="form-control bg-dark text-white border-secondary" name="return_date" type="date" placeholder="Return date"></div>
+        <div class="col-md-4">
+            <select id="charter-sort" class="form-select bg-dark text-white border-secondary">
+                <option value="stops">Fuel stops</option>
+                <option value="price">Estimated price</option>
+                <option value="hours">Flight duration</option>
+                <option value="speed">Cruise speed</option>
+                <option value="seats">Passengers</option>
+            </select>
+        </div>
+    </form>
+    <p id="charter-notice" style="color:#ccc;"></p>
+    <div class="row g-3">
+        <div class="col-lg-7"><div id="charter-results"></div></div>
+        <div class="col-lg-5"><div id="charter-map" style="height:420px;background:#111;border-radius:12px;"></div></div>
+    </div>
+    <form id="charter-inquiry" class="mt-4 p-3" hidden style="background:#141414;border:1px solid #333;border-radius:12px;">
+        <h2>Inquire for Charter</h2>
+        <input type="hidden" name="inquiry_type" value="charter">
+        <input type="hidden" name="aircraft_name">
+        <input type="hidden" name="aircraft_id">
+        <input type="hidden" name="departure_airport">
+        <input type="hidden" name="arrival_airport">
+        <input type="hidden" name="departure_date">
+        <input type="hidden" name="departure_time">
+        <input type="hidden" name="return_date">
+        <input type="hidden" name="passengers">
+        <input type="hidden" name="estimated_price">
+        <input type="hidden" name="fuel_stops">
+        <input type="hidden" name="route_notes">
+        <p id="charter-inquiry-summary"></p>
+        <label class="form-label">Name</label>
+        <input class="form-control bg-dark text-white border-secondary mb-2" name="name" required>
+        <label class="form-label">Email</label>
+        <input class="form-control bg-dark text-white border-secondary mb-2" name="email" type="email" required>
+        <label class="form-label">Phone</label>
+        <input class="form-control bg-dark text-white border-secondary mb-2" name="phone" required>
+        <label class="form-label">Special requests</label>
+        <textarea class="form-control bg-dark text-white border-secondary mb-2" name="notes" rows="3"></textarea>
+        <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
+        <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> I agree that Jetschool may contact me. This request does not reserve an aircraft.</label>
+        <button class="btn btn-danger" type="submit">Send charter inquiry</button>
+        <p class="inquiry-status mt-2" role="status"></p>
+    </form>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+    const form = document.getElementById('charter-mission');
+    const results = document.getElementById('charter-results');
+    const notice = document.getElementById('charter-notice');
+    const inquiry = document.getElementById('charter-inquiry');
+    let map = L.map('charter-map').setView([39, -98], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap'}).addTo(map);
+    let line;
+    let markers = [];
+    let latest = null;
+    function money(value) { return value ? ('$' + Number(value).toLocaleString()) : 'Rate unavailable'; }
+    function hours(value) {
+        if (!value) return 'Unavailable';
+        const whole = Math.floor(value);
+        const minutes = Math.round((value - whole) * 60);
+        return whole + ' hours ' + minutes + ' minutes';
+    }
+    function draw(card) {
+        markers.forEach(function (marker) { map.removeLayer(marker); });
+        markers = [];
+        if (line) map.removeLayer(line);
+        const latlngs = (card.points || []).map(function (point) { return [point.lat, point.lon]; });
+        line = L.polyline(latlngs, {color: '#F05545'}).addTo(map);
+        card.points.forEach(function (point) {
+            const marker = L.marker([point.lat, point.lon]).addTo(map);
+            marker.bindPopup((point.kind === 'fuel_stop' ? 'Fuel stop candidate: ' : '') + (point.name || point.code));
+            markers.push(marker);
+        });
+        if (latlngs.length) map.fitBounds(latlngs, {padding: [24, 24]});
+    }
+    function paint() {
+        if (!latest) return;
+        const cards = latest.unverified.slice().concat(latest.suitable);
+        const key = document.getElementById('charter-sort').value;
+        cards.sort(function (a, b) {
+            if (key === 'stops') return a.fuel_stops - b.fuel_stops;
+            if (key === 'hours') return (a.flight_hours || 99) - (b.flight_hours || 99);
+            if (key === 'speed') return b.speed_kts - a.speed_kts;
+            if (key === 'seats') return b.passengers - a.passengers;
+            return (a.estimated_total || 1e12) - (b.estimated_total || 1e12);
+        });
+        results.innerHTML = '';
+        if (!cards.length) {
+            results.innerHTML = '<p>No aircraft can be planned for this mission with two or fewer fuel stops and the recorded runway lengths.</p>';
+            return;
+        }
+        cards.forEach(function (card) {
+            const article = document.createElement('article');
+            article.className = 'p-3 mb-3';
+            article.style.cssText = 'background:#141414;border:1px solid #333;border-radius:14px;';
+            article.innerHTML = '<h2 class="h4">' + card.name + '</h2>'
+                + '<p>' + card.stop_label + ' · ' + card.runway_status + '</p>'
+                + '<p>Estimated charter cost: ' + money(card.estimated_total) + '</p>'
+                + '<p>Flight time: ' + hours(card.flight_hours) + ' · Passengers: ' + card.passengers + ' · ' + card.speed_kts + ' kt</p>'
+                + '<p style="color:#bbb;">' + card.price_note + ' ' + card.fuel_status + '.</p>'
+                + '<button class="btn btn-outline-light me-2" type="button">Show route</button>'
+                + '<button class="btn btn-danger" type="button">Inquire for Charter</button>';
+            article.querySelector('.btn-outline-light').addEventListener('click', function () { draw(card); });
+            article.querySelector('.btn-danger').addEventListener('click', function () { openInquiry(card); });
+            results.appendChild(article);
+        });
+        draw(cards[0]);
+    }
+    function openInquiry(card) {
+        const mission = new FormData(form);
+        inquiry.hidden = false;
+        inquiry.aircraft_name.value = card.name;
+        inquiry.aircraft_id.value = card.id || '';
+        inquiry.departure_airport.value = mission.get('departure');
+        inquiry.arrival_airport.value = mission.get('arrival');
+        inquiry.departure_date.value = mission.get('departure_date') || '';
+        inquiry.departure_time.value = mission.get('departure_time') || '';
+        inquiry.return_date.value = mission.get('return_date') || '';
+        inquiry.passengers.value = mission.get('passengers') || '';
+        inquiry.estimated_price.value = card.estimated_total || '';
+        inquiry.fuel_stops.value = card.fuel_stops;
+        inquiry.route_notes.value = card.points.map(function (point) { return point.code || point.name; }).join(' → ');
+        document.getElementById('charter-inquiry-summary').textContent = card.name + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + money(card.estimated_total);
+        inquiry.scrollIntoView();
+    }
+    form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        notice.textContent = 'Comparing aircraft…';
+        fetch('/api/charter/plan', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+        }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
+          .then(function (result) {
+              if (!result.ok) { notice.textContent = result.body.error || 'That route could not be planned.'; return; }
+              latest = result.body;
+              notice.textContent = result.body.notice + ' Great-circle route about ' + Math.round(result.body.distance_nm) + ' nm.';
+              paint();
+          });
+    });
+    document.getElementById('charter-sort').addEventListener('change', paint);
+    inquiry.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const status = inquiry.querySelector('.inquiry-status');
+        const data = Object.fromEntries(new FormData(inquiry).entries());
+        data.consent = inquiry.consent.checked;
+        const token = document.querySelector('meta[name="csrf-token"]');
+        fetch('/api/inquiries', {
+            method: 'POST', credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : ''},
+            body: JSON.stringify(data),
+        }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
+          .then(function (result) {
+              status.textContent = result.ok ? ('Inquiry ' + result.body.id + ' received.') : (result.body.error || 'Could not save that inquiry.');
+          });
+    });
+})();
+</script>
+{% endblock %}

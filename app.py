@@ -80,6 +80,7 @@ app.register_blueprint(product_blueprint)
 # Database: PostgreSQL (Railway) or SQLite (local) via db module
 import db as db_module
 import sections as sections_module
+import advisory
 
 def init_db():
     """Create users, user_listings, user_subscriptions, per_use_purchases tables (Postgres or SQLite)."""
@@ -383,12 +384,8 @@ def per_use_required(service_type, price_per_use):
 @app.route('/charter')
 @app.route('/charter-search')
 def charter_search():
-    """Charter stays closed while the booking model is still being built."""
-    return render_template(
-        'coming_soon.html',
-        product='Charter',
-        summary='Shop a route and see the aircraft that can fly it.',
-    )
+    """Compare aircraft models for a charter mission. Estimates are not bookings."""
+    return render_template('charter_finder.html')
 
 @app.route('/empty-legs')
 def empty_legs():
@@ -3452,7 +3449,7 @@ def api_admin_contacts():
         return jsonify({'error': 'server_error'}), 500
 
 
-_SITEMAP_PAGES = ('/', '/privacy', '/terms', '/refunds', '/contact', '/brokers')
+_SITEMAP_PAGES = ('/', '/aircraft', '/charter', '/about', '/privacy', '/terms', '/refunds', '/contact', '/brokers')
 _ROBOTS_PRIVATE = (
     '/admin', '/api/', '/dashboard', '/profile', '/my-listings', '/create-listing',
     '/off-market', '/logout', '/login', '/register', '/forgot-password', '/reset-password',
@@ -11683,6 +11680,184 @@ def admin_populate_profiles():
     except Exception as e:
         print(f"Error populating performance profiles: {e}")
         return jsonify({'error': 'Failed to populate profiles'}), 500
+
+def _money_or_unavailable(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 'Unavailable'
+    if number <= 0:
+        return 'Unavailable'
+    return f'${number:,.0f}'
+
+
+@app.route('/aircraft')
+def aircraft_catalog():
+    rows = [advisory.catalog_card(row) for row in get_unified_aircraft_data()]
+    categories = sorted({row['category'] for row in rows if row.get('category')})
+    return render_template('aircraft_catalog.html', aircraft=rows, categories=categories)
+
+
+@app.route('/aircraft/<slug>')
+def aircraft_model(slug):
+    row = advisory.find_aircraft(get_unified_aircraft_data(), slug)
+    if not row:
+        return render_template('error.html', error_code=404, message='That aircraft model is not in the database.'), 404
+    return render_template(
+        'aircraft_model.html',
+        aircraft=row,
+        slug=advisory.slug_for(row),
+        images=advisory.image_slots(row),
+        price=_money_or_unavailable(row.get('price')),
+        hourly=_money_or_unavailable(row.get('total_hourly_cost')),
+        annual=_money_or_unavailable(row.get('annual_budget')),
+        mile=_money_or_unavailable(row.get('cost_per_mile')),
+        charter=_money_or_unavailable(row.get('charter_rate')),
+    )
+
+
+@app.route('/about')
+def about_page():
+    return render_template('about.html')
+
+
+@app.route('/api/charter/plan', methods=['POST'])
+def api_charter_plan():
+    data = request.get_json(silent=True) or {}
+    origin = sections_module.resolve_place(data.get('departure') or data.get('departure_airport'))
+    destination = sections_module.resolve_place(data.get('arrival') or data.get('arrival_airport'))
+    if not origin or not destination:
+        return jsonify({'error': 'Enter a departure airport and a destination airport Jetschool can find.'}), 400
+    try:
+        passengers = int(data.get('passengers') or 1)
+    except (TypeError, ValueError):
+        passengers = 1
+    plan = advisory.plan_charter(
+        origin,
+        destination,
+        get_unified_aircraft_data(),
+        sections_module.airports(),
+        _runway_feet_table(),
+        passengers=max(1, min(passengers, 19)),
+        round_trip=(data.get('trip') == 'round_trip'),
+    )
+    status = 200 if plan.get('ok') else 400
+    return jsonify(plan), status
+
+
+@app.route('/api/inquiries', methods=['POST'])
+def api_inquiries():
+    if _auth_rate_limited():
+        return jsonify({'error': 'Wait a minute and try again.'}), 429
+    if not _csrf_matches():
+        return jsonify({'error': 'Reload the page and try again.'}), 403
+    data = request.get_json(silent=True) or {}
+    if (data.get('company_url') or '').strip():
+        return jsonify({'ok': True, 'ignored': True})
+    kind = (data.get('inquiry_type') or '').strip().lower()
+    if kind not in {'purchase', 'advising', 'charter'}:
+        return jsonify({'error': 'Choose a purchase, advising, or charter inquiry.'}), 400
+    name = ' '.join(str(data.get('name') or '').split())[:200]
+    email = str(data.get('email') or '').strip().lower()[:254]
+    phone = ' '.join(str(data.get('phone') or '').split())[:50]
+    if len(name) < 2 or not _looks_like_email(email) or len(phone) < 7 or not data.get('consent'):
+        return jsonify({'error': 'Name, email, phone, and consent are required.'}), 400
+    try:
+        passengers = int(data.get('passengers')) if data.get('passengers') not in (None, '') else None
+    except (TypeError, ValueError):
+        passengers = None
+    try:
+        price = float(data.get('estimated_price')) if data.get('estimated_price') not in (None, '') else None
+    except (TypeError, ValueError):
+        price = None
+    try:
+        stops = int(data.get('fuel_stops')) if data.get('fuel_stops') not in (None, '') else None
+    except (TypeError, ValueError):
+        stops = None
+    try:
+        aircraft_id = int(data.get('aircraft_id')) if data.get('aircraft_id') not in (None, '') else None
+    except (TypeError, ValueError):
+        aircraft_id = None
+    payload = {
+        'inquiry_type': kind,
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'aircraft_name': data.get('aircraft_name'),
+        'aircraft_id': aircraft_id,
+        'timeline': data.get('timeline'),
+        'budget': data.get('budget'),
+        'mission': data.get('mission'),
+        'preferred_time': data.get('preferred_time'),
+        'departure_airport': data.get('departure_airport'),
+        'arrival_airport': data.get('arrival_airport'),
+        'departure_date': data.get('departure_date'),
+        'departure_time': data.get('departure_time'),
+        'return_date': data.get('return_date'),
+        'passengers': passengers,
+        'estimated_price': price,
+        'fuel_stops': stops,
+        'route_notes': data.get('route_notes'),
+        'notes': data.get('notes'),
+        'consent': True,
+    }
+    try:
+        inquiry_id = db_module.create_advisory_inquiry(payload)
+    except Exception:
+        logger.exception('inquiry save failed')
+        return jsonify({'error': 'Could not save that inquiry.'}), 500
+    note = f"{kind} inquiry #{inquiry_id} from {name} <{email}>"
+    try:
+        for admin_id in db_module.list_admin_user_ids():
+            db_module.create_notification(admin_id, 'inquiry', f'New {kind} inquiry', note, '/admin/inquiries')
+    except Exception:
+        logger.exception('inquiry notification failed')
+    try:
+        import email_service
+        target = (os.environ.get('ADMIN_EMAILS') or 'support@jetschoolusa.com').split(',')[0].strip()
+        if target:
+            email_service.send_email(target, f'Jetschool {kind} inquiry #{inquiry_id}', f'<p>{note}</p>', note)
+    except Exception:
+        logger.exception('inquiry email failed')
+    return jsonify({'ok': True, 'id': inquiry_id}), 201
+
+
+@app.route('/admin/inquiries', methods=['GET'])
+@require_admin
+def admin_inquiries():
+    rows = db_module.list_advisory_inquiries()
+    missing = len(advisory.missing_image_report(get_unified_aircraft_data()))
+    return render_template('admin_inquiries.html', inquiries=rows, missing_images=missing)
+
+
+@app.route('/admin/inquiries.csv')
+@require_admin
+def admin_inquiries_export():
+    import csv
+    from io import StringIO
+    rows = db_module.list_advisory_inquiries()
+    buffer = StringIO()
+    fields = ['id', 'created_at', 'inquiry_type', 'status', 'name', 'email', 'phone', 'aircraft_name', 'departure_airport', 'arrival_airport', 'route_notes', 'notes', 'internal_notes']
+    writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    writer.writerows(rows)
+    response = app.response_class(buffer.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename="jetschool-inquiries.csv"'
+    return response
+
+
+@app.route('/admin/inquiries/<int:inquiry_id>', methods=['POST'])
+@require_admin
+def admin_inquiry_update(inquiry_id):
+    if not _csrf_matches():
+        return redirect(url_for('admin_inquiries'))
+    db_module.update_advisory_inquiry(
+        inquiry_id,
+        status=(request.form.get('status') or '').strip(),
+        internal_notes=request.form.get('internal_notes') or '',
+    )
+    return redirect(url_for('admin_inquiries'))
+
 
 if __name__ == '__main__':
     with app.app_context():

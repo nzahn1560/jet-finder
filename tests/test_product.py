@@ -62,12 +62,13 @@ class ProductTests(unittest.TestCase):
         home = self.client.get('/')
         self.assertEqual(home.status_code, 200)
         self.assertIn(b'<title>Jetschool: Jet Finder</title>', home.data)
-        self.assertIn(b'<h1 class="finder-title">Jet Finder</h1>', home.data)
-        self.assertIn(b'Discounts through Dec. 31st', home.data)
-        self.assertNotIn(b'70OFF', home.data)
-        self.assertIn(b'100OFF', home.data)
-        self.assertIn(b'is for listings. Enter it at checkout. Listing is free through Dec. 31st. The listing expires Dec. 31, 2027.', home.data)
-        self.assertIn(b'is for the broker subscription', home.data)
+        self.assertIn(b'Find the Right Aircraft. Backed by Data.', home.data)
+        self.assertIn(b'Find My Aircraft to Buy', home.data)
+        self.assertIn(b'Find My Aircraft to Charter', home.data)
+        self.assertIn(b'Browse All Aircraft', home.data)
+        self.assertNotIn(b'>Create Listing<', home.data)
+        self.assertNotIn(b'Broker Map', home.data)
+        self.assertNotIn(b'>Register<', home.data)
         self.assertNotIn(b'Compare private aircraft by cost, range, and route', home.data)
         self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
         self.assertIn(b'rel="canonical" href="http://localhost/"', home.data)
@@ -408,10 +409,42 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn(b'Approve brokerage', admin_page.data)
 
     def test_charter_and_mechanics_are_coming_soon(self):
-        for path in ('/charter', '/charter-search', '/mechanics', '/charter/fleet'):
+        for path in ('/charter', '/charter-search'):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200, path)
+            self.assertIn(b'Charter Finder', page.data)
+            self.assertNotIn(b'Coming soon', page.data)
+        for path in ('/mechanics', '/charter/fleet'):
             page = self.client.get(path)
             self.assertEqual(page.status_code, 200, path)
             self.assertIn(b'Coming soon', page.data)
+
+    def test_catalog_lists_models_and_inquiries_are_stored(self):
+        catalog = self.client.get('/aircraft')
+        self.assertEqual(catalog.status_code, 200)
+        self.assertIn(b'Average Market Purchase Price', catalog.data)
+        self.assertIn(b'not an asking price', catalog.data)
+        self.assertGreater(catalog.data.count(b'catalog-card'), 100)
+        detail = self.client.get('/aircraft/does-not-exist')
+        self.assertEqual(detail.status_code, 404)
+        contact = self.client.get('/contact')
+        token = contact.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+        saved = self.client.post('/api/inquiries', json={
+            'inquiry_type': 'purchase',
+            'name': 'Buyer Example',
+            'email': 'buyer-inquiry@example.com',
+            'phone': '5551234567',
+            'aircraft_name': 'Citation CJ3',
+            'timeline': 'This year',
+            'consent': True,
+        }, headers={'X-CSRF-Token': token})
+        self.assertEqual(saved.status_code, 201, saved.get_json())
+        inquiry_id = saved.get_json()['id']
+        self._login('admin@example.com', 'admin-pass-1')
+        page = self.client.get('/admin/inquiries')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Citation CJ3', page.data)
+        self.assertIn(str(inquiry_id).encode(), page.data)
 
     def test_listing_market_is_public_or_broker_off_market(self):
         self._login('seller@example.com', 'seller-pass-1')

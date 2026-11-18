@@ -297,6 +297,43 @@ class UserNotification(Base):
         return data
 
 
+class AdvisoryInquiry(Base):
+    """A purchase, advising, or charter request. No public account is required."""
+    __tablename__ = 'advisory_inquiries'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inquiry_type = Column(String(40), nullable=False)
+    status = Column(String(40), nullable=False, default='new')
+    name = Column(String(200), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(50))
+    aircraft_name = Column(String(255))
+    aircraft_id = Column(Integer)
+    timeline = Column(String(120))
+    budget = Column(String(120))
+    mission = Column(Text)
+    preferred_time = Column(String(120))
+    departure_airport = Column(String(80))
+    arrival_airport = Column(String(80))
+    departure_date = Column(String(40))
+    departure_time = Column(String(40))
+    return_date = Column(String(40))
+    passengers = Column(Integer)
+    estimated_price = Column(Float)
+    fuel_stops = Column(Integer)
+    route_notes = Column(Text)
+    notes = Column(Text)
+    internal_notes = Column(Text)
+    consent = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        created = data.get('created_at')
+        if created is not None and not isinstance(created, str):
+            data['created_at'] = created.isoformat()
+        return data
+
+
 class CharterInquiry(Base):
     """A charter estimate request. Stored so a coordinator can follow up."""
     __tablename__ = 'charter_inquiries'
@@ -1569,6 +1606,62 @@ def list_users_by_role(role, limit=500):
                 'profile_location': u.profile_location,
             })
         return out
+
+
+def create_advisory_inquiry(data):
+    """Store one visitor inquiry. Returns the new id."""
+    with get_session() as s:
+        row = AdvisoryInquiry(
+            inquiry_type=(data.get('inquiry_type') or '').strip()[:40],
+            status='new',
+            name=(data.get('name') or '').strip()[:200],
+            email=(data.get('email') or '').strip().lower()[:255],
+            phone=(data.get('phone') or '').strip()[:50] or None,
+            aircraft_name=(data.get('aircraft_name') or '').strip()[:255] or None,
+            aircraft_id=data.get('aircraft_id'),
+            timeline=(data.get('timeline') or '').strip()[:120] or None,
+            budget=(data.get('budget') or '').strip()[:120] or None,
+            mission=(data.get('mission') or '').strip() or None,
+            preferred_time=(data.get('preferred_time') or '').strip()[:120] or None,
+            departure_airport=(data.get('departure_airport') or '').strip()[:80] or None,
+            arrival_airport=(data.get('arrival_airport') or '').strip()[:80] or None,
+            departure_date=(data.get('departure_date') or '').strip()[:40] or None,
+            departure_time=(data.get('departure_time') or '').strip()[:40] or None,
+            return_date=(data.get('return_date') or '').strip()[:40] or None,
+            passengers=data.get('passengers'),
+            estimated_price=data.get('estimated_price'),
+            fuel_stops=data.get('fuel_stops'),
+            route_notes=(data.get('route_notes') or '').strip() or None,
+            notes=(data.get('notes') or '').strip() or None,
+            consent=bool(data.get('consent')),
+        )
+        s.add(row)
+        s.flush()
+        return int(row.id)
+
+
+def list_advisory_inquiries(inquiry_type=None, status=None):
+    with get_session() as s:
+        query = s.query(AdvisoryInquiry).order_by(AdvisoryInquiry.created_at.desc())
+        if inquiry_type:
+            query = query.filter(AdvisoryInquiry.inquiry_type == inquiry_type)
+        if status:
+            query = query.filter(AdvisoryInquiry.status == status)
+        return [row.to_dict() for row in query.limit(500).all()]
+
+
+def update_advisory_inquiry(inquiry_id, status=None, internal_notes=None):
+    allowed = {'new', 'contacted', 'active', 'completed', 'closed'}
+    with get_session() as s:
+        row = s.query(AdvisoryInquiry).filter(AdvisoryInquiry.id == int(inquiry_id)).first()
+        if not row:
+            return None
+        if status in allowed:
+            row.status = status
+        if internal_notes is not None:
+            row.internal_notes = str(internal_notes)[:4000]
+        s.flush()
+        return row.to_dict()
 
 
 def create_charter_inquiry(data):
