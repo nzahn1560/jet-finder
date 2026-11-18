@@ -4,7 +4,7 @@
 {% block canonical %}{{ public_base }}/aircraft/{{ slug }}{% endblock %}
 {% block content %}
 <div class="container py-4" style="max-width:980px;">
-    <p class="mb-2"><a href="{{ url_for('aircraft_catalog') }}" style="color:#F05545;">Browse Aircraft</a></p>
+    <p class="mb-2"><a href="{{ url_for('home') }}" style="color:#F05545;">Jet Finder</a></p>
     <p class="text-uppercase mb-1" style="color:#F05545;">{{ aircraft.manufacturer }} · {{ aircraft.category }}</p>
     <h1>{{ aircraft.aircraft_name }}</h1>
     <p style="color:#ccc;">{{ aircraft.date_range or 'Year range unavailable' }}. This is a model profile, not a specific airplane offered for sale.</p>
@@ -83,7 +83,7 @@
             <li>Cruise speed: {{ aircraft.speed or 'Unavailable' }} kt</li>
             <li>Cabin volume: {{ aircraft.cabin_volume or 'Unavailable' }} cu ft</li>
         </ul>
-        <a class="btn btn-danger" href="{{ url_for('charter_search') }}?aircraft={{ slug }}">Plan this model in Charter Finder</a>
+        <a class="btn btn-danger" href="{{ url_for('charter_search') }}?aircraft={{ slug }}">Plan this model in Charter Tool</a>
     </section>
 </div>
 <script>

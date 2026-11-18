@@ -4061,9 +4061,9 @@
             <h1 class="finder-title">Find the Right Aircraft. Backed by Data.</h1>
             <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps buyers and charter customers compare aircraft using performance, operating cost, and mission data. The tools are free. No account is required.</p>
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-danger" href="#aircraft-selection">Find My Aircraft to Buy</a>
-                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Aircraft to Charter</a>
-                <a class="btn btn-outline-light" href="{{ url_for('aircraft_catalog') }}">Browse All Aircraft</a>
+                <a class="btn btn-danger" href="#aircraftGrid">Inquire to Buy</a>
+                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Inquire to Charter</a>
+                <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Free Advisory Session</a>
             </div>
         </div>
     </div>
@@ -5139,14 +5139,13 @@ document.addEventListener('click', function (event) {
 
     async function loadAllAircraftData() {
         try {
-            const listingsResp = await fetch('/api/user-listings', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-            const listings = listingsResp.ok ? await listingsResp.json() : [];
-            const listingRows = (Array.isArray(listings) ? listings : []).map(ac => normalizeAircraftRecord(ac, true));
-            allAircraftData = listingRows;
+            const dataResp = await fetch('/api/finder-aircraft', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+            const rows = dataResp.ok ? await dataResp.json() : [];
+            allAircraftData = (Array.isArray(rows) ? rows : []).map(ac => normalizeAircraftRecord(ac, false));
             filteredAircraftData = [...allAircraftData];
             return allAircraftData.length > 0;
         } catch (error) {
-            console.error('Error loading listings:', error);
+            console.error('Error loading aircraft:', error);
             allAircraftData = [];
             filteredAircraftData = [];
             return false;
@@ -5951,8 +5950,8 @@ document.addEventListener('click', function (event) {
                 <div class="empty-state-card text-center w-100">
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
-                        <h3 class="h4 mb-2" style="color:#f4f4f4;">No listings yet</h3>
-                        <p class="mb-0" style="color:#d0d0d0;">Approved aircraft for sale show up here. Nothing is on the marketplace right now.</p>
+                        <h3 class="h4 mb-2" style="color:#f4f4f4;">No aircraft match</h3>
+                        <p class="mb-0" style="color:#d0d0d0;">Change the filters to see more models from the aircraft database.</p>
                     </div>
                 </div>
             `;
@@ -6776,17 +6775,6 @@ document.addEventListener('click', function (event) {
                         <span class="listing-score__value" style="color:${overallScore === '—' ? '#fff' : scoreColor(overallScore)}">${overallScore}${overallScore === '—' ? '' : '%'}</span>
                     </div>
                     ${photoUrls.length > 1 ? `<button class="listing-photo-nav listing-photo-nav--prev" type="button" aria-label="Previous photo"><i class="fas fa-chevron-left"></i></button><button class="listing-photo-nav listing-photo-nav--next" type="button" aria-label="Next photo"><i class="fas fa-chevron-right"></i></button>` : ''}
-                    <button class="btn save-aircraft-btn listing-save" type="button"
-                            data-kind="${aircraft.is_user_listing ? 'listing' : 'catalog'}"
-                            data-id="${aircraft.listing_id || aircraft.id}"
-                            data-title="${listingTitle}"
-                            data-manufacturer="${(aircraft.manufacturer || '').replace(/"/g, '&quot;')}"
-                            data-price="${priceValue || 0}"
-                            data-location="${String(listingLocation).replace(/"/g, '&quot;')}"
-                            aria-label="Save"
-                            style="position:absolute; top:8px; right:8px; background:rgba(12,12,12,0.82); color:#fff; font-size:1.1rem; z-index:2;">
-                        <i class="far fa-bookmark"></i>
-                    </button>
                     </div>
                 
                 <div class="listing-face">
@@ -6797,6 +6785,7 @@ document.addEventListener('click', function (event) {
                         <i class="fas fa-map-marker-alt me-1"></i>${listingLocation}
                     </div>
                     <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
+                        <div style="font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8;">Average market purchase price</div>
                         <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px; color:#F05545;">
                             $${(priceValue || 0).toLocaleString()}
                         </div>
@@ -6819,21 +6808,9 @@ document.addEventListener('click', function (event) {
                         </details>` : ''}
                         
                         <div class="listing-actions">
-                            <button class="btn add-to-compare-btn" type="button"
-                                    data-compare-id="${aircraft.id}"
-                                    data-compare-name="${escCard(aircraft.manufacturer || '')} ${escCard(aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft')}">
-                                <i class="fas fa-plus"></i><span>Compare</span>
+                            <button class="btn inquire-buy" type="button" data-aircraft="${listingTitle}" style="grid-column: 1 / -1;">
+                                <i class="fas fa-paper-plane"></i><span>Inquire to Buy</span>
                             </button>
-                            <button class="btn save-aircraft-btn" type="button"
-                                    data-kind="${aircraft.is_user_listing ? 'listing' : 'catalog'}"
-                                    data-id="${aircraft.listing_id || aircraft.id}"
-                                    data-title="${listingTitle}"
-                                    data-manufacturer="${escCard(aircraft.manufacturer || '')}"
-                                    data-price="${Number(priceValue) || 0}"
-                                    data-location="${listingLocation}">
-                                <i class="far fa-bookmark"></i><span>Watch</span>
-                            </button>
-                            ${sellerId ? `<a class="btn" href="/people/${sellerId}"><i class="fas fa-user"></i><span>Seller</span></a>` : `<span class="btn" aria-disabled="true"><i class="fas fa-user"></i><span>Seller</span></span>`}
                         </div>
                     </div> <!-- End aircraft-content -->
                     <div class="listing-scroll__bar" aria-hidden="true"><span></span></div>
@@ -8535,6 +8512,66 @@ document.addEventListener('click', function (event) {
         }
     };
 
+</script>
+<div class="modal fade" id="buy-inquiry-modal" tabindex="-1" aria-labelledby="buy-inquiry-title">
+    <div class="modal-dialog">
+        <form class="modal-content bg-dark text-white" id="buy-inquiry-form">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="buy-inquiry-title">Inquire to Buy</h2>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p id="buy-inquiry-aircraft" class="mb-3"></p>
+                <input type="hidden" name="inquiry_type" value="purchase">
+                <input type="hidden" name="aircraft_name" id="buy-inquiry-name">
+                <label class="form-label">Name</label>
+                <input class="form-control bg-black text-white border-secondary mb-2" name="name" required>
+                <label class="form-label">Email</label>
+                <input class="form-control bg-black text-white border-secondary mb-2" name="email" type="email" required>
+                <label class="form-label">Phone</label>
+                <input class="form-control bg-black text-white border-secondary mb-2" name="phone" required>
+                <label class="form-label">Notes</label>
+                <textarea class="form-control bg-black text-white border-secondary mb-2" name="notes" rows="3"></textarea>
+                <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
+                <label class="form-check"><input class="form-check-input" type="checkbox" name="consent" required> Jetschool may contact me about this aircraft. This is not a purchase order.</label>
+                <p id="buy-inquiry-status" class="mt-2 mb-0" role="status"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" type="submit">Send inquiry</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+document.addEventListener('click', function (event) {
+    const button = event.target.closest('.inquire-buy');
+    if (!button) return;
+    const title = button.getAttribute('data-aircraft') || 'Aircraft';
+    document.getElementById('buy-inquiry-aircraft').textContent = title;
+    document.getElementById('buy-inquiry-name').value = title;
+    document.getElementById('buy-inquiry-status').textContent = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('buy-inquiry-modal')).show();
+});
+document.getElementById('buy-inquiry-form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    const form = event.target;
+    const status = document.getElementById('buy-inquiry-status');
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.consent = form.consent.checked;
+    data.aircraft_name = document.getElementById('buy-inquiry-name').value;
+    const token = document.querySelector('meta[name="csrf-token"]');
+    status.textContent = 'Sending…';
+    fetch('/api/inquiries', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : ''},
+        body: JSON.stringify(data),
+    }).then(function (response) {
+        return response.json().then(function (body) { return {ok: response.ok, body: body}; });
+    }).then(function (result) {
+        status.textContent = result.ok && result.body.id ? ('Inquiry ' + result.body.id + ' received.') : (result.body.error || 'Could not save that inquiry.');
+    }).catch(function () { status.textContent = 'Could not save that inquiry.'; });
+});
 </script>
 
 {% endblock %}

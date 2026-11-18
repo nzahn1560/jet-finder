@@ -11691,6 +11691,12 @@ def _money_or_unavailable(value):
     return f'${number:,.0f}'
 
 
+@app.route('/api/finder-aircraft')
+def api_finder_aircraft():
+    """Public model list for the Jet Finder cards. This is the same catalog already shown on the site."""
+    return jsonify(get_unified_aircraft_data())
+
+
 @app.route('/aircraft')
 def aircraft_catalog():
     rows = [advisory.catalog_card(row) for row in get_unified_aircraft_data()]
