@@ -17,7 +17,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="col-md-3">
                 <select class="form-select bg-dark text-white border-secondary" name="status">
-                    {% for status in ['new', 'contacted', 'active', 'completed', 'closed'] %}
+                    {% for status in ['new', 'contacted', 'qualified', 'active', 'completed', 'closed'] %}
                     <option {% if inquiry.status == status %}selected{% endif %}>{{ status }}</option>
                     {% endfor %}
                 </select>

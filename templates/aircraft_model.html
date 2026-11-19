@@ -47,6 +47,23 @@
             <li>Best all-around score: {{ aircraft.best_all_around_dollar or 'Unavailable' }}</li>
         </ul>
         <p>Landing distance is not stored separately from balanced field length, so runway suitability for a specific airport is not confirmed here.</p>
+        <h2>{{ aircraft.aircraft_name }} Aircraft Currently for Sale</h2>
+        {% if for_sale %}
+        <div class="row g-3 mb-4">
+            {% for item in for_sale %}
+            <div class="col-md-6">
+                <a href="{{ url_for('public_listing', listing_id=item.id) }}" style="display:block;background:#141414;border:1px solid #333;border-radius:12px;padding:1rem;color:#fff;text-decoration:none;">
+                    {% if item.image %}<img src="{{ item.image }}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:8px;">{% endif %}
+                    <strong>{{ item.title }}</strong>
+                    <p class="mb-0" style="color:#F05545;">{{ item.price_text or 'Price on request' }}{% if item.place %} · {{ item.place }}{% endif %}</p>
+                    <p class="mb-0" style="color:#aaa;">Asking price for this airplane. The model price above is an average.</p>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No approved listing for this model is public right now.</p>
+        {% endif %}
         <a class="btn btn-danger me-2" href="#purchase-form">Inquire for Aircraft Purchase</a>
         <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising&aircraft={{ aircraft.aircraft_name|urlencode }}">Schedule a Free Advising Call</a>
         <form id="purchase-form" class="mt-4 p-3" style="background:#141414;border:1px solid #333;border-radius:12px;">

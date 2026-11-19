@@ -4059,11 +4059,13 @@
     <div class="finder-heading">
         <div>
             <h1 class="finder-title">Find the Right Aircraft. Backed by Data.</h1>
-            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps buyers and charter customers compare aircraft using performance, operating cost, and mission data. The tools are free. No account is required.</p>
+            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps people compare aircraft using performance, operating cost, and mission data. The research tools and basic aircraft listings are free. No account is required to research an aircraft or contact a seller.</p>
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-danger" href="#aircraftGrid">Inquire to Buy</a>
-                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Inquire to Charter</a>
-                <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Free Advisory Session</a>
+                <a class="btn btn-danger" href="#aircraftGrid">Find My Perfect Aircraft</a>
+                <a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>
+                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Perfect Charter</a>
+                <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">List Your Aircraft — Free</a>
+                <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Schedule a Free Aircraft Advising Call</a>
             </div>
         </div>
     </div>
@@ -6806,6 +6808,7 @@ document.addEventListener('click', function (event) {
                             ${listingDescription ? `<p>${listingDescription}</p>` : ''}
                         </details>` : ''}
                         
+                        ${Number(aircraft.listings_for_sale) > 0 && aircraft.model_path ? `<p style="margin:0.4rem 0;"><a href="${escCard(aircraft.model_path)}" style="color:#F05545;">${Number(aircraft.listings_for_sale)} listed for sale</a></p>` : ''}
                         <div class="listing-actions">
                             <button class="btn inquire-buy" type="button" data-aircraft="${listingTitle}" style="grid-column: 1 / -1;">
                                 <i class="fas fa-paper-plane"></i><span>Inquire to Buy</span>

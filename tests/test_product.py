@@ -63,13 +63,16 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(home.status_code, 200)
         self.assertIn(b'<title>Jetschool: Jet Finder</title>', home.data)
         self.assertIn(b'Find the Right Aircraft. Backed by Data.', home.data)
+        self.assertIn(b'Find My Perfect Aircraft', home.data)
+        self.assertIn(b'Explore Aircraft for Sale', home.data)
+        self.assertIn(b'Find My Perfect Charter', home.data)
+        self.assertIn(b'Create Listing', home.data)
+        self.assertIn(b'>Register<', home.data)
+        self.assertIn(b'Schedule a Free Aircraft Advising Call', home.data)
         self.assertIn(b'Inquire to Buy', home.data)
-        self.assertIn(b'Inquire to Charter', home.data)
-        self.assertIn(b'Free Advisory Session', home.data)
         self.assertNotIn(b'Browse All Aircraft', home.data)
-        self.assertNotIn(b'>Create Listing<', home.data)
         self.assertNotIn(b'Broker Map', home.data)
-        self.assertNotIn(b'>Register<', home.data)
+        self.assertNotIn(b'Off Market', home.data)
         self.assertNotIn(b'Compare private aircraft by cost, range, and route', home.data)
         self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
         self.assertIn(b'rel="canonical" href="http://localhost/"', home.data)
@@ -459,9 +462,8 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403, blocked.get_json())
         self._login('broker@example.com', 'broker-pass-1')
         broker_page = self.client.get('/create-listing')
-        self.assertIn(b'Off market', broker_page.data)
-        self.assertIn(b'For sale', broker_page.data)
-        self.assertIn(b'Wanted', broker_page.data)
+        self.assertNotIn(b'Off market', broker_page.data)
+        self.assertNotIn(b'Wanted', broker_page.data)
         self.assertNotIn(b'value="private"', broker_page.data)
         created = self.client.post('/api/listings', json=self._payload('Broker Quiet', 'broker_only'))
         self.assertEqual(created.status_code, 201, created.get_json())
@@ -470,6 +472,7 @@ class ProductTests(unittest.TestCase):
         previous_flag = os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS')
         previous_key = os.environ.get('STRIPE_SECRET_KEY')
         os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
+        os.environ['LISTINGS_REQUIRE_PAYMENT'] = 'true'
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallonly'
         try:
             self._login('seller@example.com', 'seller-pass-1')
@@ -498,7 +501,7 @@ class ProductTests(unittest.TestCase):
                 self.assertIn(f"listing-{public.get_json()['id']}-user-{self.seller['id']}-sn-5501", url)
                 self.assertNotIn('amount_cents=1', url)
             page = self.client.get('/create-listing')
-            self.assertIn(b'The listing expires December 31, 2027.', page.data)
+            self.assertIn(b'Basic listings are free', page.data)
             self.assertNotIn(b'opens checkout', page.data)
             self.assertIn(b"/api/listings/' + listingId + '/checkout'", page.data)
             self.assertIn(b'X-CSRF-Token', page.data)
@@ -528,6 +531,7 @@ class ProductTests(unittest.TestCase):
         finally:
             if previous_flag is None:
                 os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
+                os.environ.pop('LISTINGS_REQUIRE_PAYMENT', None)
             else:
                 os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = previous_flag
             if previous_key is None:
@@ -539,6 +543,7 @@ class ProductTests(unittest.TestCase):
         previous_flag = os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS')
         previous_key = os.environ.get('STRIPE_SECRET_KEY')
         os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
+        os.environ['LISTINGS_REQUIRE_PAYMENT'] = 'true'
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paywallreason'
         try:
             self._login('seller@example.com', 'seller-pass-1')
@@ -567,6 +572,7 @@ class ProductTests(unittest.TestCase):
         finally:
             if previous_flag is None:
                 os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
+                os.environ.pop('LISTINGS_REQUIRE_PAYMENT', None)
             else:
                 os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = previous_flag
             if previous_key is None:
@@ -1347,6 +1353,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'<lastmod>', sitemap.data)
         self.assertNotIn(f'/listing/{hidden_id}'.encode(), sitemap.data)
         self.assertNotIn(b'/off-market', sitemap.data)
+        self.assertNotIn(b'/brokers', sitemap.data)
         self.assertNotIn(b'/admin', sitemap.data)
         sale = self.client.get('/aircraft-for-sale')
         self.assertEqual(sale.status_code, 200)
@@ -2320,6 +2327,7 @@ class ProductTests(unittest.TestCase):
         previous_flag = os.environ.get('REQUIRE_PAYMENT_FOR_LISTINGS')
         previous_key = os.environ.get('STRIPE_SECRET_KEY')
         os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = 'true'
+        os.environ['LISTINGS_REQUIRE_PAYMENT'] = 'true'
         os.environ['STRIPE_SECRET_KEY'] = 'sk_test_paylink'
         try:
             with patch.object(pricing, 'listing_price_cents', return_value=1499):
@@ -2378,6 +2386,7 @@ class ProductTests(unittest.TestCase):
         finally:
             if previous_flag is None:
                 os.environ.pop('REQUIRE_PAYMENT_FOR_LISTINGS', None)
+                os.environ.pop('LISTINGS_REQUIRE_PAYMENT', None)
             else:
                 os.environ['REQUIRE_PAYMENT_FOR_LISTINGS'] = previous_flag
             if previous_key is None:

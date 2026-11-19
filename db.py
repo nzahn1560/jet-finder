@@ -27,7 +27,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, D
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import func
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _log = logging.getLogger(__name__)
 Base = declarative_base()
@@ -332,6 +332,16 @@ class AdvisoryInquiry(Base):
         if created is not None and not isinstance(created, str):
             data['created_at'] = created.isoformat()
         return data
+
+
+class ListingEvent(Base):
+    """A counted listing action. The visitor hash is not shown to sellers."""
+    __tablename__ = 'listing_events'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    listing_id = Column(Integer, nullable=False, index=True)
+    event_type = Column(String(40), nullable=False)
+    visitor_hash = Column(String(64))
+    created_at = Column(DateTime, server_default=func.now(), index=True)
 
 
 class CharterInquiry(Base):
@@ -1651,7 +1661,7 @@ def list_advisory_inquiries(inquiry_type=None, status=None):
 
 
 def update_advisory_inquiry(inquiry_id, status=None, internal_notes=None):
-    allowed = {'new', 'contacted', 'active', 'completed', 'closed'}
+    allowed = {'new', 'contacted', 'qualified', 'active', 'completed', 'closed'}
     with get_session() as s:
         row = s.query(AdvisoryInquiry).filter(AdvisoryInquiry.id == int(inquiry_id)).first()
         if not row:
@@ -1662,6 +1672,91 @@ def update_advisory_inquiry(inquiry_id, status=None, internal_notes=None):
             row.internal_notes = str(internal_notes)[:4000]
         s.flush()
         return row.to_dict()
+
+
+def record_listing_event(listing_id, event_type, visitor_hash=None):
+    """Store one listing event. A repeat from the same visitor within 30 minutes is ignored."""
+    allowed = {'impression', 'detail_view', 'match', 'click', 'inquiry'}
+    if event_type not in allowed:
+        return False
+    cutoff = datetime.utcnow() - timedelta(minutes=30)
+    with get_session() as s:
+        if visitor_hash:
+            recent = (
+                s.query(ListingEvent.id)
+                .filter(
+                    ListingEvent.listing_id == int(listing_id),
+                    ListingEvent.event_type == event_type,
+                    ListingEvent.visitor_hash == visitor_hash,
+                    ListingEvent.created_at >= cutoff,
+                )
+                .first()
+            )
+            if recent:
+                return False
+        s.add(ListingEvent(
+            listing_id=int(listing_id),
+            event_type=event_type,
+            visitor_hash=visitor_hash or None,
+        ))
+        return True
+
+
+def listing_analytics(listing_ids, days=None):
+    """Counts for listings the caller already owns. Raw visitor hashes stay out of the result."""
+    ids = [int(item) for item in listing_ids]
+    if not ids:
+        return {'totals': {}, 'listings': [], 'days': []}
+    cutoff = None
+    if days:
+        cutoff = datetime.utcnow() - timedelta(days=int(days))
+    with get_session() as s:
+        query = s.query(ListingEvent).filter(ListingEvent.listing_id.in_(ids))
+        if cutoff is not None:
+            query = query.filter(ListingEvent.created_at >= cutoff)
+        rows = query.all()
+    names = {
+        'detail_view': 'views',
+        'impression': 'impressions',
+        'match': 'matches',
+        'click': 'clicks',
+        'inquiry': 'inquiries',
+    }
+    totals = {name: 0 for name in names.values()}
+    totals['unique_visitors'] = 0
+    per = {item: {name: 0 for name in names.values()} | {'unique_visitors': set()} for item in ids}
+    visitors = set()
+    by_day = {}
+    for row in rows:
+        key = names.get(row.event_type)
+        if not key:
+            continue
+        totals[key] += 1
+        bucket = per.setdefault(row.listing_id, {name: 0 for name in names.values()} | {'unique_visitors': set()})
+        bucket[key] += 1
+        if row.visitor_hash and row.event_type == 'detail_view':
+            visitors.add(row.visitor_hash)
+            bucket['unique_visitors'].add(row.visitor_hash)
+        day = row.created_at.strftime('%Y-%m-%d') if row.created_at else ''
+        if day:
+            slot = by_day.setdefault(day, {'day': day, 'views': 0, 'inquiries': 0})
+            if row.event_type == 'detail_view':
+                slot['views'] += 1
+            elif row.event_type == 'inquiry':
+                slot['inquiries'] += 1
+    totals['unique_visitors'] = len(visitors)
+    listings = []
+    for listing_id, bucket in per.items():
+        listings.append({
+            'listing_id': listing_id,
+            'views': bucket['views'],
+            'impressions': bucket['impressions'],
+            'matches': bucket['matches'],
+            'clicks': bucket['clicks'],
+            'inquiries': bucket['inquiries'],
+            'unique_visitors': len(bucket['unique_visitors']),
+        })
+    return {'totals': totals, 'listings': listings, 'days': [by_day[key] for key in sorted(by_day)]}
 
 
 def create_charter_inquiry(data):

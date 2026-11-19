@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Listing Analytics{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:900px;">
+    <h1>Listing analytics</h1>
+    <p>These counts are from visits recorded on Jetschool. A match is not a listing view, and a button click is not an inquiry.</p>
+    <div class="d-flex gap-2 mb-3">
+        <a class="btn btn-outline-light" href="{{ url_for('seller_analytics', days=7) }}">Last 7 days</a>
+        <a class="btn btn-outline-light" href="{{ url_for('seller_analytics', days=30) }}">Last 30 days</a>
+        <a class="btn btn-outline-light" href="{{ url_for('seller_analytics', days=90) }}">Last 90 days</a>
+        <a class="btn btn-outline-light" href="{{ url_for('seller_analytics', days=0) }}">All time</a>
+    </div>
+    <p>Showing {{ days }}.</p>
+    <ul>
+        <li>Listing views: {{ stats.totals.views or 0 }}</li>
+        <li>Unique visitors: {{ stats.totals.unique_visitors or 0 }}</li>
+        <li>Aircraft Finder matches: {{ stats.totals.matches or 0 }}</li>
+        <li>Listing clicks: {{ stats.totals.clicks or 0 }}</li>
+        <li>Contact inquiries: {{ stats.totals.inquiries or 0 }}</li>
+    </ul>
+    <h2>By listing</h2>
+    {% for item in stats.listings %}
+    <p><strong>{{ item.title }}</strong> — views {{ item.views }}, visitors {{ item.unique_visitors }}, matches {{ item.matches }}, inquiries {{ item.inquiries }}</p>
+    {% else %}
+    <p>No listings on this account yet.</p>
+    {% endfor %}
+    <h2>By day</h2>
+    {% for day in stats.days %}
+    <p>{{ day.day }}: {{ day.views }} views, {{ day.inquiries }} inquiries</p>
+    {% else %}
+    <p>No recorded activity in this period.</p>
+    {% endfor %}
+</div>
+{% endblock %}

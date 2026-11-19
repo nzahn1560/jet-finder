@@ -507,24 +507,7 @@
                                         placeholder="you@example.com" required>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Where should this listing appear?</label>
-                                <div class="market-choice">
-                                    <label><input type="radio" name="market" value="public" {% if not off_market_allowed or request.args.get('market') not in ['off_market', 'broker_only'] %}checked{% endif %}> Public</label>
-                                    {% if off_market_allowed %}
-                                    <label><input type="radio" name="market" value="broker_only" {% if request.args.get('market') in ['off_market', 'broker_only'] %}checked{% endif %}> Off market</label>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            {% if off_market_allowed %}
-                            <div class="mb-3" id="intent-choice" hidden>
-                                <label class="form-label">For sale or wanted?</label>
-                                <div class="market-choice">
-                                    <label><input type="radio" name="listing_intent" value="sale"> For sale</label>
-                                    <label><input type="radio" name="listing_intent" value="wanted"> Wanted</label>
-                                </div>
-                            </div>
-                            {% endif %}
+                            <input type="hidden" name="market" value="public">
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
                                 <textarea class="form-control" id="description" name="description" rows="4"
@@ -590,7 +573,7 @@
 
                     <!-- Form Actions -->
                     <div class="text-center mt-5">
-                        <p id="listing-next-step" class="text-white mb-3">The listing fee is $49.99 per month. Enter code 100OFF at checkout for a free listing through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.</p>
+                        <p id="listing-next-step" class="text-white mb-3">Basic listings are free. There is no listing fee. An administrator reviews the listing before it is public.</p>
                         <button type="button" class="btn btn-secondary me-3" onclick="saveDraft()">
                             <i class="fas fa-save me-2"></i>Save Draft
                         </button>
@@ -635,9 +618,7 @@
             } else if (editing) {
                 next.textContent = 'Saving this listing does not open checkout.';
             } else {
-                next.textContent = off
-                    ? 'Off-market listings go to an admin for approval. There is no listing fee.'
-                    : 'The listing fee is $49.99 per month. Enter code 100OFF at checkout for a free listing through December 31, 2026. The listing expires December 31, 2027. Wait 1-5 business days for approval.';
+                next.textContent = 'Basic listings are free. There is no listing fee. An administrator reviews the listing before it is public.';
             }
         }
         const submitLink = document.getElementById('listing-submit');
@@ -647,20 +628,8 @@
         radio.addEventListener('change', syncOffMarketFields);
     });
     syncOffMarketFields();
-    fetch('/api/pricing/listing').then(function (response) { return response.json(); }).then(function (price) {
-        const box = document.getElementById('listing-price-box');
-        const note = document.getElementById('listing-price-note');
-        if (!box || !price) return;
-        const current = '$' + Number(price.amount_dollars).toFixed(2) + ' per month';
-        box.innerHTML = '<strong style="font-size:2rem;">' + current + '</strong>';
-        if (note) note.textContent = price.note || '';
-        const next = document.getElementById('listing-next-step');
-        const picked = document.querySelector('[name="market"]:checked');
-        const editingNow = !!new URLSearchParams(window.location.search).get('edit');
-        if (next && !editingNow && picked && picked.value !== 'broker_only') {
-            next.textContent = price.label || '';
-        }
-    }).catch(function () {});
+    const feeSection = document.getElementById('listing-fee-section');
+    if (feeSection) feeSection.hidden = true;
     let currentListingType = 'aircraft';
 
     function setListingType(type) {
