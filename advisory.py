@@ -15,8 +15,6 @@ ROUTE_FACTOR = 1.08
 RANGE_RESERVE = 0.85
 MAX_CROSS_TRACK_NM = 80.0
 MAX_DIVERSION_FACTOR = 1.45
-CHARTER_RATE_MULTIPLE = 3.25
-CREW_HOURS = 1.7
 IMAGE_ROLES = ('exterior', 'cabin', 'cockpit', 'cabin-extra')
 
 
@@ -156,6 +154,7 @@ def _point(airport: dict, runways: dict) -> dict:
         'name': airport.get('name') or _code(airport),
         'lat': airport.get('lat'),
         'lon': airport.get('lon'),
+        'country': str(airport.get('country') or '').strip().upper(),
         'runway_ft': _runway(airport, runways),
         'kind': 'airport',
     }
@@ -214,11 +213,9 @@ def _takeoff_fits(runway_ft: int | None, field_length: float | None) -> bool | N
 
 
 def _charter_rate(aircraft: dict) -> float | None:
-    """Charter rate is 325% of the spreadsheet total hourly operating cost."""
-    hourly = _num(aircraft.get('total_hourly_cost'))
-    if not hourly or hourly <= 0:
-        return None
-    return hourly * CHARTER_RATE_MULTIPLE
+    """Planning charter rate from variable cost. Total hourly cost includes fixed ownership costs."""
+    import charter_pricing
+    return charter_pricing.hourly_rate(aircraft, charter_pricing.active_config()).get('hourly_rate')
 
 
 def _hours(distance_nm: float, speed: float, legs: int) -> float | None:
@@ -240,7 +237,7 @@ def plan_charter(
 
     Runway fit uses the same rule as Jet Finder: balanced field length must be
     no longer than the recorded runway at every airport on the route. The
-    charter price is 325% of total hourly operating cost, plus 1.7 crew hours.
+    charter price is a planning range from variable operating cost. It is not an operator quote.
     """
     start = _point(origin, runways)
     end = _point(destination, runways)
@@ -252,6 +249,10 @@ def plan_charter(
     trip_nm = direct * ROUTE_FACTOR
     stops_pool = _candidates(start, end, airports, runways, direct) if trip_nm > 0 else []
     pax = max(1, int(passengers or 1))
+    import charter_pricing
+    pricing = charter_pricing.active_config()
+    domestic = start.get('country') in ('US', 'USA') and end.get('country') in ('US', 'USA')
+    international = not domestic and ('US' in (start.get('country'), end.get('country')) or 'USA' in (start.get('country'), end.get('country')))
     suitable = []
     unverified = []
     excluded = {'seats': 0, 'range': 0, 'runway': 0, 'stops': 0, 'missing': 0}
@@ -284,11 +285,20 @@ def plan_charter(
             runway_status = 'A runway requirement is not available for this aircraft'
         else:
             runway_status = 'Runway length is not recorded for every airport on this route'
-        rate = _charter_rate(aircraft)
         one_way_nm = route['distance_nm']
         hours = _hours(one_way_nm * (2 if round_trip else 1), speed, route['legs'] * (2 if round_trip else 1))
-        billed = round(hours + CREW_HOURS, 2) if hours else None
-        estimate = int(round(billed * rate)) if billed and rate else None
+        priced = charter_pricing.price_mission(
+            aircraft,
+            hours,
+            fuel_stops=route['stops'],
+            passengers=pax,
+            round_trip=round_trip,
+            domestic=domestic,
+            international=international,
+            config=pricing,
+        )
+        public = charter_pricing.public_price(priced)
+        photo = next((slot.get('url') for slot in image_slots(aircraft) if slot.get('present') and slot.get('url')), '')
         card = {
             'id': aircraft.get('id'),
             'slug': slug_for(aircraft),
@@ -305,18 +315,11 @@ def plan_charter(
             'max_altitude': int(_num(aircraft.get('max_altitude')) or 0) or None,
             'wingspan': _num(aircraft.get('wingspan')),
             'flight_hours': round(hours, 2) if hours else None,
-            'crew_hours': CREW_HOURS,
-            'billed_hours': billed,
+            'billed_hours': round(hours, 2) if hours else None,
             'distance_nm': round(one_way_nm * (2 if round_trip else 1), 1),
-            'hourly_operating_cost': _num(aircraft.get('total_hourly_cost')) or None,
-            'hourly_charter_rate': round(rate, 2) if rate else None,
-            'estimated_total': estimate,
-            'price_note': (
-                'This estimate includes flight time and crew. It is not a confirmed quote. '
-                'An authorized operator confirms the final figure.'
-                if estimate else
-                'A charter estimate is not available for this aircraft.'
-            ),
+            'hourly_operating_cost': _num(aircraft.get('hourly_variable_cost')) or None,
+            'image': photo,
+            **public,
             'confirmed_suitable': confirmed,
             'runway_status': runway_status,
             'fuel_status': 'Nonstop' if route['stops'] == 0 else 'Fuel stop calculated from range',
@@ -328,6 +331,15 @@ def plan_charter(
         else:
             unverified.append(card)
 
+    try:
+        from product import score_aircraft_for_trip
+        scores = score_aircraft_for_trip(aircraft_list, trip_nm)
+    except Exception:
+        scores = {}
+    for card in suitable + unverified:
+        score = scores.get(card.get('id')) or {}
+        card['all_around_dollar'] = score.get('dollar')
+        card['all_around_percent'] = score.get('percent')
     unverified.sort(key=lambda row: (row['fuel_stops'], row['estimated_total'] or 10 ** 12, row['name']))
     return {
         'ok': True,
@@ -342,8 +354,7 @@ def plan_charter(
         'notice': (
             'Aircraft are compared for this charter the same way they are compared for a purchase. '
             'A result is shown when the aircraft can fly the mission and its runway requirement fits '
-            'the airports. The price is a charter estimate. An authorized operator confirms the '
-            'aircraft and the final figure. Jetschool is not the operator.'
+            'the airports. ' + charter_pricing.DISCLAIMER + ' Jetschool is not the operator.'
         ),
     }
 

@@ -140,24 +140,11 @@
                 {% if listing.engine_hours %}<div class="showroom__stat"><span>Engines</span><b>{{ listing.engine_hours }} hrs</b></div>{% endif %}
             </div>
             <div class="d-flex flex-wrap gap-2 my-3">
-                <a class="btn btn-danger" href="#contact-seller">Contact Seller</a>
+                {% if listing.user_id %}
+                <a class="btn btn-danger" href="/people/{{ listing.user_id }}">View seller contact details</a>
+                {% endif %}
                 <a class="btn btn-outline-light" href="#jetschool-buy">Have Jetschool Help Me Buy This Aircraft</a>
             </div>
-            <form id="contact-seller" class="showroom__notes">
-                <h2>Contact Seller</h2>
-                <p>This message goes to {{ seller_name }}, the seller of this listing. It does not hire Jetschool.</p>
-                <input type="hidden" name="inquiry_type" value="seller">
-                <input type="hidden" name="listing_id" value="{{ listing.id }}">
-                <input type="hidden" name="aircraft_name" value="{{ listing.title }}">
-                <input class="form-control bg-dark text-white border-secondary mb-2" name="name" placeholder="Name" required>
-                <input class="form-control bg-dark text-white border-secondary mb-2" name="email" type="email" placeholder="Email" required>
-                <input class="form-control bg-dark text-white border-secondary mb-2" name="phone" placeholder="Phone" required>
-                <textarea class="form-control bg-dark text-white border-secondary mb-2" name="notes" rows="3" placeholder="Message"></textarea>
-                <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
-                <label class="form-check mb-2"><input class="form-check-input" type="checkbox" name="consent" required> I agree the seller may contact me about this airplane.</label>
-                <button class="btn btn-danger" type="submit">Send to seller</button>
-                <p class="inquiry-status mt-2" role="status"></p>
-            </form>
             <form id="jetschool-buy" class="showroom__notes">
                 <h2>Have Jetschool Help Me Buy This Aircraft</h2>
                 <p>This is a separate request for Jetschool to represent you. It is optional.</p>
@@ -188,24 +175,6 @@
                 {% if listing.interior_year %}Interior {{ listing.interior_year }}.{% endif %}
             </p>
             {% endif %}
-            {% set viewer = get_current_user_info() %}
-            {% if viewer and brokers %}
-            <form class="showroom__send" id="send-listing">
-                <strong>Send this listing to a broker</strong>
-                <select name="broker_id" required>
-                    {% for broker in brokers %}
-                    <option value="{{ broker.id }}">{{ broker.name }}{% if broker.place %} · {{ broker.place }}{% endif %}</option>
-                    {% endfor %}
-                </select>
-                <textarea name="notes" maxlength="2000" rows="3" placeholder="Notes for the broker"></textarea>
-                <label for="send-email">Email</label>
-                <input id="send-email" name="contact_email" type="email" maxlength="254" required autocomplete="email" value="{{ viewer.email or '' }}">
-                <label for="send-phone">Phone</label>
-                <input id="send-phone" name="contact_phone" type="tel" maxlength="40" required autocomplete="tel" value="{{ viewer.phone or '' }}">
-                <button type="submit">Send listing</button>
-                <span id="send-listing-status" style="color:#c8c8c8;"></span>
-            </form>
-            {% endif %}
         </div>
     </div>
 </article>
@@ -234,37 +203,8 @@
     next.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); show(1, 'next'); });
 })();
 </script>
-{% if viewer and brokers %}
 <script>
-document.getElementById('send-listing').addEventListener('submit', async function (event) {
-    event.preventDefault();
-    const status = document.getElementById('send-listing-status');
-    const data = new FormData(this);
-    status.textContent = 'Sending...';
-    const response = await fetch('/api/brokers/' + data.get('broker_id') + '/messages', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            kind: 'listing',
-            listing_id: {{ listing.id }},
-            notes: data.get('notes') || '',
-            contact_email: data.get('contact_email') || '',
-            contact_phone: data.get('contact_phone') || '',
-        }),
-    });
-    const body = await response.json().catch(function () { return {}; });
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: response.ok ? 'listing_broker_send' : 'listing_broker_send_failed', listing_id: {{ listing.id }} });
-    if (typeof window.gtag === 'function') {
-        window.gtag('event', response.ok ? 'listing_broker_send' : 'listing_broker_send_failed', { listing_id: {{ listing.id }} });
-    }
-    status.textContent = response.ok ? 'Sent to the broker.' : (body.message || 'Could not send that listing.');
-});
-</script>
-{% endif %}
-<script>
-['contact-seller', 'jetschool-buy'].forEach(function (id) {
+['jetschool-buy'].forEach(function (id) {
     const form = document.getElementById(id);
     if (!form) return;
     form.addEventListener('submit', function (event) {

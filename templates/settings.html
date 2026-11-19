@@ -49,9 +49,7 @@
             <h2>General</h2>
             <p>{{ user.first_name or '' }} {{ user.last_name or '' }}</p>
             <p>{{ user.email }}</p>
-            <p>{{ (user.profile_role or 'member')|replace('_', ' ')|title }}{% if user.company %} · {{ user.company }}{% endif %}</p>
-            {% if user.broker_specialties %}<p>Aircraft specialty: {{ user.broker_specialties }}</p>{% endif %}
-            {% if user.broker_years %}<p>Years in business: {{ user.broker_years }}</p>{% endif %}
+            {% if user.phone %}<p>{{ user.phone }}</p>{% endif %}
             {% if user.created_at %}<p class="settings__note">Account opened {{ user.created_at }}</p>{% endif %}
             <p>Jetschool is an aircraft brokerage. A purchase or charter is not complete until it is confirmed with you.</p>
             <p>
@@ -89,7 +87,7 @@
                 <input type="hidden" name="email_opt_in" value="0">
                 <label class="settings__check" for="email-opt-in">
                     <input id="email-opt-in" name="email_opt_in" type="checkbox" value="1" {% if user.email_opt_in not in [false, 0, '0'] %}checked{% endif %}>
-                    <span>Send me optional emails, such as watch alerts and messages. Uncheck this to opt out.</span>
+                    <span>Send me optional emails, such as watch alerts. Uncheck this to opt out.</span>
                 </label>
                 <p class="settings__note">Messages about your account still come by email.</p>
                 <div class="settings__actions">
@@ -114,7 +112,7 @@
 </div>
 <script>
 document.getElementById('delete-account').addEventListener('click', async function () {
-    if (!window.confirm('Delete this account? Your profile, messages, and listings will be removed.')) return;
+    if (!window.confirm('Delete this account? Your profile and listings will be removed.')) return;
     this.disabled = true;
     const response = await fetch('/api/account', { method: 'DELETE', credentials: 'include' });
     if (!response.ok) {

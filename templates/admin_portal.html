@@ -154,12 +154,9 @@
             <button type="button" class="ap__btn ap__btn--secondary" id="account-close">Close</button>
         </div>
         <section class="review__panel" id="account-body"></section>
-        <label for="account-message">Message this person. It shows in their Messages.</label>
-        <textarea id="account-message" maxlength="4000" placeholder="Write the message"></textarea>
         <div class="review__actions">
             <button type="button" class="ap__btn ap__btn--approve" id="account-approve" hidden>Approve</button>
             <button type="button" class="ap__btn ap__btn--reject" id="account-deny" hidden>Deny</button>
-            <button type="button" class="ap__btn ap__btn--approve" id="account-send">Send message</button>
             <a class="ap__btn ap__btn--secondary" id="account-profile" href="/people/0">Open public profile</a>
             <button type="button" class="ap__btn ap__btn--reject" id="account-revoke" hidden>Revoke subscription</button>
             <button type="button" class="ap__btn ap__btn--reject" id="account-delete">Delete account</button>
@@ -181,7 +178,7 @@
         <label for="review-message">Message to the seller. They can edit and send it back. A live listing stays up.</label>
         <textarea id="review-message" placeholder="What they need to fix"></textarea>
         <div class="review__actions">
-            <button type="button" class="ap__btn ap__btn--secondary" id="review-send">Send message</button>
+            <button type="button" class="ap__btn ap__btn--secondary" id="review-send">Send back</button>
             <button type="button" class="ap__btn ap__btn--approve" id="review-approve">Approve</button>
             <button type="button" class="ap__btn ap__btn--reject" id="review-reject">Reject</button>
         </div>
@@ -263,7 +260,7 @@ async function loadAdminListings() {
                 + '    </div>'
                 + '    <div class="ap__col"><span class="ap__badge" style="background:' + color + '22; color:' + color + ';">' + esc(updateWaiting ? 'update' : l.status) + '</span></div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-                + (l.owner && l.owner.id ? '      <button class="ap__btn ap__btn--approve" data-user-message="' + l.owner.id + '">Message</button>' : '')
+                + (l.owner && l.owner.id ? '      <a class="ap__btn ap__btn--secondary" href="/people/' + l.owner.id + '">Profile</a>' : '')
                 + '      <button class="ap__btn ap__btn--approve" data-act="approve" data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>Approve</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="reject"  data-id="' + l.id + '"' + (updateWaiting ? ' data-pending="1"' : '') + '>' + (updateWaiting ? 'Reject update' : 'Reject') + '</button>'
                 + '      <button class="ap__btn ap__btn--reject"  data-act="suspend" data-id="' + l.id + '">Suspend</button>'
@@ -277,11 +274,10 @@ async function loadAdminListings() {
                 + (l.rejection_reason ? '<div class="ap__col" style="margin-top:0.5rem;color:#ffb4b4;">Reason: ' + esc(l.rejection_reason) + '</div>' : '')
                 + '</div>';
         }).join('');
-        bindAccountMessages(target);
         target.querySelectorAll('.ap__card').forEach(function (card) {
             card.addEventListener('click', function () { openReview(card.getAttribute('data-id')); });
         });
-        target.querySelectorAll('.ap__photos a').forEach(function (link) {
+        target.querySelectorAll('a').forEach(function (link) {
             link.addEventListener('click', function (event) { event.stopPropagation(); });
         });
         target.querySelectorAll('button[data-act]').forEach(function (btn) {
@@ -363,17 +359,15 @@ function renderAdminUsers() {
                 + '    <div class="ap__col" style="flex:1;min-width:220px;">'
                 + '      <strong>' + esc(name) + '</strong> ' + (u.is_admin ? '<span class="ap__badge" style="background:#F0554522;color:#F05545;margin-left:0.5rem;">ADMIN</span>' : '') + '<br>'
                 + '      ' + esc(u.email) + (u.phone ? ' · ' + esc(u.phone) : '') + '<br>'
-                + '      <span style="color:#8e8e93;font-size:0.85rem;">Role: ' + esc(u.profile_role || 'other') + ' · Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
+                + '      <span style="color:#8e8e93;font-size:0.85rem;">Joined: ' + esc((u.created_at || '').split('T')[0]) + '</span>'
                 + '    </div>'
                 + '    <div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
                 + '      <a class="ap__btn ap__btn--secondary" href="/people/' + u.id + '">View</a>'
-                + '      <button class="ap__btn ap__btn--approve" data-user-message="' + u.id + '">Message</button>'
                 + (u.is_admin ? '' : '      <button class="ap__btn ap__btn--reject" data-user-delete="' + u.id + '">Delete</button>')
                 + '    </div>'
                 + '  </div>'
                 + '</div>';
         }).join('');
-        bindAccountMessages(target);
         target.querySelectorAll('[data-user-delete]').forEach(function (button) {
             button.addEventListener('click', function () { deleteAccount(button.getAttribute('data-user-delete')); });
         });
@@ -398,28 +392,18 @@ async function loadAdminUsers() {
 document.getElementById('user-search').addEventListener('input', renderAdminUsers);
 document.getElementById('user-role').addEventListener('change', renderAdminUsers);
 
-function bindAccountMessages(root) {
-    root.querySelectorAll('[data-user-message]').forEach(function (button) {
-        button.addEventListener('click', function (event) {
-            event.stopPropagation();
-            openAccount(button.getAttribute('data-user-message'), true);
-        });
-    });
-}
-
 let accountId = null;
 
 function accountLine(label, value) {
     return '<p><span style="color:#bdbdbd;">' + esc(label) + '</span> ' + esc(value || '—') + '</p>';
 }
 
-async function openAccount(id, focusMessage) {
+async function openAccount(id) {
     accountId = id;
     const screen = document.getElementById('account-screen');
     const body = document.getElementById('account-body');
     const status = document.getElementById('account-status');
     status.textContent = '';
-    document.getElementById('account-message').value = '';
     body.innerHTML = '<p>Loading</p>';
     screen.hidden = false;
     const response = await fetch('/api/admin/users/' + id, { credentials: 'include' });
@@ -447,26 +431,11 @@ async function openAccount(id, focusMessage) {
     document.getElementById('account-approve').hidden = !waiting;
     document.getElementById('account-deny').hidden = !waiting;
     document.getElementById('account-revoke').hidden = !paid;
-    const subscriptionNo = data.subscription_number
-        ? '<p class="ap__broker-no"><span>Broker number</span>' + esc(data.subscription_number) + '</p>'
-        : '';
-    const brokerageState = waiting
-        ? (paid ? 'Paid, waiting for approval. Not a broker yet.' : 'Submitted. Not a broker until approved after payment, or accepted onto a team.')
-        : (user.broker_application_status || '');
-    body.innerHTML = subscriptionNo
-        + accountLine('Email', user.email)
+    body.innerHTML = accountLine('Email', user.email)
         + accountLine('Phone', user.phone)
-        + accountLine('Company', user.company)
-        + accountLine('Role', user.profile_role)
-        + accountLine('Brokerage', brokerageState)
-        + accountLine('Location', user.profile_location)
-        + accountLine('Specialty', user.broker_specialties)
-        + accountLine('Years in business', user.broker_years)
         + accountLine('Joined', (user.created_at || '').split('T')[0])
-        + (user.broker_bio ? '<p>' + esc(user.broker_bio) + '</p>' : '')
         + '<p style="color:#bdbdbd;margin-top:0.8rem;">Listings</p>'
         + listingText;
-    if (focusMessage) document.getElementById('account-message').focus();
 }
 
 async function deleteAccount(id) {
@@ -502,28 +471,6 @@ document.getElementById('account-deny').addEventListener('click', async function
 document.getElementById('account-close').addEventListener('click', function () {
     document.getElementById('account-screen').hidden = true;
     accountId = null;
-});
-document.getElementById('account-send').addEventListener('click', async function () {
-    if (!accountId) return;
-    const status = document.getElementById('account-status');
-    const message = document.getElementById('account-message').value.trim();
-    if (!message) {
-        status.textContent = 'Write a message first.';
-        return;
-    }
-    const response = await fetch('/api/admin/users/' + accountId + '/message', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message }),
-    });
-    const body = await response.json().catch(function () { return {}; });
-    if (!response.ok) {
-        status.textContent = body.message || 'Message was not sent.';
-        return;
-    }
-    document.getElementById('account-message').value = '';
-    status.textContent = 'Sent. It is in their Messages.';
 });
 document.getElementById('account-delete').addEventListener('click', function () {
     if (accountId) deleteAccount(accountId);
@@ -859,7 +806,7 @@ async function loadApprovals() {
         return '<div class="ap__card" data-user="' + person.id + '"><div class="ap__row"><div class="ap__col" style="flex:1;">' + subscriptionNo + '<strong>' + esc(name) + '</strong><br>' + esc(company) + esc(person.email) + (practice ? '<br>' + esc(practice) : '') + '<br>' + waitingLine + '</div>'
             + '<div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
             + '<button class="ap__btn ap__btn--approve" data-approve-broker="' + person.id + '">Approve</button>'
-            + '<button class="ap__btn ap__btn--approve" data-user-message="' + person.id + '">Message</button>'
+            + '<a class="ap__btn ap__btn--secondary" href="/people/' + person.id + '">Profile</a>'
             + '<button class="ap__btn ap__btn--reject" data-deny-broker="' + person.id + '">Deny</button></div></div></div>';
     }).join('');
     const deletes = (data.subscription_deletes || []).map(function (item) {
@@ -874,7 +821,9 @@ async function loadApprovals() {
             + '<button class="ap__btn ap__btn--reject" data-clear-cancel="' + item.user_id + '">Clear request</button></div></div></div>';
     }).join('');
     target.innerHTML = (brokers + deletes) || '<div class="ap__empty">Nothing is waiting. A broker submission shows up here. A team request goes to that brokerage.</div>';
-    bindAccountMessages(target);
+    target.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function (event) { event.stopPropagation(); });
+    });
     target.querySelectorAll('.ap__card[data-user]').forEach(function (card) {
         card.addEventListener('click', function () { openAccount(card.getAttribute('data-user')); });
     });
@@ -924,11 +873,9 @@ async function loadAdminBrokers() {
             + (broker.team_name ? '<br>' + esc(broker.team_name) : '')
             + '</div><div class="ap__col" style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
             + revoke
-            + '<button class="ap__btn ap__btn--approve" data-user-message="' + broker.id + '">Message</button>'
             + '<a class="ap__btn ap__btn--secondary" href="/people/' + (broker.admin_user_id || broker.id) + '">View</a>'
             + '</div></div></div>';
     }).join('');
-    bindAccountMessages(target);
     target.querySelectorAll('[data-revoke-broker]').forEach(function (btn) {
         btn.addEventListener('click', async function (event) {
             event.stopPropagation();

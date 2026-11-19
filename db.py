@@ -344,6 +344,36 @@ class ListingEvent(Base):
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
 
+class CharterPricingConfig(Base):
+    """One row of administrator pricing assumptions. Visitors cannot edit it."""
+    __tablename__ = 'charter_pricing_config'
+    id = Column(Integer, primary_key=True)
+    payload = Column(Text, nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_by = Column(Integer)
+
+
+class CharterQuoteObservation(Base):
+    """An anonymized operator quote kept for review. It does not change public rates by itself."""
+    __tablename__ = 'charter_quote_observations'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    aircraft_name = Column(String(255), nullable=False)
+    route_notes = Column(String(255))
+    quoted_total = Column(Float)
+    website_estimate = Column(Float)
+    source = Column(String(255))
+    quoted_on = Column(String(40))
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    def to_dict(self):
+        data = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        created = data.get('created_at')
+        if created is not None and not isinstance(created, str):
+            data['created_at'] = created.isoformat()
+        return data
+
+
 class CharterInquiry(Base):
     """A charter estimate request. Stored so a coordinator can follow up."""
     __tablename__ = 'charter_inquiries'
@@ -1757,6 +1787,187 @@ def listing_analytics(listing_ids, days=None):
             'unique_visitors': len(bucket['unique_visitors']),
         })
     return {'totals': totals, 'listings': listings, 'days': [by_day[key] for key in sorted(by_day)]}
+
+
+def site_listing_analytics(days=None):
+    """Counts for every listing that has not been deleted.
+
+    The result has totals, a day-by-day series, and one row per listing.
+    Visitor hashes stay out of the result. A prior window of the same length
+    is included when a day range is set, so the dashboard can show the change.
+    """
+    names = {
+        'detail_view': 'views',
+        'impression': 'impressions',
+        'match': 'matches',
+        'click': 'clicks',
+        'inquiry': 'inquiries',
+    }
+    window = int(days) if days else None
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=window) if window else None
+    previous_cutoff = now - timedelta(days=window * 2) if window else None
+    with get_session() as s:
+        listings = (
+            s.query(UserListing)
+            .filter(UserListing.status != 'deleted')
+            .all()
+        )
+        catalog = [
+            {'id': row.id, 'title': row.title or f'Listing {row.id}', 'status': row.status or ''}
+            for row in listings
+        ]
+        ids = [item['id'] for item in catalog]
+        query = s.query(ListingEvent)
+        if ids:
+            query = query.filter(ListingEvent.listing_id.in_(ids))
+        else:
+            query = query.filter(ListingEvent.id < 0)
+        if previous_cutoff is not None:
+            query = query.filter(ListingEvent.created_at >= previous_cutoff)
+        events = [
+            {
+                'listing_id': row.listing_id,
+                'event_type': row.event_type,
+                'visitor_hash': row.visitor_hash,
+                'created_at': row.created_at,
+            }
+            for row in query.all()
+        ]
+
+    def empty():
+        totals = {name: 0 for name in names.values()}
+        totals['unique_visitors'] = 0
+        return totals
+
+    def consume(rows):
+        totals = empty()
+        per = {item: empty() | {'visitors': set()} for item in ids}
+        visitors = set()
+        by_day = {}
+        for row in rows:
+            key = names.get(row['event_type'])
+            if not key:
+                continue
+            totals[key] += 1
+            bucket = per.setdefault(row['listing_id'], empty() | {'visitors': set()})
+            bucket[key] += 1
+            if row['visitor_hash'] and row['event_type'] == 'detail_view':
+                visitors.add(row['visitor_hash'])
+                bucket['visitors'].add(row['visitor_hash'])
+            if row['created_at']:
+                day = row['created_at'].strftime('%Y-%m-%d')
+                slot = by_day.setdefault(day, {'views': 0, 'inquiries': 0})
+                if row['event_type'] == 'detail_view':
+                    slot['views'] += 1
+                elif row['event_type'] == 'inquiry':
+                    slot['inquiries'] += 1
+        totals['unique_visitors'] = len(visitors)
+        return totals, per, by_day
+
+    current_rows = []
+    previous_rows = []
+    for row in events:
+        created = row['created_at']
+        if cutoff is None or (created and created >= cutoff):
+            current_rows.append(row)
+        else:
+            previous_rows.append(row)
+    totals, per, by_day = consume(current_rows)
+    previous = consume(previous_rows)[0] if window else None
+
+    if window:
+        start = (now - timedelta(days=window - 1)).date()
+        labels = [(start + timedelta(days=offset)).strftime('%Y-%m-%d') for offset in range(window)]
+    elif by_day:
+        first = datetime.strptime(min(by_day), '%Y-%m-%d').date()
+        last = now.date()
+        span = (last - first).days + 1
+        labels = [(first + timedelta(days=offset)).strftime('%Y-%m-%d') for offset in range(span)]
+    else:
+        labels = [now.strftime('%Y-%m-%d')]
+    series = []
+    for day in labels:
+        slot = by_day.get(day, {})
+        series.append({
+            'day': day,
+            'views': slot.get('views', 0),
+            'inquiries': slot.get('inquiries', 0),
+        })
+
+    rows_out = []
+    quiet = 0
+    for item in catalog:
+        bucket = per.get(item['id']) or (empty() | {'visitors': set()})
+        activity = bucket['views'] + bucket['clicks'] + bucket['matches'] + bucket['inquiries']
+        if not activity:
+            quiet += 1
+        rows_out.append({
+            'listing_id': item['id'],
+            'title': item['title'],
+            'status': item['status'],
+            'views': bucket['views'],
+            'unique_visitors': len(bucket.get('visitors') or ()),
+            'clicks': bucket['clicks'],
+            'matches': bucket['matches'],
+            'inquiries': bucket['inquiries'],
+        })
+    rows_out.sort(key=lambda item: (-item['views'], -item['inquiries'], item['title'].lower()))
+    return {
+        'totals': totals,
+        'previous': previous,
+        'listings': rows_out,
+        'series': series,
+        'quiet': quiet,
+        'days': window,
+    }
+
+
+def get_charter_pricing_config():
+    with get_session() as s:
+        row = s.query(CharterPricingConfig).filter(CharterPricingConfig.id == 1).first()
+        if not row or not row.payload:
+            return None
+        try:
+            saved = json.loads(row.payload)
+        except (TypeError, ValueError):
+            return None
+        return saved if isinstance(saved, dict) else None
+
+
+def save_charter_pricing_config(payload, user_id=None):
+    text_payload = json.dumps(payload)
+    with get_session() as s:
+        row = s.query(CharterPricingConfig).filter(CharterPricingConfig.id == 1).first()
+        if row is None:
+            row = CharterPricingConfig(id=1, payload=text_payload, updated_by=user_id)
+            s.add(row)
+        else:
+            row.payload = text_payload
+            row.updated_by = user_id
+        return True
+
+
+def add_charter_quote_observation(data):
+    with get_session() as s:
+        row = CharterQuoteObservation(
+            aircraft_name=(data.get('aircraft_name') or 'Aircraft')[:255],
+            route_notes=(data.get('route_notes') or '')[:255] or None,
+            quoted_total=data.get('quoted_total'),
+            website_estimate=data.get('website_estimate'),
+            source=(data.get('source') or '')[:255] or None,
+            quoted_on=(data.get('quoted_on') or '')[:40] or None,
+            notes=(data.get('notes') or '')[:4000] or None,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def list_charter_quote_observations(limit=30):
+    with get_session() as s:
+        rows = s.query(CharterQuoteObservation).order_by(CharterQuoteObservation.id.desc()).limit(limit).all()
+        return [row.to_dict() for row in rows]
 
 
 def create_charter_inquiry(data):

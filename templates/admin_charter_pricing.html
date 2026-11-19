@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Charter Pricing{% endblock %}
+{% block extra_head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:900px;">
+    <h1>Charter pricing assumptions</h1>
+    <p>These settings change Charter Finder estimates. A saved operator quote is kept for review and does not change a public rate by itself.</p>
+    {% if saved %}<p style="color:#8f8;">Saved.</p>{% endif %}
+    <form method="post" class="p-3 mb-4" style="background:#141414;border:1px solid #333;border-radius:12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="form" value="settings">
+        <h2 class="h4">Category multipliers</h2>
+        <div class="row g-2">
+            {% for key, label in categories %}
+            <div class="col-md-4">
+                <label class="form-label">{{ label }}</label>
+                <input class="form-control bg-dark text-white border-secondary" name="multiplier_{{ key }}" value="{{ settings.multipliers[key] }}" required>
+            </div>
+            {% endfor %}
+        </div>
+        <h2 class="h4 mt-3">Planning allowances</h2>
+        <div class="row g-2">
+            <div class="col-md-4"><label class="form-label">Low positioning %</label><input class="form-control bg-dark text-white border-secondary" name="reposition_low" value="{{ (settings.reposition_low * 100)|round(1) }}"></div>
+            <div class="col-md-4"><label class="form-label">Middle positioning %</label><input class="form-control bg-dark text-white border-secondary" name="reposition_mid" value="{{ (settings.reposition_mid * 100)|round(1) }}"></div>
+            <div class="col-md-4"><label class="form-label">High positioning %</label><input class="form-control bg-dark text-white border-secondary" name="reposition_high" value="{{ (settings.reposition_high * 100)|round(1) }}"></div>
+            <div class="col-md-4"><label class="form-label">Airport allowance</label><input class="form-control bg-dark text-white border-secondary" name="airport_allowance" value="{{ settings.airport_allowance }}"></div>
+            <div class="col-md-4"><label class="form-label">Extra fee per fuel stop</label><input class="form-control bg-dark text-white border-secondary" name="stop_handling_fee" value="{{ settings.stop_handling_fee }}"></div>
+            <div class="col-md-4"><label class="form-label">Minimum billable hours</label><input class="form-control bg-dark text-white border-secondary" name="minimum_billable_hours" value="{{ settings.minimum_billable_hours or '' }}"></div>
+            <div class="col-md-4"><label class="form-label">Brokerage share of selling price %</label><input class="form-control bg-dark text-white border-secondary" name="commission_rate" value="{{ (settings.commission_rate * 100)|round(1) }}"></div>
+            <div class="col-md-4"><label class="form-label">U.S. percentage tax</label><input class="form-control bg-dark text-white border-secondary" name="domestic_percentage_tax" value="{{ settings.domestic_percentage_tax }}"></div>
+            <div class="col-md-4"><label class="form-label">U.S. segment tax ({{ settings.tax_year }})</label><input class="form-control bg-dark text-white border-secondary" name="domestic_segment_tax" value="{{ settings.domestic_segment_tax }}"></div>
+            <div class="col-md-4"><label class="form-label">International head tax</label><input class="form-control bg-dark text-white border-secondary" name="international_head_tax" value="{{ settings.international_head_tax }}"></div>
+            <div class="col-md-4"><label class="form-label">Verified rate stays current for days</label><input class="form-control bg-dark text-white border-secondary" name="verified_rate_days" value="{{ settings.verified_rate_days }}"></div>
+        </div>
+        <h2 class="h4 mt-3">Aircraft rate overrides</h2>
+        <p>JSON keyed by aircraft id. A verified rate needs <code>verified_hourly_rate</code>, <code>verified_on</code> (YYYY-MM-DD), and <code>source</code>. One quote does not belong here until you decide it is representative.</p>
+        <textarea class="form-control bg-dark text-white border-secondary" name="overrides" rows="8">{{ overrides_text }}</textarea>
+        <button class="btn btn-danger mt-3" type="submit">Save assumptions</button>
+    </form>
+    <form method="post" class="p-3" style="background:#141414;border:1px solid #333;border-radius:12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="form" value="quote">
+        <h2 class="h4">Record an operator quote</h2>
+        <div class="row g-2">
+            <div class="col-md-6"><input class="form-control bg-dark text-white border-secondary" name="aircraft_name" placeholder="Aircraft model" required></div>
+            <div class="col-md-6"><input class="form-control bg-dark text-white border-secondary" name="route_notes" placeholder="Route"></div>
+            <div class="col-md-4"><input class="form-control bg-dark text-white border-secondary" name="quoted_total" placeholder="Operator quote" required></div>
+            <div class="col-md-4"><input class="form-control bg-dark text-white border-secondary" name="website_estimate" placeholder="Website estimate"></div>
+            <div class="col-md-4"><input class="form-control bg-dark text-white border-secondary" name="quoted_on" type="date"></div>
+            <div class="col-12"><input class="form-control bg-dark text-white border-secondary" name="source" placeholder="Source, without a customer name"></div>
+            <div class="col-12"><textarea class="form-control bg-dark text-white border-secondary" name="notes" rows="2" placeholder="What differed from the estimate"></textarea></div>
+        </div>
+        <button class="btn btn-outline-light mt-3" type="submit">Save quote for review</button>
+    </form>
+    <h2 class="h4 mt-4">Recent quotes</h2>
+    {% for quote in quotes %}
+    <p>{{ quote.quoted_on or quote.created_at }} · {{ quote.aircraft_name }} · quote {{ quote.quoted_total }} · website {{ quote.website_estimate or 'n/a' }} · {{ quote.route_notes or '' }}
+        {% if quote.website_estimate and quote.quoted_total and (quote.quoted_total - quote.website_estimate)|abs > (quote.website_estimate * 0.25) %}
+        <strong>Review: this quote differs from the website estimate by more than 25%.</strong>
+        {% endif %}
+    </p>
+    {% else %}
+    <p>No operator quotes recorded.</p>
+    {% endfor %}
+</div>
+{% endblock %}
