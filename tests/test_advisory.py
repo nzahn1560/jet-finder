@@ -19,6 +19,7 @@ def _aircraft(**overrides):
         'speed': 400,
         'runway_length': 3000,
         'total_hourly_cost': 1000,
+        'hourly_variable_cost': 800,
         'price': 1000000,
     }
     row.update(overrides)
@@ -46,9 +47,11 @@ class CharterPlanTests(unittest.TestCase):
         self.assertEqual(card['stop_label'], 'Nonstop')
         self.assertEqual(len(card['points']), 2)
         self.assertTrue(card['confirmed_suitable'])
-        self.assertEqual(card['hourly_charter_rate'], 3250)
-        self.assertEqual(card['crew_hours'], 1.7)
-        self.assertEqual(card['estimated_total'], int(round(card['billed_hours'] * 3250)))
+        self.assertEqual(card['hourly_charter_rate'], 2000)
+        self.assertNotIn('commission_mid', card)
+        self.assertLess(card['estimate_low'], card['estimate_mid'])
+        self.assertLess(card['estimate_mid'], card['estimate_high'])
+        self.assertEqual(card['estimated_total'], card['estimate_mid'])
 
     def test_one_fuel_stop_is_mapped(self):
         plan = advisory.plan_charter(
@@ -95,11 +98,33 @@ class CharterPlanTests(unittest.TestCase):
 
     def test_missing_operating_cost_is_not_invented(self):
         plan = advisory.plan_charter(
-            self.origin, self.near, [_aircraft(total_hourly_cost=0, aircraft_name='No Rate')],
+            self.origin, self.near, [_aircraft(total_hourly_cost=5000, hourly_variable_cost=0, aircraft_name='No Rate')],
             [], self.runways, passengers=1,
         )
         self.assertIsNone(plan['suitable'][0]['estimated_total'])
         self.assertIn('not available for this aircraft', plan['suitable'][0]['price_note'])
+
+    def test_example_turboprop_price_uses_variable_cost_and_commission(self):
+        import charter_pricing
+        aircraft = _aircraft(category='Turboprop', hourly_variable_cost=2000, id=9)
+        priced = charter_pricing.price_mission(aircraft, 2, fuel_stops=0, passengers=1, domestic=False)
+        self.assertEqual(priced['hourly_rate'], 5500)
+        self.assertEqual(priced['operator_mid'], 14250)
+        self.assertEqual(priced['before_tax_mid'], 15833.33)
+        self.assertEqual(priced['commission_mid'], 1583.33)
+        self.assertEqual(priced['estimate_mid'], 15800)
+        self.assertEqual(priced['status'], 'preliminary')
+        domestic = charter_pricing.price_mission(aircraft, 2, passengers=1, domestic=True)
+        self.assertEqual(domestic['tax_status'], 'us_domestic')
+        self.assertGreater(domestic['estimate_mid'], priced['estimate_mid'])
+
+    def test_route_score_uses_the_purchase_equation(self):
+        cheap = _aircraft(id=11, price=1000000, total_fixed_cost=80000, total_variable_cost=40000, aircraft_name='Cheap')
+        costly = _aircraft(id=12, price=8000000, total_fixed_cost=400000, total_variable_cost=300000, aircraft_name='Costly')
+        plan = advisory.plan_charter(self.origin, self.near, [cheap, costly], [], self.runways, passengers=1)
+        scores = {card['name']: card['all_around_percent'] for card in plan['suitable']}
+        self.assertIsNotNone(scores['Cheap'])
+        self.assertGreater(scores['Cheap'], scores['Costly'])
 
 
 if __name__ == '__main__':

@@ -353,23 +353,13 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('home') }}#aircraftGrid">
-                                <i class="fas fa-calculator me-2"></i>Aircraft Finder
-                            </a>
-                        </li>
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('aircraft_catalog') }}">
-                                <i class="fas fa-th-list me-2"></i>Browse Aircraft
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('aircraft_for_sale') }}">
                                 <i class="fas fa-tag me-2"></i>Aircraft for Sale
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('charter_search') }}">
-                                <i class="fas fa-plane-departure me-2"></i>Charter Finder
+                                <i class="fas fa-plane-departure me-2"></i>Charter
                             </a>
                         </li>
                         <li>
@@ -433,11 +423,6 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#messages">
-                                <i class="fas fa-envelope me-2"></i>Messages <span id="nav-message-count"></span>
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('dashboard') }}#alerts">
                                 <i class="fas fa-bell me-2"></i>Alerts <span id="nav-alert-count"></span>
                             </a>
@@ -454,16 +439,28 @@
                             </a>
                         </li>
                         <li>
+                            <a class="dropdown-item" href="{{ url_for('admin_analytics') }}">
+                                <i class="fas fa-chart-line me-2"></i>Analytics
+                            </a>
+                        </li>
+                        <li>
                             <a class="dropdown-item" href="{{ url_for('admin_inquiries') }}">
                                 <i class="fas fa-inbox me-2"></i>Inquiries
                             </a>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('admin_charter_pricing') }}">
+                                <i class="fas fa-calculator me-2"></i>Charter Pricing
+                            </a>
+                        </li>
                         {% endif %}
+                        {% if not current_user.is_admin %}
                         <li>
                             <a class="dropdown-item" href="{{ url_for('seller_analytics') }}">
                                 <i class="fas fa-chart-line me-2"></i>Listing Analytics
                             </a>
                         </li>
+                        {% endif %}
                         <li>
                             <hr class="dropdown-divider">
                         </li>
@@ -538,21 +535,6 @@
             if (!slot || !data || !data.unread) return;
             slot.textContent = '(' + data.unread + ')';
         }).catch(function () {});
-        (function () {
-            const count = document.getElementById('nav-message-count');
-            if (!count) return;
-            function loadMessageCount() {
-                fetch('/api/broker/messages', { credentials: 'include' }).then(function (response) {
-                    return response.ok ? response.json() : null;
-                }).then(function (data) {
-                    if (!data) return;
-                    const rows = (data.inbox || []).length;
-                    count.textContent = rows ? '(' + rows + ')' : '';
-                }).catch(function () {});
-            }
-            document.addEventListener('jet-messages-changed', loadMessageCount);
-            loadMessageCount();
-        })();
         {% endif %}
 
         // Universal share helper

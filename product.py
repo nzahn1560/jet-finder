@@ -245,6 +245,60 @@ def _bar_point(value):
     return text or '0'
 
 
+def score_aircraft_for_trip(rows, trip_nm):
+    """Best All-Around/$ for one trip length, using the Jet Finder spreadsheet equation."""
+    params = _finder_scenario()
+    try:
+        distance = float(trip_nm or 0)
+    except (TypeError, ValueError):
+        distance = 0
+    if distance > 0:
+        params['F2'] = distance
+    fleet = []
+    prepared = []
+    for row in rows or []:
+        compact = {
+            's': _sheet_number((row or {}).get('speed')),
+            'x': _sheet_number((row or {}).get('range')),
+            'z': _sheet_number((row or {}).get('passengers')),
+            'p': _sheet_number((row or {}).get('price')),
+            'f': _sheet_number((row or {}).get('total_fixed_cost')),
+            'v': _sheet_number((row or {}).get('total_variable_cost')),
+            'c': (row or {}).get('category') or '',
+        }
+        if compact['p'] <= 0 or compact['s'] <= 0 or compact['f'] <= 0 or compact['v'] <= 0:
+            prepared.append(((row or {}).get('id'), None))
+            continue
+        fleet.append(compact)
+        prepared.append(((row or {}).get('id'), compact))
+    bounds = _fleet_bounds(fleet, params) if fleet else None
+    scores = {}
+    for aircraft_id, compact in prepared:
+        if not compact or not bounds:
+            scores[aircraft_id] = None
+            continue
+        metrics = _sheet_metrics({
+            'speed': compact['s'],
+            'range': compact['x'],
+            'passengers': compact['z'],
+            'price': compact['p'],
+            'total_fixed_cost': compact['f'],
+            'total_variable_cost': compact['v'],
+            'category': compact['c'],
+        }, params)
+        speed_norm = _scaled(metrics['speed_dollar'], *bounds['speed'])
+        range_norm = _scaled(metrics['range_dollar'], *bounds['range'])
+        efficiency_norm = _scaled(metrics['efficiency'], *bounds['efficiency'])
+        performance = (speed_norm + range_norm) / 2
+        performance_norm = _scaled(performance, *bounds['performance'])
+        all_around = (performance_norm + efficiency_norm) / 2
+        scores[aircraft_id] = {
+            'dollar': _sheet_round(all_around, 2),
+            'percent': _bar_percent(all_around),
+        }
+    return scores
+
+
 def _dollar_bars(profile, price):
     """The five per-dollar bars from the listing cards, using this asking price."""
     from app import _sheet_fleet, get_unified_aircraft_data

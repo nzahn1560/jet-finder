@@ -9,14 +9,14 @@
     </div>
 </div>
 
-{% block title %}Jet Finder{% endblock %}
+{% block title %}{{ page_title|default('Jet Finder') }}{% endblock %}
 {% block meta_description %}Jet Finder lines up every data point for the aircraft on the page at the same time. The figures are estimates. Confirm them before you buy.{% endblock %}
 {% block canonical %}{{ seo_canonical }}{% endblock %}
 {% block extra_head %}
 {% if seo_noindex %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Jetschool">
-<meta property="og:title" content="Jetschool: Jet Finder">
+<meta property="og:title" content="Jetschool: {{ page_title|default('Jet Finder') }}">
 <meta property="og:description" content="Jet Finder lines up every data point for the aircraft on the page at the same time. The figures are estimates. Confirm them before you buy.">
 <meta property="og:url" content="{{ seo_canonical }}">
 <meta property="og:image" content="{{ seo_image }}">
@@ -4058,11 +4058,10 @@
 <div class="container py-4 position-relative">
     <div class="finder-heading">
         <div>
-            <h1 class="finder-title">Find the Right Aircraft. Backed by Data.</h1>
-            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps people compare aircraft using performance, operating cost, and mission data. The research tools and basic aircraft listings are free. No account is required to research an aircraft or contact a seller.</p>
+            <h1 class="finder-title">{% if marketplace %}Aircraft for Sale{% else %}Find the Right Aircraft. Backed by Data.{% endif %}</h1>
+            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">{% if marketplace %}These are aircraft listed for sale. The cards, filters, and map work the same way as Jet Finder. The price on each card is that airplane's asking price.{% else %}Jetschool helps people compare aircraft using performance, operating cost, and mission data. The research tools and basic aircraft listings are free. No account is required to research an aircraft or contact a seller.{% endif %}</p>
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-danger" href="#aircraftGrid">Find My Perfect Aircraft</a>
-                <a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>
+                {% if not marketplace %}<a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>{% endif %}
                 <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Perfect Charter</a>
                 <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">List Your Aircraft — Free</a>
                 <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Schedule a Free Aircraft Advising Call</a>
@@ -4996,6 +4995,7 @@ document.addEventListener('click', function (event) {
 
 <!-- Real-Time Aircraft Filtering System -->
 <script>
+    window.MARKETPLACE_LISTINGS = {{ 'true' if marketplace else 'false' }};
     window.SHEET_SCALE = {{ sheet_scale|default({}, true)|tojson }};
     window.SHEET_FLEET = {{ sheet_fleet|default([], true)|tojson }};
     console.log('Aircraft filtering system initialized');
@@ -5141,9 +5141,10 @@ document.addEventListener('click', function (event) {
 
     async function loadAllAircraftData() {
         try {
-            const dataResp = await fetch('/api/finder-aircraft', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+            const source = window.MARKETPLACE_LISTINGS ? '/api/user-listings' : '/api/finder-aircraft';
+            const dataResp = await fetch(source, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
             const rows = dataResp.ok ? await dataResp.json() : [];
-            allAircraftData = (Array.isArray(rows) ? rows : []).map(ac => normalizeAircraftRecord(ac, false));
+            allAircraftData = (Array.isArray(rows) ? rows : []).map(ac => normalizeAircraftRecord(ac, !!window.MARKETPLACE_LISTINGS));
             filteredAircraftData = [...allAircraftData];
             return allAircraftData.length > 0;
         } catch (error) {
@@ -5952,8 +5953,8 @@ document.addEventListener('click', function (event) {
                 <div class="empty-state-card text-center w-100">
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
-                        <h3 class="h4 mb-2" style="color:#f4f4f4;">No aircraft match</h3>
-                        <p class="mb-0" style="color:#d0d0d0;">Change the filters to see more aircraft.</p>
+                        <h3 class="h4 mb-2" style="color:#f4f4f4;">${window.MARKETPLACE_LISTINGS && allAircraftData.length === 0 ? 'No aircraft are listed' : 'No aircraft match'}</h3>
+                        <p class="mb-0" style="color:#d0d0d0;">${window.MARKETPLACE_LISTINGS && allAircraftData.length === 0 ? 'Approved listings show up here.' : 'Change the filters to see more aircraft.'}</p>
                     </div>
                 </div>
             `;
@@ -6786,7 +6787,7 @@ document.addEventListener('click', function (event) {
                     ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
                     <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
-                        <div style="font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8;">Average market purchase price</div>
+                        <div style="font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8;">${aircraft.is_user_listing ? 'Asking price' : 'Average market purchase price'}</div>
                         <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px; color:#F05545;">
                             $${(priceValue || 0).toLocaleString()}
                         </div>

@@ -105,9 +105,7 @@
             list.innerHTML = rows.map(function (row) {
                 const photo = (row.photos && row.photos[0]) || '/static/images/aircraft_placeholder.jpg';
                 const place = row.place || [row.city, row.state].filter(Boolean).join(', ') || row.location;
-                const manage = owner
-                    ? '<a class="manage" href="https://billing.stripe.com/p/login/7sYbIUgyoesqejI9AVgbm00" target="_blank" rel="noopener">Manage payment</a>'
-                    : '';
+                const manage = '';
                 const who = row.broker_name ? fact('Listed by', row.broker_name) : '';
                 return '<article class="sale-card">'
                     + '<img src="' + esc(photo) + '" alt="">'

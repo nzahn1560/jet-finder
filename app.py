@@ -3914,17 +3914,19 @@ def aircraft_for_sale(slug=None):
             'Open one to see price, range, and the other data.'
         )
         canonical = _public_base() + f'/aircraft-for-sale/{slug}'
-    else:
-        heading = 'Aircraft for sale'
-        title = 'Aircraft for Sale'
-        noun = 'listing' if len(rows) == 1 else 'listings'
-        description = (
-            f'Aircraft for sale on JetSchool. {len(rows)} live {noun}. '
-            'Open one to compare price, range, and the other data.'
+        return _render_sale_catalog(
+            rows, heading, title, description, canonical, current_slug=slug,
         )
-        canonical = _public_base() + '/aircraft-for-sale'
-    return _render_sale_catalog(
-        rows, heading, title, description, canonical, current_slug=slug or '',
+    catalog = get_unified_aircraft_data()
+    return render_template(
+        'index.html',
+        marketplace=True,
+        page_title='Aircraft for Sale',
+        sheet_scale=_sheet_scale(catalog),
+        sheet_fleet=_sheet_fleet(catalog),
+        seo_canonical=_public_base() + '/aircraft-for-sale',
+        seo_noindex=bool(request.args),
+        seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
     )
 
 
@@ -5295,97 +5297,43 @@ def api_broker_directory():
 @app.route('/api/brokers/<int:user_id>/messages', methods=['POST'])
 @require_auth
 def api_broker_message(user_id):
-    """Send a broker an aircraft request, a listing, or a note."""
-    sender = request.current_user  # type: ignore[attr-defined]
-    recipient = get_user_by_id(user_id)
-    if not recipient or recipient.get('broker_application_status') != 'approved':
-        return jsonify({'error': 'not_found'}), 404
-    if int(recipient['id']) == int(sender['id']):
-        return jsonify({'error': 'forbidden'}), 403
-    data = request.get_json(silent=True) or {}
-    contact_email = str(data.get('contact_email') if 'contact_email' in data else (sender.get('email') or '')).strip()[:254]
-    contact_phone = str(data.get('contact_phone') if 'contact_phone' in data else (sender.get('phone') or '')).strip()[:40]
-    if '@' not in contact_email or '.' not in contact_email.split('@')[-1]:
-        return jsonify({'error': 'contact_required', 'message': 'Enter an email the broker can use.'}), 400
-    if sum(ch.isdigit() for ch in contact_phone) < 7:
-        return jsonify({'error': 'contact_required', 'message': 'Enter a phone number the broker can use.'}), 400
-    kind = (data.get('kind') or 'message').strip().lower()
-    listing_id = data.get('listing_id')
-    if kind == 'listing':
-        try:
-            listing_id = int(listing_id)
-        except (TypeError, ValueError):
-            return jsonify({'error': 'listing_required'}), 400
-        listing = db_module.get_listing_with_owner(listing_id)
-        if not listing or listing.get('status') not in ('active', 'pending'):
-            return jsonify({'error': 'not_found'}), 404
-        if listing.get('status') != 'active' and listing.get('user_id') != sender['id'] and not sender.get('is_admin'):
-            return jsonify({'error': 'not_found'}), 404
-    try:
-        message_id = db_module.create_broker_message(
-            sender['id'], user_id, kind,
-            notes=data.get('notes') or '',
-            aircraft_name=data.get('aircraft_name') or '',
-            listing_id=listing_id if kind == 'listing' else None,
-            contact_email=contact_email,
-            contact_phone=contact_phone,
-        )
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-    sender_name = ' '.join(part for part in [sender.get('first_name'), sender.get('last_name')] if part) or 'A member'
-    titles = {
-        'request': f'{sender_name} is looking for an aircraft',
-        'listing': f'{sender_name} sent you a listing',
-        'message': f'{sender_name} sent you a message',
-    }
-    note = (data.get('notes') or data.get('aircraft_name') or '').strip()
-    db_module.notify_user(
-        user_id, 'broker_message', titles.get(kind, titles['message']),
-        f'Email: {contact_email}\nPhone: {contact_phone}' + (f'\n{note}' if note else ''),
-        '/dashboard#messages', recipient.get('email'),
-    )
-    return jsonify({'ok': True, 'id': message_id}), 201
+    """In-site messages are closed. Contact details are on the public profile."""
+    return _messages_closed()
+
+
+def _messages_closed():
+    return jsonify({
+        'error': 'messages_closed',
+        'message': 'Messages stay off the site. Open the public profile for a phone number and email.',
+    }), 410
 
 
 @app.route('/api/broker/messages')
 @require_auth
 def api_broker_messages():
-    """Messages this account sent, and messages sent to this broker."""
-    user = request.current_user  # type: ignore[attr-defined]
-    return jsonify({
-        'inbox': db_module.list_broker_messages(user['id'], 'in'),
-        'sent': db_module.list_broker_messages(user['id'], 'out'),
-        'deleted': db_module.list_broker_messages(user['id'], 'deleted'),
-    })
+    """In-site messages are closed."""
+    return _messages_closed()
 
 
 @app.route('/api/broker/messages/<int:message_id>', methods=['DELETE'])
 @require_auth
 def api_broker_message_delete(message_id):
-    """Remove one broker message from this account."""
-    user = request.current_user  # type: ignore[attr-defined]
-    if not db_module.hide_broker_message(user['id'], message_id):
-        return jsonify({'error': 'not_found'}), 404
-    return jsonify({'ok': True})
+    """In-site messages are closed."""
+    return _messages_closed()
 
 
 @app.route('/api/broker/messages', methods=['DELETE'])
 @require_auth
 def api_broker_messages_clear():
-    """Remove every broker message from this account."""
-    user = request.current_user  # type: ignore[attr-defined]
-    db_module.hide_broker_messages(user['id'])
-    return jsonify({'ok': True})
+    """In-site messages are closed."""
+    return _messages_closed()
 
 
 @app.route('/api/broker/messages/<int:message_id>/restore', methods=['POST'])
 @require_auth
 def api_broker_message_restore(message_id):
-    """Put a deleted broker message back on this account."""
-    user = request.current_user  # type: ignore[attr-defined]
-    if not db_module.restore_broker_message(user['id'], message_id):
-        return jsonify({'error': 'not_found'}), 404
-    return jsonify({'ok': True})
+    """In-site messages are closed."""
+    return _messages_closed()
 
 
 def _saved_snapshot_from_request(data: dict) -> dict:
@@ -10895,36 +10843,8 @@ def api_admin_user_account(user_id):
 @app.route('/api/admin/users/<int:user_id>/message', methods=['POST'])
 @require_admin
 def api_admin_user_message(user_id):
-    """Send a note into this person's Messages, and an alert so they see it."""
-    admin = request.current_user  # type: ignore[attr-defined]
-    person = get_user_by_id(user_id)
-    if not person:
-        return jsonify({'error': 'not_found'}), 404
-    if int(admin.get('id') or 0) == int(user_id):
-        return jsonify({'error': 'forbidden', 'message': 'Choose someone else.'}), 400
-    data = request.get_json(silent=True) or {}
-    message = str(data.get('message') or '').strip()
-    if not message:
-        return jsonify({'error': 'message_required', 'message': 'Write a message first.'}), 400
-    message = message[:4000]
-    try:
-        db_module.create_broker_message(
-            admin['id'], user_id, 'message',
-            notes=message,
-            aircraft_name='JetSchool',
-            contact_email=admin.get('email') or '',
-        )
-    except ValueError:
-        return jsonify({'error': 'message_required', 'message': 'Write a message first.'}), 400
-    db_module.notify_user(
-        user_id,
-        'account',
-        'Message from JetSchool',
-        message,
-        '/dashboard#messages',
-        person.get('email'),
-    )
-    return jsonify({'ok': True})
+    """In-site messages are closed. The public profile has the contact details."""
+    return _messages_closed()
 
 
 @app.route('/api/admin/approvals')
@@ -11973,6 +11893,137 @@ def api_inquiries():
     except Exception:
         logger.exception('inquiry email failed')
     return jsonify({'ok': True, 'id': inquiry_id}), 201
+
+
+@app.route('/admin/charter-pricing', methods=['GET', 'POST'])
+@require_admin
+def admin_charter_pricing():
+    """Edit charter assumptions. The page is not public and does not change a rate from one quote."""
+    import json as json_module
+    import charter_pricing
+    if request.method == 'POST':
+        if not _csrf_matches():
+            return redirect(url_for('admin_charter_pricing'))
+        admin = get_current_user_from_request() or {}
+        if request.form.get('form') == 'quote':
+            try:
+                quoted = float(request.form.get('quoted_total') or 0)
+            except (TypeError, ValueError):
+                quoted = 0
+            try:
+                website = float(request.form.get('website_estimate')) if request.form.get('website_estimate') else None
+            except (TypeError, ValueError):
+                website = None
+            if quoted > 0:
+                db_module.add_charter_quote_observation({
+                    'aircraft_name': request.form.get('aircraft_name'),
+                    'route_notes': request.form.get('route_notes'),
+                    'quoted_total': quoted,
+                    'website_estimate': website,
+                    'source': request.form.get('source'),
+                    'quoted_on': request.form.get('quoted_on'),
+                    'notes': request.form.get('notes'),
+                })
+            return redirect(url_for('admin_charter_pricing', saved=1))
+        current = charter_pricing.active_config()
+        multipliers = {}
+        for key in charter_pricing.DEFAULTS['multipliers']:
+            try:
+                multipliers[key] = float(request.form.get(f'multiplier_{key}') or current['multipliers'][key])
+            except (TypeError, ValueError):
+                multipliers[key] = current['multipliers'][key]
+        def number(name, fallback):
+            try:
+                return float(request.form.get(name))
+            except (TypeError, ValueError):
+                return fallback
+        minimum_text = (request.form.get('minimum_billable_hours') or '').strip()
+        minimum = None
+        if minimum_text:
+            try:
+                minimum = float(minimum_text)
+            except ValueError:
+                minimum = None
+        try:
+            overrides = json_module.loads(request.form.get('overrides') or '{}')
+        except (TypeError, ValueError):
+            overrides = current.get('overrides') or {}
+        if not isinstance(overrides, dict):
+            overrides = {}
+        payload = {
+            'multipliers': multipliers,
+            'reposition_low': number('reposition_low', 10) / 100,
+            'reposition_mid': number('reposition_mid', 25) / 100,
+            'reposition_high': number('reposition_high', 50) / 100,
+            'airport_allowance': number('airport_allowance', 500),
+            'stop_handling_fee': number('stop_handling_fee', 250),
+            'minimum_billable_hours': minimum,
+            'commission_rate': number('commission_rate', 10) / 100,
+            'domestic_percentage_tax': number('domestic_percentage_tax', 0.075),
+            'domestic_segment_tax': number('domestic_segment_tax', 5.30),
+            'international_head_tax': number('international_head_tax', 23.40),
+            'verified_rate_days': int(number('verified_rate_days', 540)),
+            'tax_year': 2026,
+            'overrides': overrides,
+        }
+        db_module.save_charter_pricing_config(payload, admin.get('id'))
+        return redirect(url_for('admin_charter_pricing', saved=1))
+    settings = charter_pricing.active_config()
+    return render_template(
+        'admin_charter_pricing.html',
+        settings=settings,
+        overrides_text=json_module.dumps(settings.get('overrides') or {}, indent=2),
+        quotes=db_module.list_charter_quote_observations(),
+        saved=request.args.get('saved'),
+        categories=[
+            ('piston', 'Piston'),
+            ('turboprop', 'Turboprop'),
+            ('very_light', 'Very light jet'),
+            ('light', 'Light jet'),
+            ('midsize', 'Midsize jet'),
+            ('super_midsize', 'Super-midsize jet'),
+            ('large', 'Large-cabin jet'),
+        ],
+        seo_noindex=True,
+    )
+
+
+def _analytics_line(values, peak, width=640, height=168):
+    """SVG points for one series. The peak is shared so two lines use one scale."""
+    if not values:
+        return ''
+    span = max(len(values) - 1, 1)
+    top = max(peak, 1)
+    points = []
+    for index, value in enumerate(values):
+        x = 8 + (width - 16) * index / span
+        y = 16 + (height - 36) * (1 - (value / top))
+        points.append(f'{x:.1f},{y:.1f}')
+    return ' '.join(points)
+
+
+@app.route('/admin/analytics')
+@require_admin
+def admin_analytics():
+    """Site-wide listing activity for an administrator."""
+    try:
+        days = int(request.args.get('days') or 30)
+    except (TypeError, ValueError):
+        days = 30
+    if days not in (7, 30, 90, 0):
+        days = 30
+    stats = db_module.site_listing_analytics(days or None)
+    series = stats.get('series') or []
+    peak = max([row['views'] for row in series] + [row['inquiries'] for row in series] + [0])
+    stats['peak'] = peak
+    stats['view_points'] = _analytics_line([row['views'] for row in series], peak)
+    stats['inquiry_points'] = _analytics_line([row['inquiries'] for row in series], peak)
+    return render_template(
+        'admin_analytics.html',
+        stats=stats,
+        days=days or 'all',
+        seo_noindex=True,
+    )
 
 
 @app.route('/admin/inquiries', methods=['GET'])

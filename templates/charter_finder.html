@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Charter Tool{% endblock %}
-{% block meta_description %}Compare aircraft for a charter mission. The result is an estimate for flight time and crew, arranged through an authorized operator.{% endblock %}
+{% block meta_description %}Compare aircraft for a charter mission. The result is a planning estimate. An authorized operator confirms availability and the final price.{% endblock %}
 {% block canonical %}{{ public_base }}/charter{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -41,7 +41,7 @@
 <div class="container py-4">
     <p class="text-uppercase mb-1" style="color:#F05545;">Free charter planning</p>
     <h1>Charter Tool</h1>
-    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Jetschool compares aircraft for the mission the same way it compares them for a purchase. The price is a charter estimate for flight time and crew. An authorized operator confirms the aircraft and the final figure. Jetschool arranges the charter and is not the operator.</p>
+    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Jetschool compares aircraft for the mission the same way it compares them for a purchase. The range is a planning estimate for modeled flight cost and uncertain positioning. It does not mean an aircraft has been located. An authorized operator confirms availability and the final figure. Jetschool arranges the charter and is not the operator.</p>
     <form id="charter-mission" class="charter-panel">
         <div class="row g-3">
             <div class="col-md-6 airport-field">
@@ -82,6 +82,7 @@
                 <select id="charter-sort" class="form-select bg-dark text-white border-secondary">
                     <option value="stops">Fuel stops</option>
                     <option value="price">Estimated price</option>
+                    <option value="value">Best All-Around/$</option>
                     <option value="hours">Flight duration</option>
                     <option value="speed">Cruise speed</option>
                     <option value="seats">Passengers</option>
@@ -92,11 +93,12 @@
             </div>
         </div>
     </form>
+    <p class="mb-3" style="color:#ccc;">Estimated charter pricing is for planning purposes only. Actual availability, routing, operating requirements, repositioning expenses, and final pricing must be confirmed with an authorized charter operator.</p>
     <p id="charter-notice" class="mb-3" style="color:#ccc;"></p>
     <div id="charter-map"></div>
     <div class="charter-grid" id="charter-results"></div>
     <form id="charter-inquiry" class="mt-4 p-4" hidden style="background:#141414;border:1px solid #333;border-radius:12px;max-width:40rem;">
-        <h2 class="h4">Inquire to Charter</h2>
+        <h2 class="h4">Inquire for Charter</h2>
         <input type="hidden" name="inquiry_type" value="charter">
         <input type="hidden" name="aircraft_name">
         <input type="hidden" name="aircraft_id">
@@ -238,6 +240,11 @@
         points.push(to);
         return points;
     }
+    function priceRange(card) {
+        if (!card.estimate_low || !card.estimate_high) return 'Unavailable';
+        if (card.estimate_low === card.estimate_high) return money(card.estimate_low);
+        return money(card.estimate_low) + ' – ' + money(card.estimate_high);
+    }
     function aircraftTitle(card) {
         const maker = String(card.manufacturer || '').trim();
         const model = String(card.name || '').trim();
@@ -283,6 +290,7 @@
         cards.sort(function (a, b) {
             if (key === 'stops') return a.fuel_stops - b.fuel_stops;
             if (key === 'hours') return (a.flight_hours || 99) - (b.flight_hours || 99);
+            if (key === 'value') return (b.all_around_percent || -1) - (a.all_around_percent || -1);
             if (key === 'speed') return b.speed_kts - a.speed_kts;
             if (key === 'seats') return b.passengers - a.passengers;
             return (a.estimated_total || 1e12) - (b.estimated_total || 1e12);
@@ -305,8 +313,10 @@
             article.className = 'aircraft-card';
             const stopScore = card.fuel_stops === 0 ? 100 : (card.fuel_stops === 1 ? 55 : 25);
             const runwayScore = card.runway_length ? Math.round((1 - Math.min(card.runway_length, maxRunway) / maxRunway) * 100) : null;
-            article.innerHTML = '<h2>' + esc(aircraftTitle(card)) + '</h2>'
-                + '<div class="aircraft-price"><div class="caption">Estimated charter cost</div><div class="amount">' + esc(money(card.estimated_total)) + '</div></div>'
+            const photo = card.image ? '<img src="' + esc(card.image) + '" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:8px;margin-bottom:0.5rem;">' : '';
+            article.innerHTML = photo + '<h2>' + esc(aircraftTitle(card)) + '</h2>'
+                + '<div class="aircraft-price"><div class="caption">Estimated charter range</div><div class="amount">' + esc(priceRange(card)) + '</div></div>'
+                + specBar('Best All-Around/$', card.all_around_percent == null ? 'Unavailable' : (card.all_around_percent + '%'), card.all_around_percent)
                 + specBar('Fuel stops', card.stop_label, stopScore)
                 + specBar('Passengers', card.passengers, Math.round((card.passengers / maxSeats) * 100))
                 + specBar('Range', card.range_nm + ' nm', Math.round((card.range_nm / maxRange) * 100))
@@ -315,7 +325,7 @@
                 + specBar('Cabin', card.cabin_volume ? (Math.round(card.cabin_volume) + ' cu ft') : 'Unavailable', card.cabin_volume ? Math.round((card.cabin_volume / maxCabin) * 100) : null)
                 + specBar('Flight time', hours(card.flight_hours), null)
                 + '<p style="color:#bbb;font-size:0.85rem;margin:0.6rem 0 0;">' + esc(card.runway_status) + '. ' + esc(card.price_note) + '</p>'
-                + '<div class="listing-actions"><button class="btn" type="button"><i class="fas fa-paper-plane"></i><span>Inquire to Charter</span></button></div>';
+                + '<div class="listing-actions"><button class="btn" type="button"><i class="fas fa-paper-plane"></i><span>Inquire for Charter</span></button></div>';
             article.querySelector('button').addEventListener('click', function () { openInquiry(card); });
             article.addEventListener('click', function (event) {
                 if (event.target.closest('button')) return;
@@ -340,10 +350,10 @@
         inquiry.departure_time.value = mission.get('departure_time') || '';
         inquiry.return_date.value = mission.get('return_date') || '';
         inquiry.passengers.value = mission.get('passengers') || '';
-        inquiry.estimated_price.value = card.estimated_total || '';
+        inquiry.estimated_price.value = card.estimate_mid || card.estimated_total || '';
         inquiry.fuel_stops.value = card.fuel_stops;
         inquiry.route_notes.value = card.points.map(function (point) { return point.code || point.name; }).join(' → ');
-        document.getElementById('charter-inquiry-summary').textContent = aircraftTitle(card) + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + money(card.estimated_total);
+        document.getElementById('charter-inquiry-summary').textContent = aircraftTitle(card) + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + priceRange(card);
         inquiry.scrollIntoView();
     }
     form.addEventListener('submit', function (event) {
