@@ -18,7 +18,7 @@ def _aircraft(**overrides):
         'range': 2000,
         'speed': 400,
         'runway_length': 3000,
-        'charter_rate': 4000,
+        'total_hourly_cost': 1000,
         'price': 1000000,
     }
     row.update(overrides)
@@ -41,22 +41,26 @@ class CharterPlanTests(unittest.TestCase):
             self.origin, self.near, [_aircraft(range=2000)], [self.mid], self.runways, passengers=2,
         )
         self.assertTrue(plan['ok'])
-        self.assertEqual(plan['suitable'], [])
-        self.assertEqual(plan['unverified'][0]['fuel_stops'], 0)
-        self.assertEqual(plan['unverified'][0]['stop_label'], 'Nonstop')
-        self.assertEqual(len(plan['unverified'][0]['points']), 2)
-        self.assertGreater(plan['unverified'][0]['estimated_total'], 0)
+        card = plan['suitable'][0]
+        self.assertEqual(card['fuel_stops'], 0)
+        self.assertEqual(card['stop_label'], 'Nonstop')
+        self.assertEqual(len(card['points']), 2)
+        self.assertTrue(card['confirmed_suitable'])
+        self.assertEqual(card['hourly_charter_rate'], 3250)
+        self.assertEqual(card['crew_hours'], 1.7)
+        self.assertEqual(card['estimated_total'], int(round(card['billed_hours'] * 3250)))
 
     def test_one_fuel_stop_is_mapped(self):
         plan = advisory.plan_charter(
             self.origin, self.near, [_aircraft(range=450, id=2, aircraft_name='One Stop')],
             [self.mid], self.runways, passengers=2,
         )
-        card = plan['unverified'][0]
+        card = plan['suitable'][0]
         self.assertEqual(card['fuel_stops'], 1)
         self.assertEqual(card['stop_label'], '1 Fuel Stop Required')
         self.assertEqual([point['code'] for point in card['points']], ['AAA', 'MMM', 'BBB'])
-        self.assertFalse(card['confirmed_suitable'])
+        self.assertTrue(card['confirmed_suitable'])
+        self.assertIn('fits the longest runway', card['runway_status'])
 
     def test_two_fuel_stops_are_mapped_and_three_are_excluded(self):
         airports = [self.close_a, self.close_b]
@@ -64,8 +68,8 @@ class CharterPlanTests(unittest.TestCase):
             self.origin, self.near, [_aircraft(range=200, id=3, aircraft_name='Two Stop')],
             airports, self.runways, passengers=2,
         )
-        self.assertEqual(two['unverified'][0]['fuel_stops'], 2)
-        self.assertEqual(len(two['unverified'][0]['points']), 4)
+        self.assertEqual(two['suitable'][0]['fuel_stops'], 2)
+        self.assertEqual(len(two['suitable'][0]['points']), 4)
         too_far = advisory.plan_charter(
             self.origin, self.near, [_aircraft(range=90, id=4, aircraft_name='Too Far')],
             airports, self.runways, passengers=2,
@@ -89,13 +93,13 @@ class CharterPlanTests(unittest.TestCase):
         self.assertGreaterEqual(plan['excluded']['seats'], 1)
         self.assertGreaterEqual(plan['excluded']['runway'], 1)
 
-    def test_missing_charter_rate_is_not_invented(self):
+    def test_missing_operating_cost_is_not_invented(self):
         plan = advisory.plan_charter(
-            self.origin, self.near, [_aircraft(charter_rate=0, aircraft_name='No Rate')],
+            self.origin, self.near, [_aircraft(total_hourly_cost=0, aircraft_name='No Rate')],
             [], self.runways, passengers=1,
         )
-        self.assertIsNone(plan['unverified'][0]['estimated_total'])
-        self.assertIn('not in the spreadsheet', plan['unverified'][0]['price_note'])
+        self.assertIsNone(plan['suitable'][0]['estimated_total'])
+        self.assertIn('not available for this aircraft', plan['suitable'][0]['price_note'])
 
 
 if __name__ == '__main__':

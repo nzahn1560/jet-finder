@@ -349,22 +349,37 @@
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('home') }}">
+                                <i class="fas fa-home me-2"></i>Home
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('home') }}#aircraftGrid">
                                 <i class="fas fa-calculator me-2"></i>Aircraft Finder
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('charter_search') }}">
-                                <i class="fas fa-plane-departure me-2"></i>Charter Tool
+                            <a class="dropdown-item" href="{{ url_for('aircraft_catalog') }}">
+                                <i class="fas fa-th-list me-2"></i>Browse Aircraft
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('about_page') }}">
-                                <i class="fas fa-info-circle me-2"></i>About
+                            <a class="dropdown-item" href="{{ url_for('aircraft_for_sale') }}">
+                                <i class="fas fa-tag me-2"></i>Aircraft for Sale
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('charter_search') }}">
+                                <i class="fas fa-plane-departure me-2"></i>Charter Finder
                             </a>
                         </li>
                         <li>
                             <a class="dropdown-item" href="{{ url_for('contact') }}">
-                                <i class="fas fa-phone me-2"></i>Free Advisory Session
+                                <i class="fas fa-phone me-2"></i>Free Advising Call
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('create_listing') }}">
+                                <i class="fas fa-plus-circle me-2"></i>Create Listing
                             </a>
                         </li>
                         {% if current_user and current_user.is_admin %}
@@ -402,6 +417,36 @@
                                 current_user.last_name }}
                             </h6>
                         </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('dashboard') }}">
+                                <i class="fas fa-user me-2"></i>My profile
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('create_listing') }}">
+                                <i class="fas fa-plus me-2"></i>Create listing
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('my_listings') }}">
+                                <i class="fas fa-list me-2"></i>My listings
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#messages">
+                                <i class="fas fa-envelope me-2"></i>Messages <span id="nav-message-count"></span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('dashboard') }}#alerts">
+                                <i class="fas fa-bell me-2"></i>Alerts <span id="nav-alert-count"></span>
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('account_settings') }}">
+                                <i class="fas fa-cog me-2"></i>Settings
+                            </a>
+                        </li>
                         {% if current_user.is_admin %}
                         <li>
                             <a class="dropdown-item" href="{{ url_for('admin_index') }}">
@@ -414,6 +459,11 @@
                             </a>
                         </li>
                         {% endif %}
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('seller_analytics') }}">
+                                <i class="fas fa-chart-line me-2"></i>Listing Analytics
+                            </a>
+                        </li>
                         <li>
                             <hr class="dropdown-divider">
                         </li>
@@ -429,9 +479,13 @@
                 </div>
                 {% else %}
                 <div class="d-flex gap-2">
-                    <a href="{{ url_for('contact') }}" class="login-btn">
-                        <i class="fas fa-phone"></i>
-                        <span>Free Advisory</span>
+                    <a href="{{ url_for('register') }}" class="login-btn">
+                        <i class="fas fa-user-plus"></i>
+                        <span>Register</span>
+                    </a>
+                    <a href="{{ url_for('login') }}" class="login-btn">
+                        <i class="fas fa-user"></i>
+                        <span>Login</span>
                     </a>
                 </div>
                 {% endif %}
@@ -532,8 +586,8 @@
     <div id="site-notice" class="site-notice" hidden>
         <div class="site-notice__card" role="dialog" aria-modal="true" aria-labelledby="site-notice-title">
             <h2 id="site-notice-title">Before you continue</h2>
-            <p>Jet Finder is an aircraft information service and marketplace. It is not financial, legal, tax, or aviation advice, and it does not act as your broker or agent.</p>
-            <p>Prices, costs, performance, and comparisons shown here are estimates. They are kept with care, and an estimate can still differ from the real cost, value, condition, or performance. Check anything important yourself, and talk with a qualified professional when the decision calls for it.</p>
+            <p>Jetschool is an aircraft brokerage. The figures on this site help you compare aircraft for a purchase or a charter. They are estimates, and a purchase or charter is not complete until it is confirmed with you.</p>
+            <p>Jetschool arranges charter travel through authorized operators and is not the operator of the flight. Check anything important before you rely on it.</p>
             <p>Decisions you make with this site are your own.</p>
             <button type="button" id="site-notice-accept">I understand</button>
         </div>

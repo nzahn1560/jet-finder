@@ -618,7 +618,7 @@ def brokers_page():
         'brokers.html',
         map_points=people,
         seo_canonical=canonical,
-        seo_noindex=bool(request.args),
+        seo_noindex=True,
         seo_image=_public_base() + url_for('static', filename='images/jetschool-logo8.png'),
         seo_schema={
             '@context': 'https://schema.org',
@@ -3449,10 +3449,11 @@ def api_admin_contacts():
         return jsonify({'error': 'server_error'}), 500
 
 
-_SITEMAP_PAGES = ('/', '/aircraft', '/charter', '/about', '/privacy', '/terms', '/refunds', '/contact', '/brokers')
+_SITEMAP_PAGES = ('/', '/aircraft', '/charter', '/about', '/privacy', '/terms', '/refunds', '/contact', '/aircraft-for-sale')
 _ROBOTS_PRIVATE = (
     '/admin', '/api/', '/dashboard', '/profile', '/my-listings', '/create-listing',
-    '/off-market', '/logout', '/login', '/register', '/forgot-password', '/reset-password',
+    '/seller', '/off-market', '/brokers', '/logout', '/login', '/register',
+    '/forgot-password', '/reset-password',
 )
 
 
@@ -3713,10 +3714,15 @@ def _sitemap_entries():
     for path in _SITEMAP_PAGES:
         loc = base + '/' if path == '/' else base + path
         entries.append((loc, ''))
+    seen_models = set()
+    for row in get_unified_aircraft_data():
+        model_slug = advisory.slug_for(row)
+        if not model_slug or model_slug in seen_models:
+            continue
+        seen_models.add(model_slug)
+        entries.append((f'{base}/aircraft/{model_slug}', ''))
     sale_rows = _public_sale_rows()
     if sale_rows:
-        latest = max((row['updated'] for row in sale_rows if row['updated']), default='')
-        entries.append((base + '/aircraft-for-sale', latest))
         by_slug = {}
         for row in sale_rows:
             if not row['slug']:
@@ -5499,7 +5505,7 @@ def create_listing():
             return render_template(
                 'create_listing.html',
                 form_error=payload.get('message') or 'Could not save the listing.',
-                off_market_allowed=_broker_market_access(user),
+                off_market_allowed=False,
             ), status
         listing_id = result['id']
         if result.get('payment_required'):
@@ -5510,7 +5516,7 @@ def create_listing():
         if user and user.get('is_admin'):
             return redirect(url_for('admin_index', highlight=listing_id))
         return redirect(url_for('dashboard', submitted=listing_id))
-    return render_template('create_listing.html', off_market_allowed=_broker_market_access(user))
+    return render_template('create_listing.html', off_market_allowed=False)
 
 @app.route('/my-listings')
 @login_required
@@ -8251,6 +8257,105 @@ def api_listings_create():
     return jsonify(result), 201
 
 
+def _record_listing_activity(listing_id, event_type):
+    """Count a real page action. Bots and a repeat from the same browser are skipped."""
+    agent = (request.headers.get('User-Agent') or '').lower()
+    if any(word in agent for word in ('bot', 'spider', 'crawl', 'slurp', 'preview', 'wget', 'curl', 'headless')):
+        return
+    import hashlib
+    raw = '|'.join([
+        str(listing_id),
+        event_type,
+        request.headers.get('User-Agent') or '',
+        request.remote_addr or '',
+        datetime.utcnow().strftime('%Y-%m-%d'),
+    ])
+    visitor = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    try:
+        db_module.record_listing_event(listing_id, event_type, visitor)
+    except Exception:
+        logger.exception('listing event failed')
+
+
+@app.route('/api/listings/import', methods=['POST'])
+@require_auth
+def api_listings_import():
+    """Create pending listings from a brokerage CSV the account is allowed to upload."""
+    import csv
+    from io import StringIO
+    user = request.current_user  # type: ignore[attr-defined]
+    upload = request.files.get('file') if request.files else None
+    text_body = upload.read().decode('utf-8', errors='replace') if upload else (request.get_data(as_text=True) or '')
+    if not text_body.strip():
+        return jsonify({'error': 'Upload a CSV with model, year, price, city, and state.'}), 400
+    created = []
+    skipped = []
+    reader = csv.DictReader(StringIO(text_body))
+    catalog = get_unified_aircraft_data()
+    for index, row in enumerate(reader):
+        if index >= 50:
+            skipped.append({'row': index + 2, 'reason': 'The first 50 rows were imported. Split the rest into another file.'})
+            break
+        model = (row.get('model') or row.get('aircraft') or '').strip().lower()
+        profile = next((
+            item for item in catalog
+            if model and model in (item.get('aircraft_name') or '').lower()
+        ), None)
+        if not profile:
+            skipped.append({'row': index + 2, 'reason': 'No matching aircraft model.'})
+            continue
+        payload = {
+            'profile_id': profile.get('id'),
+            'year': row.get('year'),
+            'price': row.get('price') or row.get('asking_price'),
+            'hours': row.get('hours') or row.get('total_time') or 0,
+            'city': row.get('city') or '',
+            'state': row.get('state') or '',
+            'location': ', '.join(part for part in [row.get('city') or '', row.get('state') or ''] if part),
+            'email': row.get('email') or user.get('email'),
+            'description': row.get('description') or '',
+            'registration': row.get('registration') or row.get('tail') or '',
+            'serial_number': row.get('serial_number') or row.get('serial') or '',
+            'market': 'public',
+        }
+        result, err = _create_listing_for_user(user, payload)
+        if err:
+            skipped.append({'row': index + 2, 'reason': err[0].get('message') or err[0].get('error')})
+            continue
+        created.append(result.get('id'))
+    return jsonify({'ok': True, 'created': created, 'skipped': skipped})
+
+
+@app.route('/seller/analytics')
+@require_auth
+def seller_analytics():
+    """Views and inquiries for the signed-in seller's own listings."""
+    user = request.current_user  # type: ignore[attr-defined]
+    try:
+        days = int(request.args.get('days') or 30)
+    except (TypeError, ValueError):
+        days = 30
+    if days not in (7, 30, 90, 0):
+        days = 30
+    rows = [row for row in db_module.get_listings_by_user_id(user['id']) if row.get('status') != 'deleted']
+    team = db_module.user_on_active_team(user['id'])
+    if team and team.get('admin_user_id') == user['id']:
+        seen = {row.get('id') for row in rows}
+        for extra in db_module.listings_for_team(team['id'], include_off_market=False):
+            if extra.get('id') not in seen:
+                rows.append(extra)
+    stats = db_module.listing_analytics([row.get('id') for row in rows if row.get('id')], days or None)
+    titles = {row.get('id'): row.get('title') for row in rows}
+    for item in stats['listings']:
+        item['title'] = titles.get(item['listing_id']) or f"Listing {item['listing_id']}"
+    return render_template(
+        'seller_analytics.html',
+        stats=stats,
+        days=days or 'all',
+        seo_noindex=True,
+    )
+
+
 @app.route('/api/listings/<int:listing_id>/resubmit', methods=['POST'])
 @require_auth
 def api_listings_resubmit(listing_id: int):
@@ -8624,11 +8729,14 @@ def _payment_required() -> bool:
 
 
 def _listing_needs_checkout(market) -> bool:
-    """The monthly fee applies to public listings. Off-market sale and wanted listings are free.
+    """Basic listings are free. Checkout stays available only when LISTINGS_REQUIRE_PAYMENT is on.
 
-    A public listing opens Stripe checkout. Code 100OFF is entered there.
+    Existing Stripe subscriptions are left alone. Turning that flag on later is a business decision.
     """
     if sections_module.normalize_market(market) == 'broker_only':
+        return False
+    flag = (os.environ.get('LISTINGS_REQUIRE_PAYMENT') or '').strip().lower()
+    if flag not in ('1', 'true', 'yes', 'on'):
         return False
     if db_module.is_production():
         return True
@@ -11694,7 +11802,17 @@ def _money_or_unavailable(value):
 @app.route('/api/finder-aircraft')
 def api_finder_aircraft():
     """Public model list for the Jet Finder cards. This is the same catalog already shown on the site."""
-    return jsonify(get_unified_aircraft_data())
+    rows = get_unified_aircraft_data()
+    counts = {}
+    for sale in _public_sale_rows():
+        key = (sale.get('model_name') or '').strip().lower()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    for row in rows:
+        name = (row.get('aircraft_name') or row.get('name') or '').strip().lower()
+        row['listings_for_sale'] = counts.get(name, 0)
+        row['model_path'] = '/aircraft/' + advisory.slug_for(row)
+    return jsonify(rows)
 
 
 @app.route('/aircraft')
@@ -11709,6 +11827,14 @@ def aircraft_model(slug):
     row = advisory.find_aircraft(get_unified_aircraft_data(), slug)
     if not row:
         return render_template('error.html', error_code=404, message='That aircraft model is not in the database.'), 404
+    wanted = (row.get('aircraft_name') or '').strip().lower()
+    for_sale = [
+        item for item in _public_sale_rows()
+        if (item.get('model_name') or '').strip().lower() == wanted
+        or wanted and wanted in (item.get('title') or '').lower()
+    ]
+    for item in for_sale:
+        _record_listing_activity(item['id'], 'match')
     return render_template(
         'aircraft_model.html',
         aircraft=row,
@@ -11718,7 +11844,8 @@ def aircraft_model(slug):
         hourly=_money_or_unavailable(row.get('total_hourly_cost')),
         annual=_money_or_unavailable(row.get('annual_budget')),
         mile=_money_or_unavailable(row.get('cost_per_mile')),
-        charter=_money_or_unavailable(row.get('charter_rate')),
+        charter=_money_or_unavailable(advisory._charter_rate(row)),
+        for_sale=for_sale,
     )
 
 
@@ -11761,8 +11888,8 @@ def api_inquiries():
     if (data.get('company_url') or '').strip():
         return jsonify({'ok': True, 'ignored': True})
     kind = (data.get('inquiry_type') or '').strip().lower()
-    if kind not in {'purchase', 'advising', 'charter'}:
-        return jsonify({'error': 'Choose a purchase, advising, or charter inquiry.'}), 400
+    if kind not in {'purchase', 'advising', 'charter', 'seller'}:
+        return jsonify({'error': 'Choose a purchase, advising, charter, or seller inquiry.'}), 400
     name = ' '.join(str(data.get('name') or '').split())[:200]
     email = str(data.get('email') or '').strip().lower()[:254]
     phone = ' '.join(str(data.get('phone') or '').split())[:50]
@@ -11807,11 +11934,21 @@ def api_inquiries():
         'notes': data.get('notes'),
         'consent': True,
     }
+    listing_id = None
+    try:
+        if data.get('listing_id') not in (None, ''):
+            listing_id = int(data.get('listing_id'))
+    except (TypeError, ValueError):
+        listing_id = None
+    if kind == 'seller' and listing_id:
+        payload['notes'] = f"Listing {listing_id}. {payload.get('notes') or ''}".strip()
     try:
         inquiry_id = db_module.create_advisory_inquiry(payload)
     except Exception:
         logger.exception('inquiry save failed')
         return jsonify({'error': 'Could not save that inquiry.'}), 500
+    if kind == 'seller' and listing_id:
+        _record_listing_activity(listing_id, 'inquiry')
     note = f"{kind} inquiry #{inquiry_id} from {name} <{email}>"
     try:
         for admin_id in db_module.list_admin_user_ids():
@@ -11821,8 +11958,18 @@ def api_inquiries():
     try:
         import email_service
         target = (os.environ.get('ADMIN_EMAILS') or 'support@jetschoolusa.com').split(',')[0].strip()
-        if target:
+        if target and kind != 'seller':
             email_service.send_email(target, f'Jetschool {kind} inquiry #{inquiry_id}', f'<p>{note}</p>', note)
+        if kind == 'seller' and listing_id:
+            listing = db_module.get_listing_with_owner(listing_id)
+            seller_email = (listing or {}).get('email') or ''
+            if seller_email:
+                email_service.send_email(
+                    seller_email,
+                    f'Jetschool inquiry about your listing #{listing_id}',
+                    f'<p>{note}</p><p>{payload.get("notes") or ""}</p>',
+                    note,
+                )
     except Exception:
         logger.exception('inquiry email failed')
     return jsonify({'ok': True, 'id': inquiry_id}), 201

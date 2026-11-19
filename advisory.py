@@ -15,6 +15,8 @@ ROUTE_FACTOR = 1.08
 RANGE_RESERVE = 0.85
 MAX_CROSS_TRACK_NM = 80.0
 MAX_DIVERSION_FACTOR = 1.45
+CHARTER_RATE_MULTIPLE = 3.25
+CREW_HOURS = 1.7
 IMAGE_ROLES = ('exterior', 'cabin', 'cockpit', 'cabin-extra')
 
 
@@ -211,6 +213,14 @@ def _takeoff_fits(runway_ft: int | None, field_length: float | None) -> bool | N
     return runway_ft >= field_length
 
 
+def _charter_rate(aircraft: dict) -> float | None:
+    """Charter rate is 325% of the spreadsheet total hourly operating cost."""
+    hourly = _num(aircraft.get('total_hourly_cost'))
+    if not hourly or hourly <= 0:
+        return None
+    return hourly * CHARTER_RATE_MULTIPLE
+
+
 def _hours(distance_nm: float, speed: float, legs: int) -> float | None:
     if speed <= 0:
         return None
@@ -228,11 +238,9 @@ def plan_charter(
 ) -> dict:
     """Compare aircraft for one mission.
 
-    A result is confirmed suitable only when takeoff field length fits a known
-    runway and landing distance is also known. The spreadsheet has balanced
-    field length and no landing distance, so confirmed suitable stays empty
-    until that data exists. Calculated options are returned separately and
-    labeled unverified.
+    Runway fit uses the same rule as Jet Finder: balanced field length must be
+    no longer than the recorded runway at every airport on the route. The
+    charter price is 325% of total hourly operating cost, plus 1.7 crew hours.
     """
     start = _point(origin, runways)
     end = _point(destination, runways)
@@ -269,12 +277,18 @@ def plan_charter(
             excluded['runway'] += 1
             continue
         takeoff_ok = bool(field) and all(item is True for item in takeoff_checks)
-        landing_known = False
-        confirmed = bool(takeoff_ok and landing_known and route['fuel_verified'])
-        rate = _num(aircraft.get('charter_rate'))
+        confirmed = takeoff_ok
+        if takeoff_ok:
+            runway_status = 'Balanced field length fits the longest runway at each airport on this route'
+        elif not field:
+            runway_status = 'A runway requirement is not available for this aircraft'
+        else:
+            runway_status = 'Runway length is not recorded for every airport on this route'
+        rate = _charter_rate(aircraft)
         one_way_nm = route['distance_nm']
         hours = _hours(one_way_nm * (2 if round_trip else 1), speed, route['legs'] * (2 if round_trip else 1))
-        estimate = int(round(hours * rate)) if hours and rate else None
+        billed = round(hours + CREW_HOURS, 2) if hours else None
+        estimate = int(round(billed * rate)) if billed and rate else None
         card = {
             'id': aircraft.get('id'),
             'slug': slug_for(aircraft),
@@ -287,19 +301,25 @@ def plan_charter(
             'cabin_volume': _num(aircraft.get('cabin_volume')),
             'fuel_stops': route['stops'],
             'stop_label': _stop_label(route['stops']),
+            'runway_length': int(field) if field else None,
+            'max_altitude': int(_num(aircraft.get('max_altitude')) or 0) or None,
+            'wingspan': _num(aircraft.get('wingspan')),
             'flight_hours': round(hours, 2) if hours else None,
+            'crew_hours': CREW_HOURS,
+            'billed_hours': billed,
             'distance_nm': round(one_way_nm * (2 if round_trip else 1), 1),
-            'hourly_charter_rate': rate,
+            'hourly_operating_cost': _num(aircraft.get('total_hourly_cost')) or None,
+            'hourly_charter_rate': round(rate, 2) if rate else None,
             'estimated_total': estimate,
             'price_note': (
-                'Estimate from the spreadsheet hourly charter rate. '
-                'Operator minimums, positioning, handling, and taxes are not included.'
+                'This estimate includes flight time and crew. It is not a confirmed quote. '
+                'An authorized operator confirms the final figure.'
                 if estimate else
-                'Charter rate is not in the spreadsheet for this aircraft.'
+                'A charter estimate is not available for this aircraft.'
             ),
             'confirmed_suitable': confirmed,
-            'runway_status': 'Runway performance not verified' if not landing_known or not takeoff_ok else 'Takeoff field length fits the recorded runway',
-            'fuel_status': 'Fuel availability not verified' if not route['fuel_verified'] else 'Fuel stop verified',
+            'runway_status': runway_status,
+            'fuel_status': 'Nonstop' if route['stops'] == 0 else 'Fuel stop calculated from range',
             'points': route['points'],
             'legs': route['legs_detail'],
         }
@@ -320,10 +340,10 @@ def plan_charter(
         'unverified': unverified,
         'excluded': excluded,
         'notice': (
-            'These figures are planning estimates. Landing distance and airport fuel '
-            'availability are not in the current data, so no aircraft is marked confirmed suitable. '
-            'An authorized operator must confirm performance, weather, payload, and availability. '
-            'Jetschool is not the aircraft operator.'
+            'Aircraft are compared for this charter the same way they are compared for a purchase. '
+            'A result is shown when the aircraft can fly the mission and its runway requirement fits '
+            'the airports. The price is a charter estimate. An authorized operator confirms the '
+            'aircraft and the final figure. Jetschool is not the operator.'
         ),
     }
 

@@ -4059,11 +4059,13 @@
     <div class="finder-heading">
         <div>
             <h1 class="finder-title">Find the Right Aircraft. Backed by Data.</h1>
-            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps buyers and charter customers compare aircraft using performance, operating cost, and mission data. The tools are free. No account is required.</p>
+            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">Jetschool helps people compare aircraft using performance, operating cost, and mission data. The research tools and basic aircraft listings are free. No account is required to research an aircraft or contact a seller.</p>
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <a class="btn btn-danger" href="#aircraftGrid">Inquire to Buy</a>
-                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Inquire to Charter</a>
-                <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Free Advisory Session</a>
+                <a class="btn btn-danger" href="#aircraftGrid">Find My Perfect Aircraft</a>
+                <a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>
+                <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Perfect Charter</a>
+                <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">List Your Aircraft — Free</a>
+                <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Schedule a Free Aircraft Advising Call</a>
             </div>
         </div>
     </div>
@@ -5951,7 +5953,7 @@ document.addEventListener('click', function (event) {
                     <div class="empty-state-content">
                         <i class="fas fa-plane-slash fa-3x mb-3" style="color: #F05545;"></i>
                         <h3 class="h4 mb-2" style="color:#f4f4f4;">No aircraft match</h3>
-                        <p class="mb-0" style="color:#d0d0d0;">Change the filters to see more models from the aircraft database.</p>
+                        <p class="mb-0" style="color:#d0d0d0;">Change the filters to see more aircraft.</p>
                     </div>
                 </div>
             `;
@@ -6707,7 +6709,9 @@ document.addEventListener('click', function (event) {
             card.id = 'listing-' + aircraft.id;
         }
 
-        const listingTitle = escCard((aircraft.listing_title || aircraft.title || `${aircraft.manufacturer || ''} ${aircraft.aircraft_name || aircraft.name || 'Unknown Aircraft'}`.trim()).trim());
+        const modelName = String(aircraft.aircraft_name || aircraft.name || aircraft.listing_title || aircraft.title || 'Unknown Aircraft').trim();
+        const makerName = String(aircraft.manufacturer || '').trim();
+        const listingTitle = escCard(makerName && modelName.toLowerCase().indexOf(makerName.toLowerCase()) !== 0 ? (makerName + ' ' + modelName) : modelName);
         const rawNotes = String(aircraft.listing_description || aircraft.description || '');
         const listingDescription = escCard(rawNotes.split('\n').filter(function (line) {
             return line.trim().toLowerCase().indexOf('listing number:') !== 0;
@@ -6781,9 +6785,6 @@ document.addEventListener('click', function (event) {
                     <h5 class="aircraft-name">${listingHref ? `<a href="${listingHref}">${listingTitle}</a>` : listingTitle}</h5>
                     ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
-                    <div class="text-muted mb-2" style="font-size: 1.05rem;">
-                        <i class="fas fa-map-marker-alt me-1"></i>${listingLocation}
-                    </div>
                     <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
                         <div style="font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8;">Average market purchase price</div>
                         <div style="font-size: 1.85rem; font-weight: 900; letter-spacing: 0.3px; color:#F05545;">
@@ -6807,6 +6808,7 @@ document.addEventListener('click', function (event) {
                             ${listingDescription ? `<p>${listingDescription}</p>` : ''}
                         </details>` : ''}
                         
+                        ${Number(aircraft.listings_for_sale) > 0 && aircraft.model_path ? `<p style="margin:0.4rem 0;"><a href="${escCard(aircraft.model_path)}" style="color:#F05545;">${Number(aircraft.listings_for_sale)} listed for sale</a></p>` : ''}
                         <div class="listing-actions">
                             <button class="btn inquire-buy" type="button" data-aircraft="${listingTitle}" style="grid-column: 1 / -1;">
                                 <i class="fas fa-paper-plane"></i><span>Inquire to Buy</span>
@@ -8173,10 +8175,10 @@ document.addEventListener('click', function (event) {
             }
             const coverLabel = document.createElement('p');
             coverLabel.className = 'text-muted mb-1';
-            coverLabel.textContent = 'Cover on the marketplace';
+            coverLabel.textContent = 'Cover photo';
             const cover = document.createElement('img');
             cover.src = homepagePhotos[0].url;
-            cover.alt = 'Cover photo as it appears on the marketplace';
+            cover.alt = 'Cover photo';
             cover.style.cssText = 'display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;border-radius:12px;margin-bottom:0.75rem;';
             listingPhotoPreview.append(coverLabel, cover);
             const row = document.createElement('div');
@@ -8358,7 +8360,7 @@ document.addEventListener('click', function (event) {
         createBtn.addEventListener('click', async function (event) {
             event.preventDefault();
             if (!homepageSelectedProfile) {
-                alert('Select a performance profile from the aircraft spreadsheet first.');
+                alert('Select an aircraft profile first.');
                 return;
             }
             const year = parseInt(document.getElementById('listingYear').value, 10);

@@ -53,7 +53,7 @@
             {% if user.broker_specialties %}<p>Aircraft specialty: {{ user.broker_specialties }}</p>{% endif %}
             {% if user.broker_years %}<p>Years in business: {{ user.broker_years }}</p>{% endif %}
             {% if user.created_at %}<p class="settings__note">Account opened {{ user.created_at }}</p>{% endif %}
-            <p>Jet Finder is an aircraft information service and marketplace. It is not your broker, and it does not buy or sell the aircraft.</p>
+            <p>Jetschool is an aircraft brokerage. A purchase or charter is not complete until it is confirmed with you.</p>
             <p>
                 <a href="{{ url_for('terms') }}">Terms</a>
                 · <a href="{{ url_for('privacy') }}">Privacy</a>
@@ -91,7 +91,7 @@
                     <input id="email-opt-in" name="email_opt_in" type="checkbox" value="1" {% if user.email_opt_in not in [false, 0, '0'] %}checked{% endif %}>
                     <span>Send me optional emails, such as watch alerts and messages. Uncheck this to opt out.</span>
                 </label>
-                <p class="settings__note">Password resets, payment problems, and a decision on your own account or listing still come by email. Those are about the account itself.</p>
+                <p class="settings__note">Messages about your account still come by email.</p>
                 <div class="settings__actions">
                     <button class="btn btn-primary" type="submit">Save email preference</button>
                 </div>
@@ -102,8 +102,7 @@
             <h2>Privacy</h2>
             <ul>
                 <li>We do not sell your personal information.</li>
-                <li>A session cookie keeps you signed in. It is not used for advertising.</li>
-                <li>Card numbers stay with Stripe. JetSchool does not store the full card number.</li>
+                <li>You can download a copy of your information or ask us to delete it.</li>
             </ul>
             <p>The privacy policy is at <a href="{{ url_for('privacy') }}">Privacy</a>. Questions: <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
             <div class="settings__actions">
