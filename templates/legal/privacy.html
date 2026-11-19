@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 
 {% block title %}Privacy{% endblock %}
-{% block meta_description %}What JetSchool collects, how that information is used, and which services process it. JetSchool does not sell personal information.{% endblock %}
+{% block meta_description %}How Jetschool uses the contact details you send when you ask about a purchase, a charter, or an advisory session.{% endblock %}
 {% block canonical %}{{ public_base }}/privacy{% endblock %}
 {% block extra_head %}
 {% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Jetschool">
 <meta property="og:title" content="Jetschool: Privacy">
-<meta property="og:description" content="What JetSchool collects, how that information is used, and which services process it.">
+<meta property="og:description" content="How Jetschool uses the contact details you send with a purchase, charter, or advisory request.">
 <meta property="og:url" content="{{ public_base }}/privacy">
 <meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Jetschool: Privacy">
-<meta name="twitter:description" content="What JetSchool collects and which services process it.">
+<meta name="twitter:description" content="How Jetschool uses the details you send with a request.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "WebPage",
     "name": "Jetschool: Privacy",
     "url": public_base ~ "/privacy",
-    "description": "What JetSchool collects, how that information is used, and which services process it.",
+    "description": "How Jetschool uses the contact details you send with a purchase, charter, or advisory request.",
     "isPartOf": {"@type": "WebSite", "name": "Jetschool", "url": public_base ~ "/"},
     "publisher": {"@type": "Organization", "name": "Jetschool", "email": "support@jetschoolusa.com"}
 }|tojson }}</script>
@@ -28,58 +28,26 @@
 {% block content %}
 <div class="container py-5" style="max-width: 860px; color: #ddd;">
     <h1 class="mb-1" style="color:#fff;">Privacy Policy</h1>
-    <p class="text-muted mb-4">Last updated: November 9, 2026</p>
+    <p class="text-muted mb-4">Last updated: November 18, 2026</p>
 
     <h2 class="h4" style="color:#fff;">Who we are</h2>
-    <p>JetSchool ("we", "us") operates jetschoolusa.com, an aviation marketplace and aircraft
-        performance platform.</p>
+    <p>Jetschool operates jetschoolusa.com. We are an aircraft brokerage. We help clients compare
+        aircraft, prepare for a purchase, and arrange charter travel.</p>
 
-    <h2 class="h4" style="color:#fff;">Information we collect</h2>
-    <ul>
-        <li><strong>Account information:</strong> email address, name, company, phone number, and a
-            hashed password when you create an account. If you sign in with Google, we receive your
-            email and name from Google.</li>
-        <li><strong>Listing content:</strong> aircraft details, photos, videos, and contact
-            information you choose to publish in a listing.</li>
-        <li><strong>Payment information:</strong> payments are processed by Stripe. We never see or
-            store your full card number.</li>
-        <li><strong>Usage data:</strong> standard server logs (IP address, browser type, pages
-            visited) used for security and debugging.</li>
-        <li><strong>Contact messages:</strong> the name, email, phone number, and message you send
-            through the contact form, so we can read and respond to it.</li>
-    </ul>
+    <h2 class="h4" style="color:#fff;">What you send us</h2>
+    <p>When you ask to buy an aircraft, arrange a charter, request an advisory session, or send a
+        message, we receive the details you choose to provide. That may include your name, email,
+        phone number, the aircraft you are considering, the trip you describe, and your message.</p>
+    <p>You can use the research tools without sending us those details.</p>
 
     <h2 class="h4" style="color:#fff;">How we use it</h2>
-    <ul>
-        <li>To operate your account, listings, and purchases.</li>
-        <li>To send transactional emails (e.g. password resets, listing status updates).</li>
-        <li>To prevent fraud and abuse.</li>
-    </ul>
-    <p>We do not sell your personal information.</p>
+    <p>We use what you send to reply, to prepare a purchase or charter conversation, and to keep
+        a record of the request. We do not sell your personal information.</p>
 
-    <h2 class="h4" style="color:#fff;">Third-party services</h2>
-    <ul>
-        <li><strong>Google</strong> — optional sign-in (OAuth).</li>
-        <li><strong>Google</strong> — a tag for container GTM-TVGS9R2S loads on every page. It can record page views and the named events this site sends. The words typed into a contact message are not sent to Google.</li>
-        <li><strong>Stripe</strong> — payment processing.</li>
-        <li><strong>Cloudflare</strong> — DNS, CDN, and media storage (R2).</li>
-        <li><strong>Railway</strong> — application and database hosting.</li>
-    </ul>
-
-    <h2 class="h4" style="color:#fff;">Your choices</h2>
-    <p>Signed-in account holders can open Settings to turn off optional emails, change a password,
-        download a copy of their account information, or delete the account. Password resets,
-        payment problems, and decisions about your own account still arrive by email. We do not
-        sell your personal information.</p>
-
-    <h2 class="h4" style="color:#fff;">Data retention &amp; deletion</h2>
-    <p>We keep your account data while your account is active. Delete the account from Settings,
-        or write to the email below.</p>
-
-    <h2 class="h4" style="color:#fff;">Cookies</h2>
-    <p>We use a session cookie (<code>jet_session</code>) to keep you logged in. It is HttpOnly and
-        not used for advertising or cross-site tracking. The Google tag may set its own cookies
-        to count visits. Those cookies are separate from the login cookie.</p>
+    <h2 class="h4" style="color:#fff;">How long we keep it</h2>
+    <p>We keep a request while we are working with you and for as long as we need it for our
+        records. You may ask us to delete it by writing to the address below. We will do so
+        unless we are required to keep it.</p>
 
     <h2 class="h4" style="color:#fff;">Contact</h2>
     <p>Questions about this policy: <a href="mailto:support@jetschoolusa.com"

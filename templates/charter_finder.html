@@ -1,17 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Charter Tool{% endblock %}
-{% block meta_description %}Compare aircraft for a charter mission using range, passengers, runway data, fuel stops, and spreadsheet charter rates.{% endblock %}
+{% block meta_description %}Compare aircraft for a charter mission. The result is an estimate for flight time and crew, arranged through an authorized operator.{% endblock %}
 {% block canonical %}{{ public_base }}/charter{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
     .charter-panel { background:#111; border:1px solid #333; border-radius:16px; padding:1.5rem; margin-bottom:1.5rem; }
     .charter-panel .form-label { color:#e8e8e8; margin-bottom:0.35rem; }
+    .charter-panel select, .charter-panel input[type="date"], .charter-panel input[type="time"] { color-scheme: dark; }
     .airport-field { position:relative; }
-    .airport-menu { position:absolute; z-index:20; left:0; right:0; top:100%; background:#1a1a1a; border:1px solid #444; border-radius:8px; max-height:240px; overflow:auto; margin-top:4px; }
-    .airport-menu button { display:block; width:100%; text-align:left; background:transparent; color:#fff; border:0; padding:0.55rem 0.75rem; }
-    .airport-menu button:hover { background:#2a2a2a; }
-    #charter-map { height:420px; background:#111; border-radius:12px; margin:1.25rem 0 1.5rem; border:1px solid #333; }
+    .airport-results { position:absolute; width:100%; max-height:300px; overflow-y:auto; z-index:1000; top:100%; left:0; }
+    .airport-results .list-group-item { border-radius:0; border-left:none; border-right:none; }
+    .airport-results .list-group-item:first-child { border-top:none; }
+    .airport-results .list-group-item:last-child { border-bottom:none; }
+    .airport-results .list-group-item:hover { background-color:rgba(240, 85, 69, 0.1) !important; border-left:3px solid #F05545; }
+    .airport-icon { background-color:#343a40; color:#fff; border:2px solid #F05545; border-radius:4px; display:flex; align-items:center; justify-content:center; font-weight:bold; width:100%; height:100%; font-size:12px; }
+    .range-tooltip { background-color:rgba(0,0,0,0.8) !important; color:#fff !important; border:1px solid #F05545 !important; border-radius:4px !important; padding:5px 10px !important; font-weight:600 !important; box-shadow:0 2px 8px rgba(0,0,0,0.5) !important; }
+    .dark-popup .leaflet-popup-content-wrapper { background-color:#1a202c; color:#fff; border-radius:5px; box-shadow:0 3px 14px rgba(0,0,0,0.4); }
+    .dark-popup .leaflet-popup-tip { background-color:#1a202c; }
+    .leaflet-container { background-color:#1a202c; outline:0; }
+    .leaflet-control-zoom a { background-color:#2d3748 !important; color:#fff !important; border-color:#4a5568 !important; }
+    .leaflet-control-zoom a:hover { background-color:#4a5568 !important; }
+    #charter-map { height:500px; background:#1a1a1a; border-radius:12px; margin:1.25rem 0 1.5rem; border:1px solid #333; }
     .charter-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1.25rem; }
     .aircraft-card { background:#141414; border:1px solid #333; border-radius:14px; padding:0.9rem; display:flex; flex-direction:column; }
     .aircraft-card h2 { font-size:1.15rem; margin:0 0 0.6rem; }
@@ -31,18 +41,18 @@
 <div class="container py-4">
     <p class="text-uppercase mb-1" style="color:#F05545;">Free charter planning</p>
     <h1>Charter Tool</h1>
-    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Every aircraft model that can fly the mission in two fuel stops or fewer is listed below in the same card format as Jet Finder. Estimates use the spreadsheet charter rate. Jetschool arranges charters through authorized operators and is not itself the operator.</p>
+    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Jetschool compares aircraft for the mission the same way it compares them for a purchase. The price is a charter estimate for flight time and crew. An authorized operator confirms the aircraft and the final figure. Jetschool arranges the charter and is not the operator.</p>
     <form id="charter-mission" class="charter-panel">
         <div class="row g-3">
             <div class="col-md-6 airport-field">
                 <label class="form-label" for="departure-search">Departure airport</label>
-                <input class="form-control bg-dark text-white border-secondary" id="departure-search" name="departure" placeholder="City, airport, or code" required autocomplete="off" value="{{ request.args.get('departure', '') }}">
-                <div class="airport-menu d-none" id="departure-menu"></div>
+                <input class="form-control bg-dark text-white border-secondary" id="departure-search" name="departure" placeholder="Search for airport..." required autocomplete="off" value="{{ request.args.get('departure', '') }}">
+                <div id="departure-results" class="airport-results d-none"><div id="departure-menu" class="list-group"></div></div>
             </div>
             <div class="col-md-6 airport-field">
                 <label class="form-label" for="arrival-search">Destination airport</label>
-                <input class="form-control bg-dark text-white border-secondary" id="arrival-search" name="arrival" placeholder="City, airport, or code" required autocomplete="off" value="{{ request.args.get('arrival', '') }}">
-                <div class="airport-menu d-none" id="arrival-menu"></div>
+                <input class="form-control bg-dark text-white border-secondary" id="arrival-search" name="arrival" placeholder="Search for airport..." required autocomplete="off" value="{{ request.args.get('arrival', '') }}">
+                <div id="arrival-results" class="airport-results d-none"><div id="arrival-menu" class="list-group"></div></div>
             </div>
             <div class="col-md-3">
                 <label class="form-label" for="departure-date">Departure date</label>
@@ -121,45 +131,61 @@
     const results = document.getElementById('charter-results');
     const notice = document.getElementById('charter-notice');
     const inquiry = document.getElementById('charter-inquiry');
-    let map = L.map('charter-map').setView([39, -98], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap'}).addTo(map);
-    let line;
-    let markers = [];
+    let map = L.map('charter-map', {center: [39.5, -98.35], zoom: 4, worldCopyJump: true, minZoom: 2});
+    const esriAttr = 'Tiles &copy; Esri';
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {attribution: esriAttr, maxZoom: 16}).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {maxZoom: 16, pane: 'overlayPane'}).addTo(map);
+    L.control.scale({imperial: false, position: 'bottomleft'}).addTo(map);
+    const routeLayer = L.layerGroup().addTo(map);
     let latest = null;
     const chosen = {departure: '', arrival: ''};
 
     function bindAirport(inputId, menuId, key) {
         const input = document.getElementById(inputId);
         const menu = document.getElementById(menuId);
+        const results = menu.parentElement;
         let timer;
         input.addEventListener('input', function () {
             chosen[key] = '';
             clearTimeout(timer);
             const query = input.value.trim();
-            if (query.length < 2) { menu.classList.add('d-none'); menu.innerHTML = ''; return; }
+            if (query.length < 2) { results.classList.add('d-none'); menu.innerHTML = ''; return; }
+            menu.innerHTML = '<div class="list-group-item bg-dark text-white">Searching...</div>';
+            results.classList.remove('d-none');
             timer = setTimeout(function () {
                 fetch('/api/airports?q=' + encodeURIComponent(query))
                     .then(function (response) { return response.json(); })
                     .then(function (airports) {
                         menu.innerHTML = '';
-                        (Array.isArray(airports) ? airports : []).forEach(function (airport) {
+                        const rows = Array.isArray(airports) ? airports : [];
+                        if (!rows.length) {
+                            menu.innerHTML = '<div class="list-group-item bg-dark text-white">No airports found</div>';
+                            return;
+                        }
+                        rows.forEach(function (airport) {
                             const code = airport.iata || airport.icao || '';
                             const button = document.createElement('button');
                             button.type = 'button';
-                            button.textContent = code + ' — ' + (airport.name || '') + (airport.city ? ', ' + airport.city : '');
-                            button.addEventListener('click', function () {
+                            button.className = 'list-group-item list-group-item-action bg-dark text-white border-secondary';
+                            button.innerHTML = '<div class="d-flex justify-content-between align-items-center"><div>'
+                                + (airport.iata ? '<strong class="me-2">' + esc(airport.iata) + '</strong>' : '')
+                                + (airport.icao ? '<span class="text-info">' + esc(airport.icao) + '</span>' : '')
+                                + '</div>' + (airport.size ? '<span class="badge bg-danger">' + esc(airport.size) + '</span>' : '')
+                                + '</div><div class="text-truncate">' + esc(airport.name || '') + '</div>'
+                                + '<small class="text-secondary text-truncate d-block">' + esc(airport.city || '') + (airport.country ? ', ' + esc(airport.country) : '') + '</small>';
+                            button.addEventListener('click', function (event) {
+                                event.preventDefault();
                                 chosen[key] = code;
-                                input.value = button.textContent;
-                                menu.classList.add('d-none');
+                                input.value = code + ' - ' + (airport.city || airport.name || '');
+                                results.classList.add('d-none');
                             });
                             menu.appendChild(button);
                         });
-                        menu.classList.toggle('d-none', !menu.children.length);
                     });
             }, 180);
         });
         document.addEventListener('click', function (event) {
-            if (!input.parentElement.contains(event.target)) menu.classList.add('d-none');
+            if (!input.parentElement.contains(event.target)) results.classList.add('d-none');
         });
     }
     bindAirport('departure-search', 'departure-menu', 'departure');
@@ -185,18 +211,70 @@
         const scored = score != null;
         return '<div class="stat-box' + (scored ? ' is-scored' : '') + '"' + (scored ? ' style="background:' + barColor(score) + '"' : '') + '><div class="stat-box__label">' + esc(label) + '</div><div class="stat-box__value">' + esc(value) + '</div></div>';
     }
+    function deg2rad(value) { return value * (Math.PI / 180); }
+    function rad2deg(value) { return value * (180 / Math.PI); }
+    function greatCircle(from, to, numPoints) {
+        const points = [from];
+        const fromLat = deg2rad(from[0]);
+        const fromLon = deg2rad(from[1]);
+        const toLat = deg2rad(to[0]);
+        const toLon = deg2rad(to[1]);
+        let deltaLon = toLon - fromLon;
+        if (Math.abs(deltaLon) > Math.PI) deltaLon = deltaLon > 0 ? deltaLon - 2 * Math.PI : deltaLon + 2 * Math.PI;
+        const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((fromLat - toLat) / 2), 2) + Math.cos(fromLat) * Math.cos(toLat) * Math.pow(Math.sin(deltaLon / 2), 2)));
+        for (let i = 1; i < numPoints; i++) {
+            const f = i / numPoints;
+            if (d < 0.0001) {
+                points.push([from[0] + f * (to[0] - from[0]), from[1] + f * (to[1] - from[1])]);
+                continue;
+            }
+            const a = Math.sin((1 - f) * d) / Math.sin(d);
+            const b = Math.sin(f * d) / Math.sin(d);
+            const x = a * Math.cos(fromLat) * Math.cos(fromLon) + b * Math.cos(toLat) * Math.cos(toLon);
+            const y = a * Math.cos(fromLat) * Math.sin(fromLon) + b * Math.cos(toLat) * Math.sin(toLon);
+            const z = a * Math.sin(fromLat) + b * Math.sin(toLat);
+            points.push([rad2deg(Math.atan2(z, Math.sqrt(x * x + y * y))), rad2deg(Math.atan2(y, x))]);
+        }
+        points.push(to);
+        return points;
+    }
+    function aircraftTitle(card) {
+        const maker = String(card.manufacturer || '').trim();
+        const model = String(card.name || '').trim();
+        if (maker && model.toLowerCase().indexOf(maker.toLowerCase()) !== 0) return maker + ' ' + model;
+        return model || maker;
+    }
     function draw(card) {
-        markers.forEach(function (marker) { map.removeLayer(marker); });
-        markers = [];
-        if (line) map.removeLayer(line);
-        const latlngs = (card.points || []).map(function (point) { return [point.lat, point.lon]; });
-        line = L.polyline(latlngs, {color: '#F05545'}).addTo(map);
-        card.points.forEach(function (point) {
-            const marker = L.marker([point.lat, point.lon]).addTo(map);
-            marker.bindPopup((point.kind === 'fuel_stop' ? 'Fuel stop candidate: ' : '') + (point.name || point.code));
-            markers.push(marker);
+        routeLayer.clearLayers();
+        const points = card.points || [];
+        const bounds = [];
+        points.forEach(function (point, index) {
+            if (index < points.length - 1) {
+                const next = points[index + 1];
+                const path = greatCircle([point.lat, point.lon], [next.lat, next.lon], 48);
+                L.polyline(path, {color: '#F05545', weight: 3, opacity: 0.8}).addTo(routeLayer);
+                path.forEach(function (pair) { bounds.push(pair); });
+            }
+            const code = point.code || '';
+            const marker = L.marker([point.lat, point.lon], {
+                icon: L.divIcon({
+                    className: 'airport-marker',
+                    html: '<div class="airport-icon">' + esc(code) + '</div>',
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20]
+                })
+            }).addTo(routeLayer);
+            const kind = point.kind === 'fuel_stop' ? 'Fuel stop<br>' : '';
+            marker.bindPopup('<strong>' + esc(code) + '</strong><br>' + kind + esc(point.name || code), {className: 'dark-popup'});
+            bounds.push([point.lat, point.lon]);
         });
-        if (latlngs.length) map.fitBounds(latlngs, {padding: [24, 24]});
+        if (points.length) {
+            const destination = routeLayer.getLayers().filter(function (layer) { return layer instanceof L.Marker; }).pop();
+            if (destination && card.distance_nm) {
+                destination.bindTooltip(Math.round(card.distance_nm) + ' nm this route', {sticky: true, direction: 'top', className: 'range-tooltip'});
+            }
+            if (bounds.length) map.fitBounds(bounds, {padding: [24, 24]});
+        }
     }
     function paint() {
         if (!latest) return;
@@ -214,19 +292,29 @@
             results.innerHTML = '<p>No aircraft can be planned for this mission with two or fewer fuel stops and the recorded runway lengths.</p>';
             return;
         }
-        const maxSeats = Math.max.apply(null, cards.map(function (card) { return card.passengers || 0; })) || 1;
-        const maxSpeed = Math.max.apply(null, cards.map(function (card) { return card.speed_kts || 0; })) || 1;
+        const maxOf = function (field) {
+            return Math.max.apply(null, cards.map(function (card) { return Number(card[field]) || 0; })) || 1;
+        };
+        const maxSeats = maxOf('passengers');
+        const maxSpeed = maxOf('speed_kts');
+        const maxRange = maxOf('range_nm');
+        const maxRunway = maxOf('runway_length');
+        const maxCabin = maxOf('cabin_volume');
         cards.forEach(function (card) {
             const article = document.createElement('article');
             article.className = 'aircraft-card';
             const stopScore = card.fuel_stops === 0 ? 100 : (card.fuel_stops === 1 ? 55 : 25);
-            article.innerHTML = '<h2>' + esc(card.name) + '</h2>'
+            const runwayScore = card.runway_length ? Math.round((1 - Math.min(card.runway_length, maxRunway) / maxRunway) * 100) : null;
+            article.innerHTML = '<h2>' + esc(aircraftTitle(card)) + '</h2>'
                 + '<div class="aircraft-price"><div class="caption">Estimated charter cost</div><div class="amount">' + esc(money(card.estimated_total)) + '</div></div>'
                 + specBar('Fuel stops', card.stop_label, stopScore)
                 + specBar('Passengers', card.passengers, Math.round((card.passengers / maxSeats) * 100))
+                + specBar('Range', card.range_nm + ' nm', Math.round((card.range_nm / maxRange) * 100))
                 + specBar('Cruise speed', card.speed_kts + ' kt', Math.round((card.speed_kts / maxSpeed) * 100))
+                + specBar('Runway needed', card.runway_length ? (card.runway_length.toLocaleString() + ' ft') : 'Unavailable', runwayScore)
+                + specBar('Cabin', card.cabin_volume ? (Math.round(card.cabin_volume) + ' cu ft') : 'Unavailable', card.cabin_volume ? Math.round((card.cabin_volume / maxCabin) * 100) : null)
                 + specBar('Flight time', hours(card.flight_hours), null)
-                + '<p style="color:#bbb;font-size:0.85rem;margin:0.6rem 0 0;">' + esc(card.runway_status) + '. ' + esc(card.fuel_status) + '. ' + esc(card.price_note) + '</p>'
+                + '<p style="color:#bbb;font-size:0.85rem;margin:0.6rem 0 0;">' + esc(card.runway_status) + '. ' + esc(card.price_note) + '</p>'
                 + '<div class="listing-actions"><button class="btn" type="button"><i class="fas fa-paper-plane"></i><span>Inquire to Charter</span></button></div>';
             article.querySelector('button').addEventListener('click', function () { openInquiry(card); });
             article.addEventListener('click', function (event) {
@@ -244,7 +332,7 @@
     function openInquiry(card) {
         const mission = new FormData(form);
         inquiry.hidden = false;
-        inquiry.aircraft_name.value = card.name;
+        inquiry.aircraft_name.value = aircraftTitle(card);
         inquiry.aircraft_id.value = card.id || '';
         inquiry.departure_airport.value = airportValue('departure', 'departure-search');
         inquiry.arrival_airport.value = airportValue('arrival', 'arrival-search');
@@ -255,7 +343,7 @@
         inquiry.estimated_price.value = card.estimated_total || '';
         inquiry.fuel_stops.value = card.fuel_stops;
         inquiry.route_notes.value = card.points.map(function (point) { return point.code || point.name; }).join(' → ');
-        document.getElementById('charter-inquiry-summary').textContent = card.name + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + money(card.estimated_total);
+        document.getElementById('charter-inquiry-summary').textContent = aircraftTitle(card) + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + money(card.estimated_total);
         inquiry.scrollIntoView();
     }
     form.addEventListener('submit', function (event) {

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Browse Aircraft{% endblock %}
-{% block meta_description %}Compare every aircraft model in the Jetschool database. Average market purchase prices, performance, and operating costs are free to research.{% endblock %}
+{% block meta_description %}Compare aircraft models with average market purchase prices, performance, and operating costs.{% endblock %}
 {% block canonical %}{{ public_base }}/aircraft{% endblock %}
 {% block content %}
 <div class="container py-4">
     <p class="text-uppercase mb-1" style="color:#F05545;letter-spacing:.14em;">Free aircraft research</p>
     <h1 class="mb-2">Browse Aircraft</h1>
-    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Every model below comes from the Jetschool aircraft database. The price is an average market purchase price for that model, not an asking price for a specific airplane that is for sale.</p>
+    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Each model is shown for comparison. The price is an average market purchase price, not an asking price for a specific airplane.</p>
     <div class="row g-2 mb-4">
         <div class="col-md-4"><input id="catalog-search" class="form-control bg-dark text-white border-secondary" placeholder="Search manufacturer or model"></div>
         <div class="col-md-3">

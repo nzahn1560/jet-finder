@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 
 {% block title %}Contact{% endblock %}
-{% block meta_description %}Send JetSchool a note about a listing, an account, or the information on this site. Messages are read by JetSchool administration.{% endblock %}
+{% block meta_description %}Ask Jetschool about a purchase, a charter, or a free advisory session.{% endblock %}
 {% block canonical %}{{ public_base }}/contact{% endblock %}
 {% block extra_head %}
 {% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Jetschool">
 <meta property="og:title" content="Jetschool: Contact">
-<meta property="og:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
+<meta property="og:description" content="Ask Jetschool about a purchase, a charter, or a free advisory session.">
 <meta property="og:url" content="{{ public_base }}/contact">
 <meta property="og:image" content="{{ public_base }}/static/images/jetschool-logo8.png">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Jetschool: Contact">
-<meta name="twitter:description" content="Send JetSchool a note about a listing, an account, or the information on this site.">
+<meta name="twitter:description" content="Ask Jetschool about a purchase, a charter, or a free advisory session.">
 <script type="application/ld+json">{{ {
     "@context": "https://schema.org",
     "@type": "ContactPage",
     "name": "Jetschool: Contact",
     "url": public_base ~ "/contact",
-    "description": "Send JetSchool a note about a listing, an account, or the information on this site.",
+    "description": "Ask Jetschool about a purchase, a charter, or a free advisory session.",
     "mainEntity": {
         "@type": "Organization",
         "name": "Jetschool",
@@ -42,7 +42,7 @@
         <h1>Contact JetSchool</h1>
         <p class="contact-card__lead">Ask for a free advising call or send a question. No account is required. You can also email <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
         <form id="advising-form" class="mb-4">
-            <h2>Schedule a Free Advising Call</h2>
+            <h2>Free Advisory Session</h2>
             <p>This request is not a confirmed appointment. Jetschool will follow up.</p>
             <label for="advise-name">Name</label>
             <input id="advise-name" name="name" required>

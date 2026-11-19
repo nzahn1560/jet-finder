@@ -5,16 +5,15 @@
 {% block content %}
 <div class="container py-5" style="max-width:760px;">
     <h1>About Jetschool</h1>
-    <p>Jetschool helps buyers and charter customers choose an aircraft with performance data, operating costs, and mission requirements. The research tools are free and do not require an account.</p>
+    <p>Jetschool is an aircraft brokerage. We help clients compare aircraft, prepare for a purchase, and arrange charter travel. The research tools are free and do not require an account.</p>
     <ul>
-        <li>Independent aircraft comparisons</li>
-        <li>Data-driven purchasing decisions</li>
-        <li>Free aircraft research</li>
-        <li>Professional aircraft acquisition assistance</li>
-        <li>Charter planning and booking assistance through authorized operators</li>
+        <li>Aircraft comparisons for a purchase</li>
+        <li>Purchase advisory</li>
+        <li>Charter planning through authorized operators</li>
+        <li>A free advisory session when you want to talk it through</li>
     </ul>
-    <p>Jetschool is not an aircraft marketplace, and it is not the operator of charter flights. A model page is not a promise that a particular airplane is for sale or available on a date.</p>
-    <a class="btn btn-danger me-2" href="{{ url_for('home') }}">Find My Aircraft to Buy</a>
-    <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Aircraft to Charter</a>
+    <p>A price on this site is an average market figure for a model. It is not an offer for a specific airplane. Jetschool arranges charter travel and is not the operator of the flight.</p>
+    <a class="btn btn-danger me-2" href="{{ url_for('home') }}">Inquire to Buy</a>
+    <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Inquire to Charter</a>
 </div>
 {% endblock %}
