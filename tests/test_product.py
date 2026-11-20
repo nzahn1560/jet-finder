@@ -77,7 +77,7 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn(b'The figures are estimates. Confirm range, price, and operating cost before you buy.', home.data)
         self.assertIn(b'rel="canonical" href="http://localhost/"', home.data)
         self.assertIn(b'WebApplication', home.data)
-        self.assertIn(b'jetfinder_route_add', home.data)
+        self.assertIn(b'id="add-route-btn"', home.data)
         self.assertNotIn(b'noindex', home.data)
         filtered = self.client.get('/?budget=5000000')
         self.assertIn(b'noindex, follow', filtered.data)
@@ -453,31 +453,14 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Citation CJ3', page.data)
         self.assertIn(str(inquiry_id).encode(), page.data)
 
-    def test_admin_analytics_dashboard_counts_listing_activity(self):
-        listing_id = db_module.create_user_listing(
-            self.profile_id, 'Dashboard Jet', 2018, 2500000, 400, 'Teterboro, NJ',
-            'seller@example.com', 'For the analytics dashboard', '', '', 'Jet', 'Cessna', 'monthly',
-            user_id=self.seller['id'], status='active',
-        )
-        self.assertTrue(db_module.record_listing_event(listing_id, 'detail_view', 'hash-one'))
-        self.assertTrue(db_module.record_listing_event(listing_id, 'inquiry', 'hash-one'))
-        stats = db_module.site_listing_analytics(30)
-        row = next(item for item in stats['listings'] if item['listing_id'] == listing_id)
-        self.assertEqual(row['views'], 1)
-        self.assertEqual(row['inquiries'], 1)
-        self.assertEqual(len(stats['series']), 30)
-        self.assertNotIn('hash-one', str(stats))
-        guest = self.client.get('/admin/analytics')
-        self.assertEqual(guest.status_code, 302)
-        self._login('seller@example.com', 'seller-pass-1')
-        self.assertEqual(self.client.get('/admin/analytics').status_code, 403)
+    def test_analytics_pages_are_not_available(self):
         self._login('admin@example.com', 'admin-pass-1')
         page = self.client.get('/admin/analytics')
-        self.assertEqual(page.status_code, 200)
-        self.assertIn(b'Views and inquiries', page.data)
-        self.assertIn(b'Dashboard Jet', page.data)
-        self.assertNotIn(b'hash-one', page.data)
-        self.assertIn(b'>Analytics<', page.data)
+        self.assertEqual(page.status_code, 404)
+        home = self.client.get('/')
+        self.assertNotIn(b'>Analytics<', home.data)
+        self.assertNotIn(b'Listing Analytics', home.data)
+        self.assertEqual(self.client.get('/seller/analytics').status_code, 404)
 
     def test_listing_market_is_public_or_broker_off_market(self):
         self._login('seller@example.com', 'seller-pass-1')
@@ -1293,7 +1276,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'<h1>Free Advising Call</h1>', page.data)
         self.assertIn(b'rel="canonical" href="http://localhost/contact"', page.data)
         self.assertIn(b'ContactPage', page.data)
-        self.assertIn(b'contact_message_sent', page.data)
+        self.assertNotIn(b'contact_message_sent', page.data)
         self.assertIn(b'support@jetschoolusa.com', page.data)
         self.assertNotIn(b'noindex', page.data)
         filtered = self.client.get('/contact?sent=1')
@@ -1339,14 +1322,13 @@ class ProductTests(unittest.TestCase):
         try:
             for path in ('/', '/contact', '/brokers', '/privacy', '/no-such-page'):
                 page = self.client.get(path)
-                self.assertEqual(page.data.count(b'https://www.googletagmanager.com/gtm.js?id=GTM-TVGS9R2S'), 1, path)
+                self.assertNotIn(b'googletagmanager.com', page.data, path)
                 self.assertNotIn(b'gtag/js', page.data)
+                self.assertNotIn(b'GTM-TVGS9R2S', page.data)
                 self.assertNotIn(b'google-site-verification', page.data)
-                head = page.data.split(b'<head>', 1)[1][:220]
-                self.assertIn(b'GTM-TVGS9R2S', head)
             os.environ['GOOGLE_SITE_VERIFICATION'] = 'verifytoken123'
             home = self.client.get('/')
-            self.assertEqual(home.data.count(b'GTM-TVGS9R2S'), 1)
+            self.assertNotIn(b'GTM-TVGS9R2S', home.data)
             self.assertIn(b'google-site-verification" content="verifytoken123"', home.data)
             os.environ['GOOGLE_SITE_VERIFICATION'] = (
                 '<meta name="google-site-verification" '
@@ -1435,7 +1417,7 @@ class ProductTests(unittest.TestCase):
         self.assertNotIn(b'noindex', seller_page.data)
         buyer_page = self.client.get(f'/people/{self.buyer["id"]}')
         self.assertIn(b'noindex, follow', buyer_page.data)
-        self.assertIn(b'profile_view', buyer_page.data)
+        self.assertNotIn(b'profile_view', buyer_page.data)
 
     def test_public_diagnostics_omit_account_counts(self):
         for path in ('/api/health', '/api/data-safety', '/api/data-source', '/api/diagnostic'):
@@ -1994,7 +1976,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Listed at $2,500,000.', page.data)
         self.assertIn(b'rel="canonical" href="http://localhost/listing/' + str(listing_id).encode() + b'"', page.data)
         self.assertIn(b'"@type": "Product"', page.data)
-        self.assertIn(b'listing_view', page.data)
+        self.assertNotIn(b'listing_view', page.data)
         self.assertIn(b'View seller contact details', page.data)
         self.assertNotIn(b'id="contact-seller"', page.data)
         self.assertNotIn(b'listing_broker_send', page.data)

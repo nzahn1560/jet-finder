@@ -23,6 +23,12 @@
     .leaflet-control-zoom a:hover { background-color:#4a5568 !important; }
     #charter-map { height:500px; background:#1a1a1a; border-radius:12px; margin:1.25rem 0 1.5rem; border:1px solid #333; }
     .charter-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1.25rem; }
+    .charter-photo { position:relative; }
+    .charter-photo img { width:100%; height:160px; object-fit:cover; border-radius:8px; background:#1c1c1c; display:block; }
+    .listing-score { position:absolute; top:8px; left:8px; z-index:2; width:52px; height:52px; border-radius:50%; background:rgba(18,18,18,0.78); display:flex; align-items:center; justify-content:center; }
+    .listing-score span { font-size:0.82rem; font-weight:800; line-height:1; }
+    .charter-kicker { margin:0.7rem 0 0; color:#F05545; font-size:0.72rem; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; }
+    .charter-class { margin:0.15rem 0 0; color:#fff; font-family:Georgia, "Iowan Old Style", Palatino, serif; font-size:1.2rem; font-weight:500; }
     .aircraft-card { background:#141414; border:1px solid #333; border-radius:14px; padding:0.9rem; display:flex; flex-direction:column; }
     .aircraft-card h2 { font-size:1.15rem; margin:0 0 0.6rem; }
     .aircraft-price { background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0 10px; }
@@ -35,13 +41,18 @@
     .aircraft-card .listing-actions { display:grid; grid-template-columns:1fr; gap:8px; padding:8px 0 0; border-top:1px solid #404040; }
     .aircraft-card .listing-actions .btn { width:100%; height:64px; margin:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1px solid #F05545; border-radius:8px; background:#1a1a1a; color:#fff; font-size:0.78rem; font-weight:700; }
     .aircraft-card .listing-actions .btn:hover { background:#F05545; color:#fff; }
+    .charter-time { display:flex; align-items:center; gap:0.9rem; margin:0 0 1rem; }
+    .charter-time[hidden] { display:none; }
+    .charter-time label { margin:0; color:#c8c8c8; font-size:0.72rem; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; }
+    .charter-time input[type="range"] { flex:1; accent-color:#F05545; }
+    .charter-time span { min-width:5.5rem; color:#F05545; font-weight:800; }
+    .charter-time span:last-child { text-align:right; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="container py-4">
-    <p class="text-uppercase mb-1" style="color:#F05545;">Free charter planning</p>
-    <h1>Charter Tool</h1>
-    <p class="mb-4" style="max-width:46rem;color:#d0d0d0;">Choose the airports, then search. Jetschool compares aircraft for the mission the same way it compares them for a purchase. The range is a planning estimate for modeled flight cost and uncertain positioning. It does not mean an aircraft has been located. An authorized operator confirms availability and the final figure. Jetschool arranges the charter and is not the operator.</p>
+    <h1>Charter</h1>
+    <p class="mb-3" style="color:#ccc;">The operator sets the final price.</p>
     <form id="charter-mission" class="charter-panel">
         <div class="row g-3">
             <div class="col-md-6 airport-field">
@@ -77,25 +88,19 @@
                 <label class="form-label" for="return-date">Return date</label>
                 <input class="form-control bg-dark text-white border-secondary" id="return-date" name="return_date" type="date">
             </div>
-            <div class="col-md-4">
-                <label class="form-label" for="charter-sort">Sort results</label>
-                <select id="charter-sort" class="form-select bg-dark text-white border-secondary">
-                    <option value="stops">Fuel stops</option>
-                    <option value="price">Estimated price</option>
-                    <option value="value">Best All-Around/$</option>
-                    <option value="hours">Flight duration</option>
-                    <option value="speed">Cruise speed</option>
-                    <option value="seats">Passengers</option>
-                </select>
-            </div>
             <div class="col-12">
                 <button class="btn btn-danger px-4" type="submit">Search aircraft</button>
             </div>
         </div>
     </form>
-    <p class="mb-3" style="color:#ccc;">Estimated charter pricing is for planning purposes only. Actual availability, routing, operating requirements, repositioning expenses, and final pricing must be confirmed with an authorized charter operator.</p>
     <p id="charter-notice" class="mb-3" style="color:#ccc;"></p>
     <div id="charter-map"></div>
+    <div id="charter-time" class="charter-time" hidden>
+        <label for="charter-time-slider">Flight time</label>
+        <span id="charter-time-fast"></span>
+        <input id="charter-time-slider" type="range" min="0" max="1" value="1" aria-label="Maximum flight time">
+        <span id="charter-time-value"></span>
+    </div>
     <div class="charter-grid" id="charter-results"></div>
     <form id="charter-inquiry" class="mt-4 p-4" hidden style="background:#141414;border:1px solid #333;border-radius:12px;max-width:40rem;">
         <h2 class="h4">Inquire for Charter</h2>
@@ -121,7 +126,7 @@
         <label class="form-label">Special requests</label>
         <textarea class="form-control bg-dark text-white border-secondary mb-2" name="notes" rows="3"></textarea>
         <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
-        <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> I agree that Jetschool may contact me. This request does not reserve an aircraft.</label>
+        <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> Jetschool may contact me.</label>
         <button class="btn btn-danger" type="submit">Send charter inquiry</button>
         <p class="inquiry-status mt-2" role="status"></p>
     </form>
@@ -140,6 +145,9 @@
     L.control.scale({imperial: false, position: 'bottomleft'}).addTo(map);
     const routeLayer = L.layerGroup().addTo(map);
     let latest = null;
+    let drawnId = null;
+    const timeBox = document.getElementById('charter-time');
+    const timeSlider = document.getElementById('charter-time-slider');
     const chosen = {departure: '', arrival: ''};
 
     function bindAirport(inputId, menuId, key) {
@@ -240,10 +248,24 @@
         points.push(to);
         return points;
     }
-    function priceRange(card) {
-        if (!card.estimate_low || !card.estimate_high) return 'Unavailable';
-        if (card.estimate_low === card.estimate_high) return money(card.estimate_low);
-        return money(card.estimate_low) + ' – ' + money(card.estimate_high);
+    function onePrice(card) {
+        return card.estimated_total ? money(card.estimated_total) : 'Unavailable';
+    }
+    function cabinSize(card) {
+        const height = Number(card.cabin_height);
+        const width = Number(card.cabin_width);
+        const length = Number(card.cabin_length);
+        if (height && width && length) return height + ' × ' + width + ' × ' + length + ' ft';
+        if (card.cabin_volume) return Math.round(card.cabin_volume) + ' cu ft';
+        return 'Unavailable';
+    }
+    function stopText(card) {
+        if (!card.fuel_stops) return 'Nonstop';
+        return card.fuel_stops === 1 ? '1 stop' : (card.fuel_stops + ' stops');
+    }
+    function scoreColor(score) {
+        const amount = Math.max(0, Math.min(100, Number(score) || 0)) / 100;
+        return 'rgb(' + Math.round(240 - 200 * amount) + ',' + Math.round(69 + 111 * amount) + ',' + Math.round(69 + amount) + ')';
     }
     function aircraftTitle(card) {
         const maker = String(card.manufacturer || '').trim();
@@ -252,6 +274,7 @@
         return model || maker;
     }
     function draw(card) {
+        drawnId = card && card.id;
         routeLayer.clearLayers();
         const points = card.points || [];
         const bounds = [];
@@ -283,48 +306,90 @@
             if (bounds.length) map.fitBounds(bounds, {padding: [24, 24]});
         }
     }
-    function paint() {
-        if (!latest) return;
-        const cards = latest.unverified.slice().concat(latest.suitable);
-        const key = document.getElementById('charter-sort').value;
-        cards.sort(function (a, b) {
-            if (key === 'stops') return a.fuel_stops - b.fuel_stops;
-            if (key === 'hours') return (a.flight_hours || 99) - (b.flight_hours || 99);
-            if (key === 'value') return (b.all_around_percent || -1) - (a.all_around_percent || -1);
-            if (key === 'speed') return b.speed_kts - a.speed_kts;
-            if (key === 'seats') return b.passengers - a.passengers;
-            return (a.estimated_total || 1e12) - (b.estimated_total || 1e12);
-        });
-        results.innerHTML = '';
-        if (!cards.length) {
-            results.innerHTML = '<p>No aircraft can be planned for this mission with two or fewer fuel stops and the recorded runway lengths.</p>';
+    function allCards() {
+        return (latest.suitable || []).concat(latest.unverified || []);
+    }
+    function timeBounds() {
+        const times = allCards().map(function (card) { return Number(card.flight_hours); }).filter(Boolean);
+        if (!times.length) return null;
+        return {min: Math.min.apply(null, times), max: Math.max.apply(null, times)};
+    }
+    function syncSlider() {
+        const bounds = timeBounds();
+        const ready = bounds && (latest.categories || []).length;
+        if (!ready) {
+            if (!(latest.categories || []).length) timeBox.hidden = true;
             return;
         }
-        const maxOf = function (field) {
-            return Math.max.apply(null, cards.map(function (card) { return Number(card[field]) || 0; })) || 1;
-        };
-        const maxSeats = maxOf('passengers');
-        const maxSpeed = maxOf('speed_kts');
-        const maxRange = maxOf('range_nm');
-        const maxRunway = maxOf('runway_length');
-        const maxCabin = maxOf('cabin_volume');
+        const minM = Math.floor(bounds.min * 60);
+        const maxM = Math.max(minM + 1, Math.ceil(bounds.max * 60));
+        const key = String(latest.distance_nm) + ':' + minM + ':' + maxM;
+        timeSlider.min = String(minM);
+        timeSlider.max = String(maxM);
+        if (timeSlider.dataset.route !== key) {
+            timeSlider.value = String(maxM);
+            timeSlider.dataset.route = key;
+        }
+        document.getElementById('charter-time-fast').textContent = hours(minM / 60);
+        document.getElementById('charter-time-value').textContent = hours(Number(timeSlider.value) / 60);
+        timeBox.hidden = false;
+    }
+    function bestWithin(limit) {
+        const order = (latest.categories || []).map(function (card) { return card.charter_class; });
+        const groups = {};
+        allCards().forEach(function (card) {
+            const key = card.charter_class || '';
+            const flight = Number(card.flight_hours);
+            if (order.indexOf(key) === -1) return;
+            if (flight && flight > limit + 0.001) return;
+            (groups[key] || (groups[key] = [])).push(card);
+        });
+        return order.map(function (key) {
+            const rows = groups[key] || [];
+            rows.sort(function (a, b) {
+                const scoreA = a.all_around_percent == null ? -1 : a.all_around_percent;
+                const scoreB = b.all_around_percent == null ? -1 : b.all_around_percent;
+                if (scoreB !== scoreA) return scoreB - scoreA;
+                if (a.confirmed_suitable !== b.confirmed_suitable) return a.confirmed_suitable ? -1 : 1;
+                const priceA = a.estimated_total || 1000000000000;
+                const priceB = b.estimated_total || 1000000000000;
+                if (priceA !== priceB) return priceA - priceB;
+                return String(a.name || '').localeCompare(String(b.name || ''));
+            });
+            return rows[0] || null;
+        }).filter(Boolean);
+    }
+    function paint() {
+        if (!latest) return;
+        syncSlider();
+        const atMax = timeBox.hidden || Number(timeSlider.value) >= Number(timeSlider.max);
+        const cards = atMax ? (latest.categories || []) : bestWithin(Number(timeSlider.value) / 60);
+        results.innerHTML = '';
+        if (!cards.length) {
+            results.innerHTML = '<p>No aircraft fit.</p>';
+            if (!(latest.categories || []).length) {
+                timeBox.hidden = true;
+                notice.textContent = '';
+            }
+            drawnId = null;
+            return;
+        }
         cards.forEach(function (card) {
             const article = document.createElement('article');
             article.className = 'aircraft-card';
-            const stopScore = card.fuel_stops === 0 ? 100 : (card.fuel_stops === 1 ? 55 : 25);
-            const runwayScore = card.runway_length ? Math.round((1 - Math.min(card.runway_length, maxRunway) / maxRunway) * 100) : null;
-            const photo = card.image ? '<img src="' + esc(card.image) + '" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:8px;margin-bottom:0.5rem;">' : '';
-            article.innerHTML = photo + '<h2>' + esc(aircraftTitle(card)) + '</h2>'
-                + '<div class="aircraft-price"><div class="caption">Estimated charter range</div><div class="amount">' + esc(priceRange(card)) + '</div></div>'
-                + specBar('Best All-Around/$', card.all_around_percent == null ? 'Unavailable' : (card.all_around_percent + '%'), card.all_around_percent)
-                + specBar('Fuel stops', card.stop_label, stopScore)
-                + specBar('Passengers', card.passengers, Math.round((card.passengers / maxSeats) * 100))
-                + specBar('Range', card.range_nm + ' nm', Math.round((card.range_nm / maxRange) * 100))
-                + specBar('Cruise speed', card.speed_kts + ' kt', Math.round((card.speed_kts / maxSpeed) * 100))
-                + specBar('Runway needed', card.runway_length ? (card.runway_length.toLocaleString() + ' ft') : 'Unavailable', runwayScore)
-                + specBar('Cabin', card.cabin_volume ? (Math.round(card.cabin_volume) + ' cu ft') : 'Unavailable', card.cabin_volume ? Math.round((card.cabin_volume / maxCabin) * 100) : null)
+            const score = card.all_around_percent == null ? '—' : (card.all_around_percent + '%');
+            const scoreStyle = card.all_around_percent == null ? '#fff' : scoreColor(card.all_around_percent);
+            const photo = card.image || '/static/images/aircraft_placeholder.jpg';
+            article.innerHTML = '<div class="charter-photo"><img src="' + esc(photo) + '" alt="">'
+                + '<div class="listing-score" title="Best All-Around/$"><span style="color:' + scoreStyle + '">' + esc(score) + '</span></div></div>'
+                + '<p class="charter-kicker">Best available</p>'
+                + '<p class="charter-class">' + esc(card.category_label || '') + '</p>'
+                + '<h2>' + esc(aircraftTitle(card)) + '</h2>'
+                + '<div class="aircraft-price"><div class="caption">Lowest price</div><div class="amount">' + esc(onePrice(card)) + '</div></div>'
                 + specBar('Flight time', hours(card.flight_hours), null)
-                + '<p style="color:#bbb;font-size:0.85rem;margin:0.6rem 0 0;">' + esc(card.runway_status) + '. ' + esc(card.price_note) + '</p>'
+                + specBar('Fuel stops', stopText(card), null)
+                + specBar('Passengers', card.passengers, null)
+                + specBar('Cabin', cabinSize(card), null)
                 + '<div class="listing-actions"><button class="btn" type="button"><i class="fas fa-paper-plane"></i><span>Inquire for Charter</span></button></div>';
             article.querySelector('button').addEventListener('click', function () { openInquiry(card); });
             article.addEventListener('click', function (event) {
@@ -333,8 +398,8 @@
             });
             results.appendChild(article);
         });
-        draw(cards[0]);
-        notice.textContent = latest.notice + ' Great-circle route about ' + Math.round(latest.distance_nm) + ' nm. Showing all ' + cards.length + ' aircraft that fit this mission.';
+        if (!cards.some(function (card) { return card.id === drawnId; })) draw(cards[0]);
+        notice.textContent = Math.round(latest.distance_nm) + ' nm';
     }
     function airportValue(key, inputId) {
         return chosen[key] || document.getElementById(inputId).value.trim();
@@ -353,12 +418,14 @@
         inquiry.estimated_price.value = card.estimate_mid || card.estimated_total || '';
         inquiry.fuel_stops.value = card.fuel_stops;
         inquiry.route_notes.value = card.points.map(function (point) { return point.code || point.name; }).join(' → ');
-        document.getElementById('charter-inquiry-summary').textContent = aircraftTitle(card) + ' · ' + inquiry.route_notes.value + ' · ' + card.stop_label + ' · ' + priceRange(card);
+        document.getElementById('charter-inquiry-summary').textContent = aircraftTitle(card) + ' · ' + onePrice(card);
         inquiry.scrollIntoView();
     }
     form.addEventListener('submit', function (event) {
         event.preventDefault();
-        notice.textContent = 'Comparing aircraft…';
+        notice.textContent = '';
+        timeBox.hidden = true;
+        timeSlider.dataset.route = '';
         const payload = Object.fromEntries(new FormData(form).entries());
         payload.departure = airportValue('departure', 'departure-search');
         payload.arrival = airportValue('arrival', 'arrival-search');
@@ -368,12 +435,12 @@
             body: JSON.stringify(payload),
         }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
           .then(function (result) {
-              if (!result.ok) { notice.textContent = result.body.error || 'That route could not be planned.'; results.innerHTML = ''; return; }
+              if (!result.ok) { notice.textContent = result.body.error || 'That route could not be planned.'; results.innerHTML = ''; timeBox.hidden = true; return; }
               latest = result.body;
               paint();
           });
     });
-    document.getElementById('charter-sort').addEventListener('change', paint);
+    timeSlider.addEventListener('input', paint);
     inquiry.addEventListener('submit', function (event) {
         event.preventDefault();
         const status = inquiry.querySelector('.inquiry-status');
@@ -386,7 +453,7 @@
             body: JSON.stringify(data),
         }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
           .then(function (result) {
-              status.textContent = result.ok ? ('Inquiry ' + result.body.id + ' received.') : (result.body.error || 'Could not save that inquiry.');
+              status.textContent = result.ok ? 'Request received.' : (result.body.error || 'Could not save that inquiry.');
           });
     });
 })();

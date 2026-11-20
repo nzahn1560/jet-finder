@@ -4059,13 +4059,14 @@
     <div class="finder-heading">
         <div>
             <h1 class="finder-title">{% if marketplace %}Aircraft for Sale{% else %}Find the Right Aircraft. Backed by Data.{% endif %}</h1>
-            <p class="mb-3" style="max-width:40rem;color:#e8e8e8;">{% if marketplace %}These are aircraft listed for sale. The cards, filters, and map work the same way as Jet Finder. The price on each card is that airplane's asking price.{% else %}Jetschool helps people compare aircraft using performance, operating cost, and mission data. The research tools and basic aircraft listings are free. No account is required to research an aircraft or contact a seller.{% endif %}</p>
+            {% if not marketplace %}
             <div class="d-flex flex-wrap gap-2 mb-3">
-                {% if not marketplace %}<a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>{% endif %}
+                <a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>
                 <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Perfect Charter</a>
                 <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">List Your Aircraft — Free</a>
                 <a class="btn btn-outline-light" href="{{ url_for('contact') }}?intent=advising">Schedule a Free Aircraft Advising Call</a>
             </div>
+            {% endif %}
         </div>
     </div>
     <!-- Route Planning Tools Section -->
@@ -4969,20 +4970,6 @@
 </div>
 
 {% block additional_js %}
-<script>
-window.dataLayer = window.dataLayer || [];
-function trackFinder(name, params) {
-    var payload = Object.assign({ event: name }, params || {});
-    window.dataLayer.push(payload);
-    if (typeof window.gtag === 'function') window.gtag('event', name, params || {});
-}
-document.addEventListener('click', function (event) {
-    var button = event.target.closest('#search-home-btn, #add-route-btn');
-    if (!button) return;
-    if (button.id === 'search-home-btn') trackFinder('jetfinder_home_airport_search');
-    if (button.id === 'add-route-btn') trackFinder('jetfinder_route_add');
-});
-</script>
 <!-- Leaflet JS for maps -->
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <!-- Leaflet Geocoder -->

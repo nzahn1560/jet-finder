@@ -49,9 +49,12 @@ class CharterPlanTests(unittest.TestCase):
         self.assertTrue(card['confirmed_suitable'])
         self.assertEqual(card['hourly_charter_rate'], 2000)
         self.assertNotIn('commission_mid', card)
-        self.assertLess(card['estimate_low'], card['estimate_mid'])
-        self.assertLess(card['estimate_mid'], card['estimate_high'])
-        self.assertEqual(card['estimated_total'], card['estimate_mid'])
+        self.assertNotIn('estimate_low', card)
+        self.assertNotIn('estimate_high', card)
+        self.assertIsNotNone(card['estimated_total'])
+        self.assertEqual(plan['categories'][0]['name'], 'Test Jet')
+        self.assertEqual(plan['categories'][0]['category_label'], 'Light jet')
+        self.assertTrue(plan['categories'][0]['best_available'])
 
     def test_one_fuel_stop_is_mapped(self):
         plan = advisory.plan_charter(
@@ -117,6 +120,16 @@ class CharterPlanTests(unittest.TestCase):
         domestic = charter_pricing.price_mission(aircraft, 2, passengers=1, domestic=True)
         self.assertEqual(domestic['tax_status'], 'us_domestic')
         self.assertGreater(domestic['estimate_mid'], priced['estimate_mid'])
+
+    def test_classes_follow_engine_and_range(self):
+        import charter_pricing
+        single = charter_pricing.charter_category({'category': 'Piston', 'multi_engine': 'No', 'range': 800})
+        twin = charter_pricing.charter_category({'category': 'Turboprop', 'multi_engine': 'Yes', 'range': 1500})
+        far = charter_pricing.charter_category({'category': 'Jet', 'range': 7500, 'passengers': 14})
+        self.assertEqual(single, 'piston_single')
+        self.assertEqual(twin, 'turboprop_multi')
+        self.assertEqual(far, 'ultra_long')
+        self.assertEqual(charter_pricing.CATEGORY_LABELS[far], 'Ultra-long range jet')
 
     def test_route_score_uses_the_purchase_equation(self):
         cheap = _aircraft(id=11, price=1000000, total_fixed_cost=80000, total_variable_cost=40000, aircraft_name='Cheap')

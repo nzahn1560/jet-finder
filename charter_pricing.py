@@ -18,13 +18,16 @@ from typing import Any
 
 DEFAULTS: dict[str, Any] = {
     'multipliers': {
-        'piston': 3.0,
-        'turboprop': 2.75,
+        'piston_single': 3.0,
+        'piston_multi': 3.0,
+        'turboprop_single': 2.75,
+        'turboprop_multi': 2.75,
         'very_light': 2.5,
         'light': 2.5,
         'midsize': 2.4,
         'super_midsize': 2.25,
         'large': 2.1,
+        'ultra_long': 2.0,
     },
     'reposition_low': 0.10,
     'reposition_mid': 0.25,
@@ -41,11 +44,33 @@ DEFAULTS: dict[str, Any] = {
     'overrides': {},
 }
 
-DISCLAIMER = (
-    'Estimated charter pricing is for planning purposes only. Actual availability, '
-    'routing, operating requirements, repositioning expenses, and final pricing must '
-    'be confirmed with an authorized charter operator.'
+DISCLAIMER = 'The operator sets the final price.'
+
+CATEGORY_ORDER = (
+    'piston_single',
+    'piston_multi',
+    'turboprop_single',
+    'turboprop_multi',
+    'very_light',
+    'light',
+    'midsize',
+    'super_midsize',
+    'large',
+    'ultra_long',
 )
+
+CATEGORY_LABELS = {
+    'piston_single': 'Piston single',
+    'piston_multi': 'Piston multi',
+    'turboprop_single': 'Turboprop single',
+    'turboprop_multi': 'Turboprop multi',
+    'very_light': 'Very light jet',
+    'light': 'Light jet',
+    'midsize': 'Midsize jet',
+    'super_midsize': 'Super midsize jet',
+    'large': 'Large jet',
+    'ultra_long': 'Ultra-long range jet',
+}
 
 
 def merged(config: dict | None = None) -> dict:
@@ -78,31 +103,74 @@ def _num(value: Any) -> float | None:
     return number
 
 
+def _multi_engine(aircraft: dict) -> bool | None:
+    raw = aircraft.get('multi_engine')
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw or '').strip().lower()
+    if text in ('yes', 'true', '1', 'y', 'multi'):
+        return True
+    if text in ('no', 'false', '0', 'n', 'single'):
+        return False
+    return None
+
+
 def charter_category(aircraft: dict, override: str | None = None) -> str | None:
-    """A planning class. Jet classes use the passengers and range already on the row."""
+    """Planning class from engine type, then range. A missing range falls back to seats."""
     chosen = (override or '').strip().lower().replace('-', '_').replace(' ', '_')
+    aliases = {
+        'vlj': 'very_light',
+        'very_light_jet': 'very_light',
+        'light_jet': 'light',
+        'midsize_jet': 'midsize',
+        'super_midsize_jet': 'super_midsize',
+        'large_jet': 'large',
+        'large_cabin': 'large',
+        'ultra_long_range': 'ultra_long',
+        'ultra_long_range_jet': 'ultra_long',
+        'ulr': 'ultra_long',
+    }
     if chosen in DEFAULTS['multipliers']:
         return chosen
+    if chosen in aliases:
+        return aliases[chosen]
     kind = str(aircraft.get('category') or '').lower()
+    if chosen == 'piston':
+        kind = 'piston'
+    elif chosen in ('turboprop', 'turbo_prop'):
+        kind = 'turboprop'
+    multi = _multi_engine(aircraft)
     if 'piston' in kind:
-        return 'piston'
-    if 'turboprop' in kind or 'turbo prop' in kind:
-        return 'turboprop'
-    if 'jet' not in kind:
+        return 'piston_multi' if multi else 'piston_single'
+    if 'turboprop' in kind or 'turbo prop' in kind or 'turbo-prop' in kind:
+        return 'turboprop_multi' if multi else 'turboprop_single'
+    if 'jet' not in kind and 'business' not in kind:
         return None
-    passengers = _num(aircraft.get('passengers')) or 0
     distance = _num(aircraft.get('range')) or 0
-    if not passengers or not distance:
-        return None
-    if passengers <= 6 and distance < 1800:
+    passengers = _num(aircraft.get('passengers')) or 0
+    if distance:
+        if distance >= 5700 or (passengers >= 16 and distance >= 5500):
+            return 'ultra_long'
+        if distance >= 4500 or (passengers >= 12 and distance >= 3300):
+            return 'large'
+        if distance >= 2900:
+            return 'super_midsize'
+        if distance >= 2200:
+            return 'midsize'
+        if distance >= 1100:
+            return 'light'
         return 'very_light'
-    if passengers <= 8 and distance < 2500:
+    if passengers <= 6:
+        return 'very_light'
+    if passengers <= 8:
         return 'light'
-    if passengers <= 9 and distance < 3500:
+    if passengers <= 9:
         return 'midsize'
-    if passengers <= 12 and distance < 4500:
+    if passengers <= 12:
         return 'super_midsize'
-    return 'large'
+    if passengers <= 16:
+        return 'large'
+    return 'ultra_long'
 
 
 def _override(config: dict, aircraft: dict) -> dict:
@@ -254,14 +322,12 @@ def price_mission(
 
 
 def public_price(result: dict) -> dict:
-    """Fields a visitor can see. The commission amount stays off this payload."""
+    """One customer price. The commission amount and the old range stay off this payload."""
     return {
         'pricing_status': result.get('status'),
+        'charter_class': result.get('category'),
+        'category_label': CATEGORY_LABELS.get(result.get('category') or '', ''),
         'hourly_charter_rate': result.get('hourly_rate'),
-        'estimate_low': result.get('estimate_low'),
-        'estimate_mid': result.get('estimate_mid'),
-        'estimate_high': result.get('estimate_high'),
         'estimated_total': result.get('estimate_mid'),
-        'tax_status': result.get('tax_status'),
         'price_note': result.get('price_note'),
     }

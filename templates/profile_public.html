@@ -65,9 +65,6 @@
 </div>
 <script>
 (function () {
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: 'profile_view', profile_id: {{ user.id }} });
-    if (typeof window.gtag === 'function') window.gtag('event', 'profile_view', { profile_id: {{ user.id }} });
     const section = document.querySelector('.profile-listings');
     const list = document.getElementById('profile-listings');
     if (!section || !list) return;

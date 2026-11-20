@@ -235,9 +235,7 @@ def plan_charter(
 ) -> dict:
     """Compare aircraft for one mission.
 
-    Runway fit uses the same rule as Jet Finder: balanced field length must be
-    no longer than the recorded runway at every airport on the route. The
-    charter price is a planning range from variable operating cost. It is not an operator quote.
+    Runway fit uses the same rule as Jet Finder. The charter price is one planning figure.
     """
     start = _point(origin, runways)
     end = _point(destination, runways)
@@ -309,6 +307,9 @@ def plan_charter(
             'range_nm': int(_num(aircraft.get('range')) or 0),
             'speed_kts': int(speed),
             'cabin_volume': _num(aircraft.get('cabin_volume')),
+            'cabin_height': _num(aircraft.get('cabin_height')),
+            'cabin_width': _num(aircraft.get('cabin_width')),
+            'cabin_length': _num(aircraft.get('cabin_length')),
             'fuel_stops': route['stops'],
             'stop_label': _stop_label(route['stops']),
             'runway_length': int(field) if field else None,
@@ -350,13 +351,37 @@ def plan_charter(
         'destination': end,
         'suitable': suitable,
         'unverified': unverified,
+        'categories': _best_by_category(suitable + unverified),
         'excluded': excluded,
-        'notice': (
-            'Aircraft are compared for this charter the same way they are compared for a purchase. '
-            'A result is shown when the aircraft can fly the mission and its runway requirement fits '
-            'the airports. ' + charter_pricing.DISCLAIMER + ' Jetschool is not the operator.'
-        ),
+        'notice': charter_pricing.DISCLAIMER,
     }
+
+
+def _best_by_category(cards: list[dict]) -> list[dict]:
+    """One aircraft per class: the best all-around score, then the lower price."""
+    import charter_pricing
+    groups: dict[str, list[dict]] = {}
+    for card in cards:
+        key = card.get('charter_class') or ''
+        if key not in charter_pricing.CATEGORY_LABELS:
+            continue
+        groups.setdefault(key, []).append(card)
+    picked = []
+    for key in charter_pricing.CATEGORY_ORDER:
+        rows = groups.get(key) or []
+        if not rows:
+            continue
+        rows.sort(key=lambda row: (
+            -(row.get('all_around_percent') if row.get('all_around_percent') is not None else -1),
+            0 if row.get('confirmed_suitable') else 1,
+            row.get('estimated_total') or 10 ** 12,
+            row.get('name') or '',
+        ))
+        best = dict(rows[0])
+        best['best_available'] = True
+        best['category_label'] = charter_pricing.CATEGORY_LABELS[key]
+        picked.append(best)
+    return picked
 
 
 def _stop_label(stops: int) -> str:

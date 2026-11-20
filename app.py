@@ -1257,15 +1257,6 @@ def jet_finder_alias():
     return redirect(url_for('home'), code=301)
 
 
-def _analytics_measurement_id():
-    """Google Analytics 4 measurement id, or nothing. A bad value is ignored."""
-    raw = (os.environ.get('ANALYTICS_MEASUREMENT_ID') or '').strip()
-    suffix = raw[2:] if raw.startswith('G-') else ''
-    if suffix and all(ch.isupper() or ch.isdigit() for ch in suffix):
-        return raw
-    return ''
-
-
 def _google_site_verification():
     """Search Console HTML-tag token, or nothing. A bad value is ignored.
 
@@ -3160,7 +3151,6 @@ def _inject_csrf():
     return {
         'csrf_token': _csrf_token,
         'public_base': _public_base(),
-        'analytics_id': _analytics_measurement_id(),
         'google_site_verification': _google_site_verification(),
     }
 
@@ -8205,26 +8195,6 @@ def api_listings_create():
     return jsonify(result), 201
 
 
-def _record_listing_activity(listing_id, event_type):
-    """Count a real page action. Bots and a repeat from the same browser are skipped."""
-    agent = (request.headers.get('User-Agent') or '').lower()
-    if any(word in agent for word in ('bot', 'spider', 'crawl', 'slurp', 'preview', 'wget', 'curl', 'headless')):
-        return
-    import hashlib
-    raw = '|'.join([
-        str(listing_id),
-        event_type,
-        request.headers.get('User-Agent') or '',
-        request.remote_addr or '',
-        datetime.utcnow().strftime('%Y-%m-%d'),
-    ])
-    visitor = hashlib.sha256(raw.encode('utf-8')).hexdigest()
-    try:
-        db_module.record_listing_event(listing_id, event_type, visitor)
-    except Exception:
-        logger.exception('listing event failed')
-
-
 @app.route('/api/listings/import', methods=['POST'])
 @require_auth
 def api_listings_import():
@@ -8272,36 +8242,6 @@ def api_listings_import():
             continue
         created.append(result.get('id'))
     return jsonify({'ok': True, 'created': created, 'skipped': skipped})
-
-
-@app.route('/seller/analytics')
-@require_auth
-def seller_analytics():
-    """Views and inquiries for the signed-in seller's own listings."""
-    user = request.current_user  # type: ignore[attr-defined]
-    try:
-        days = int(request.args.get('days') or 30)
-    except (TypeError, ValueError):
-        days = 30
-    if days not in (7, 30, 90, 0):
-        days = 30
-    rows = [row for row in db_module.get_listings_by_user_id(user['id']) if row.get('status') != 'deleted']
-    team = db_module.user_on_active_team(user['id'])
-    if team and team.get('admin_user_id') == user['id']:
-        seen = {row.get('id') for row in rows}
-        for extra in db_module.listings_for_team(team['id'], include_off_market=False):
-            if extra.get('id') not in seen:
-                rows.append(extra)
-    stats = db_module.listing_analytics([row.get('id') for row in rows if row.get('id')], days or None)
-    titles = {row.get('id'): row.get('title') for row in rows}
-    for item in stats['listings']:
-        item['title'] = titles.get(item['listing_id']) or f"Listing {item['listing_id']}"
-    return render_template(
-        'seller_analytics.html',
-        stats=stats,
-        days=days or 'all',
-        seo_noindex=True,
-    )
 
 
 @app.route('/api/listings/<int:listing_id>/resubmit', methods=['POST'])
@@ -11753,8 +11693,6 @@ def aircraft_model(slug):
         if (item.get('model_name') or '').strip().lower() == wanted
         or wanted and wanted in (item.get('title') or '').lower()
     ]
-    for item in for_sale:
-        _record_listing_activity(item['id'], 'match')
     return render_template(
         'aircraft_model.html',
         aircraft=row,
@@ -11867,8 +11805,6 @@ def api_inquiries():
     except Exception:
         logger.exception('inquiry save failed')
         return jsonify({'error': 'Could not save that inquiry.'}), 500
-    if kind == 'seller' and listing_id:
-        _record_listing_activity(listing_id, 'inquiry')
     note = f"{kind} inquiry #{inquiry_id} from {name} <{email}>"
     try:
         for admin_id in db_module.list_admin_user_ids():
@@ -11975,53 +11911,7 @@ def admin_charter_pricing():
         overrides_text=json_module.dumps(settings.get('overrides') or {}, indent=2),
         quotes=db_module.list_charter_quote_observations(),
         saved=request.args.get('saved'),
-        categories=[
-            ('piston', 'Piston'),
-            ('turboprop', 'Turboprop'),
-            ('very_light', 'Very light jet'),
-            ('light', 'Light jet'),
-            ('midsize', 'Midsize jet'),
-            ('super_midsize', 'Super-midsize jet'),
-            ('large', 'Large-cabin jet'),
-        ],
-        seo_noindex=True,
-    )
-
-
-def _analytics_line(values, peak, width=640, height=168):
-    """SVG points for one series. The peak is shared so two lines use one scale."""
-    if not values:
-        return ''
-    span = max(len(values) - 1, 1)
-    top = max(peak, 1)
-    points = []
-    for index, value in enumerate(values):
-        x = 8 + (width - 16) * index / span
-        y = 16 + (height - 36) * (1 - (value / top))
-        points.append(f'{x:.1f},{y:.1f}')
-    return ' '.join(points)
-
-
-@app.route('/admin/analytics')
-@require_admin
-def admin_analytics():
-    """Site-wide listing activity for an administrator."""
-    try:
-        days = int(request.args.get('days') or 30)
-    except (TypeError, ValueError):
-        days = 30
-    if days not in (7, 30, 90, 0):
-        days = 30
-    stats = db_module.site_listing_analytics(days or None)
-    series = stats.get('series') or []
-    peak = max([row['views'] for row in series] + [row['inquiries'] for row in series] + [0])
-    stats['peak'] = peak
-    stats['view_points'] = _analytics_line([row['views'] for row in series], peak)
-    stats['inquiry_points'] = _analytics_line([row['inquiries'] for row in series], peak)
-    return render_template(
-        'admin_analytics.html',
-        stats=stats,
-        days=days or 'all',
+        categories=[(key, charter_pricing.CATEGORY_LABELS[key]) for key in charter_pricing.CATEGORY_ORDER],
         seo_noindex=True,
     )
 

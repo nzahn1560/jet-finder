@@ -418,11 +418,6 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('my_listings') }}">
-                                <i class="fas fa-list me-2"></i>My listings
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('dashboard') }}#alerts">
                                 <i class="fas fa-bell me-2"></i>Alerts <span id="nav-alert-count"></span>
                             </a>
@@ -439,11 +434,6 @@
                             </a>
                         </li>
                         <li>
-                            <a class="dropdown-item" href="{{ url_for('admin_analytics') }}">
-                                <i class="fas fa-chart-line me-2"></i>Analytics
-                            </a>
-                        </li>
-                        <li>
                             <a class="dropdown-item" href="{{ url_for('admin_inquiries') }}">
                                 <i class="fas fa-inbox me-2"></i>Inquiries
                             </a>
@@ -451,13 +441,6 @@
                         <li>
                             <a class="dropdown-item" href="{{ url_for('admin_charter_pricing') }}">
                                 <i class="fas fa-calculator me-2"></i>Charter Pricing
-                            </a>
-                        </li>
-                        {% endif %}
-                        {% if not current_user.is_admin %}
-                        <li>
-                            <a class="dropdown-item" href="{{ url_for('seller_analytics') }}">
-                                <i class="fas fa-chart-line me-2"></i>Listing Analytics
                             </a>
                         </li>
                         {% endif %}
@@ -568,9 +551,7 @@
     <div id="site-notice" class="site-notice" hidden>
         <div class="site-notice__card" role="dialog" aria-modal="true" aria-labelledby="site-notice-title">
             <h2 id="site-notice-title">Before you continue</h2>
-            <p>Jetschool is an aircraft brokerage. The figures on this site help you compare aircraft for a purchase or a charter. They are estimates, and a purchase or charter is not complete until it is confirmed with you.</p>
-            <p>Jetschool arranges charter travel through authorized operators and is not the operator of the flight. Check anything important before you rely on it.</p>
-            <p>Decisions you make with this site are your own.</p>
+            <p>The operator or seller sets the final price.</p>
             <button type="button" id="site-notice-accept">I understand</button>
         </div>
     </div>

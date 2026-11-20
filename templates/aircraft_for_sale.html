@@ -74,19 +74,4 @@
     .sale-index__list span { color: #c8c8c8; }
     .sale-index__empty { color: #c8c8c8; }
 </style>
-<script>
-(function () {
-    window.dataLayer = window.dataLayer || [];
-    var params = { result_count: {{ rows|length }}, make: {{ (current_slug or 'all')|tojson }}, model: {{ (current_model or 'all')|tojson }}, place: {{ (current_place or 'all')|tojson }} };
-    window.dataLayer.push(Object.assign({ event: 'aircraft_for_sale_view' }, params));
-    if (typeof window.gtag === 'function') window.gtag('event', 'aircraft_for_sale_view', params);
-    document.querySelectorAll('.sale-index__list a').forEach(function (link) {
-        link.addEventListener('click', function () {
-            var id = (link.getAttribute('href') || '').split('/').pop();
-            window.dataLayer.push({ event: 'aircraft_listing_open', listing_id: id });
-            if (typeof window.gtag === 'function') window.gtag('event', 'aircraft_listing_open', { listing_id: id });
-        });
-    });
-})();
-</script>
 {% endblock %}
