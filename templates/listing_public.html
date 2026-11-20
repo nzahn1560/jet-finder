@@ -180,12 +180,6 @@
 </article>
 <script>
 (function () {
-    function trackListing(name, params) {
-        window.dataLayer = window.dataLayer || [];
-        window.dataLayer.push(Object.assign({ event: name }, params || {}));
-        if (typeof window.gtag === 'function') window.gtag('event', name, params || {});
-    }
-    trackListing('listing_view', { listing_id: {{ listing.id }} });
     const photos = Array.from(document.querySelectorAll('[data-showroom-photo]'));
     const prev = document.getElementById('showroom-prev');
     const next = document.getElementById('showroom-next');
@@ -197,7 +191,6 @@
         photos[index].hidden = true;
         index = (index + step + photos.length) % photos.length;
         photos[index].hidden = false;
-        trackListing('listing_photo_step', { listing_id: {{ listing.id }}, direction: direction });
     }
     prev.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); show(-1, 'prev'); });
     next.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); show(1, 'next'); });

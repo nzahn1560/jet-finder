@@ -56,7 +56,6 @@
                     {% if item.image %}<img src="{{ item.image }}" alt="" style="width:100%;height:140px;object-fit:cover;border-radius:8px;">{% endif %}
                     <strong>{{ item.title }}</strong>
                     <p class="mb-0" style="color:#F05545;">{{ item.price_text or 'Price on request' }}{% if item.place %} · {{ item.place }}{% endif %}</p>
-                    <p class="mb-0" style="color:#aaa;">Asking price for this airplane. The model price above is an average.</p>
                 </a>
             </div>
             {% endfor %}
@@ -84,7 +83,7 @@
             <label class="form-label">Comments</label>
             <textarea class="form-control bg-dark text-white border-secondary mb-2" name="notes" rows="3"></textarea>
             <input class="visually-hidden" tabindex="-1" autocomplete="off" name="company_url">
-            <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> I agree that Jetschool may contact me about this inquiry. This is not a purchase order.</label>
+            <label class="form-check mb-3"><input class="form-check-input" type="checkbox" name="consent" required> Jetschool may contact me.</label>
             <button class="btn btn-danger" type="submit">Send purchase inquiry</button>
             <p class="inquiry-status mt-2" role="status"></p>
         </form>
@@ -92,7 +91,7 @@
 
     <section id="charter-view" hidden>
         <h2>Charter</h2>
-        <p>The model shown here is not reserved and may not be available on a chosen date. The planning rate is not an operator quote. Estimated charter pricing is for planning purposes only. Actual availability, routing, operating requirements, repositioning expenses, and final pricing must be confirmed with an authorized charter operator. Jetschool is not the aircraft operator.</p>
+        <p>The operator sets the final price.</p>
         <ul>
             <li>Planning hourly charter rate: {{ charter }}</li>
             <li>Passengers: {{ aircraft.passengers or 'Unavailable' }}</li>

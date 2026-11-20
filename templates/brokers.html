@@ -51,11 +51,6 @@
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 <script>
 (function () {
-    function trackBroker(name, params) {
-        window.dataLayer = window.dataLayer || [];
-        window.dataLayer.push(Object.assign({ event: name }, params || {}));
-        if (typeof window.gtag === 'function') window.gtag('event', name, params || {});
-    }
     function esc(value) {
         return String(value || '').replace(/[&<>"']/g, function (ch) {
             return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
@@ -272,7 +267,6 @@
 
     function selectBroker(broker) {
         activeId = broker.pin_id;
-        trackBroker('broker_profile_open', { broker_kind: broker.kind || 'broker' });
         if (broker.lat != null && broker.lon != null) {
             map.flyTo([Number(broker.lat), Number(broker.lon)], Math.max(map.getZoom(), 11), { duration: 0.6 });
         }
@@ -317,7 +311,6 @@
                 });
                 renderResults(shown, area);
                 showMarkers(shown);
-                trackBroker('broker_area_search', { result_count: shown.length });
                 const spots = shown.map(function (team) { return [Number(team.lat), Number(team.lon)]; });
                 if (spots.length) map.fitBounds(L.latLngBounds(spots), { padding: [64, 64], maxZoom: 9 });
                 else if (area && area.lat != null && area.lon != null) map.flyTo([area.lat, area.lon], 9, { duration: 0.45 });

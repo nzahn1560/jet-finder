@@ -40,12 +40,6 @@
     <article class="contact-card" id="advising">
         <p class="contact-card__kicker">Jetschool</p>
         <h1>Free Advising Call</h1>
-        <p class="contact-card__lead">A private conversation about an aircraft you are comparing, buying, or considering for charter. The call is free. Share a few details and Jetschool will confirm a time.</p>
-        <ul class="advise__points">
-            <li>Compare aircraft for the trips you fly</li>
-            <li>Talk through a listing before you decide</li>
-            <li>No account is required</li>
-        </ul>
         <form id="advising-form">
             <h2>Request a time</h2>
             <div class="advise__grid">
@@ -59,30 +53,29 @@
                 </div>
                 <div>
                     <label for="advise-phone">Phone</label>
-                    <input id="advise-phone" name="phone" required autocomplete="tel" placeholder="A number we can reach">
+                    <input id="advise-phone" name="phone" required autocomplete="tel">
                 </div>
                 <div>
                     <label for="advise-time">Preferred time</label>
-                    <input id="advise-time" name="preferred_time" placeholder="Weekday mornings, or after 4 p.m.">
+                    <input id="advise-time" name="preferred_time">
                 </div>
             </div>
             <label for="advise-aircraft">Aircraft</label>
-            <input id="advise-aircraft" name="aircraft_name" value="{{ request.args.get('aircraft', '') }}" placeholder="A model, or a listing you have in mind">
+            <input id="advise-aircraft" name="aircraft_name" value="{{ request.args.get('aircraft', '') }}">
             <label for="advise-mission">What you want to cover</label>
-            <textarea id="advise-mission" name="mission" rows="4" placeholder="The trip, the budget, or the decision you are working through"></textarea>
+            <textarea id="advise-mission" name="mission" rows="4"></textarea>
             <input class="contact-card__trap" tabindex="-1" autocomplete="off" name="company_url" aria-hidden="true">
             <label class="advise__consent" for="advise-consent">
                 <input id="advise-consent" type="checkbox" required>
-                <span>Jetschool may contact me by phone or email to schedule this call.</span>
+                <span>Jetschool may contact me.</span>
             </label>
             <button type="submit" class="contact-card__submit">Request a call</button>
-            <p class="advise__note">Jetschool reviews the request and confirms the time. Sending this form does not reserve a specific hour.</p>
             <p id="advise-status" role="status"></p>
         </form>
     </article>
     <article class="contact-card advise__message" id="message">
         <h2>Send a message</h2>
-        <p class="contact-card__lead">For a question that does not need a call, write here or email <a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a>.</p>
+        <p class="contact-card__lead"><a href="mailto:support@jetschoolusa.com">support@jetschoolusa.com</a></p>
         <form id="contact-form">
             <label for="contact-name">Name</label>
             <input id="contact-name" name="name" maxlength="120" required autocomplete="name">
@@ -277,15 +270,10 @@
             }),
         });
         const data = await response.json().catch(function () { return {}; });
-        window.dataLayer = window.dataLayer || [];
         if (!response.ok) {
-            window.dataLayer.push({ event: 'contact_message_failed' });
-            if (typeof window.gtag === 'function') window.gtag('event', 'contact_message_failed');
             status.textContent = data.error || 'Could not send that message.';
             return;
         }
-        window.dataLayer.push({ event: 'contact_message_sent' });
-        if (typeof window.gtag === 'function') window.gtag('event', 'contact_message_sent');
         form.reset();
         status.textContent = 'Message received. JetSchool will review it.';
     });
