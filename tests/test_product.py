@@ -1100,6 +1100,77 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'refreshListingNumbers', page.data)
         self.assertNotIn(b'Column AN', page.data)
         self.assertNotIn(b'Normalized Speed', page.data)
+        self.assertIn(b'bestAllAroundDollar', page.data)
+        self.assertIn(b'return aValue - bValue;', page.data)
+
+    def test_all_around_point_follows_the_spreadsheet(self):
+        import csv
+        from product import _finder_scenario, _scaled, _sheet_metrics
+
+        def amount(value):
+            return float(str(value or '0').replace('$', '').replace(',', ''))
+
+        fleet = []
+        with open('static/data/aircraft_data.csv', newline='') as handle:
+            for row in csv.DictReader(handle):
+                fleet.append({
+                    'name': row['316'],
+                    'speed': amount(row['Speed(KTS)']),
+                    'range': amount(row['Range(NM)']),
+                    'passengers': amount(row['Passengers']),
+                    'price': amount(row['Average Price']),
+                    'total_fixed_cost': amount(row['Total Fixed Cost']),
+                    'total_variable_cost': amount(row['Total Variable Cost']),
+                    'category': row['Type'],
+                    'year': amount(row['Highest Year']),
+                })
+        params = _finder_scenario()
+        params.update({'F2': 634, 'G2': 40, 'H2': 5})
+        prepared = [
+            (row, _sheet_metrics(row, params))
+            for row in fleet if row['price'] > 0 and row['speed'] > 0
+        ]
+
+        def span(key):
+            values = [metrics[key] for _, metrics in prepared if metrics[key] > 0]
+            return (min(values), max(values))
+
+        speed_bounds, range_bounds, efficiency_bounds = span('speed_dollar'), span('range_dollar'), span('efficiency')
+        performance_values = []
+        staged = []
+        for row, metrics in prepared:
+            performance = (
+                _scaled(metrics['speed_dollar'], *speed_bounds)
+                + _scaled(metrics['range_dollar'], *range_bounds)
+            ) / 2
+            staged.append((row, metrics, performance))
+            if performance > 0:
+                performance_values.append(performance)
+        performance_bounds = (min(performance_values), max(performance_values))
+        ranked = []
+        for row, metrics, performance in staged:
+            if row['range'] < 400 or row['passengers'] < 5 or row['price'] > 4000000 or row['year'] < 1980:
+                continue
+            point = (
+                _scaled(performance, *performance_bounds)
+                + _scaled(metrics['efficiency'], *efficiency_bounds)
+            ) / 2
+            ranked.append((point, row['name']))
+        ranked.sort()
+        names = [name for _, name in ranked[:12]]
+        self.assertEqual(names, [
+            'DAKOTA', '337H', '402C', 'DUKE B60', '206G', 'T206G',
+            '6XT', '180K', '6X', '414A RAM V', '340A RAM VII', 'NAVAJO 310',
+        ])
+        baked = _finder_scenario()
+        baked.update({'F2': 400, 'G2': 104, 'H2': 5})
+        duke = next(row for row in fleet if row['name'] == 'DUKE B60')
+        shorter = dict(params, F2=200, G2=10)
+        self.assertAlmostEqual(_sheet_metrics(duke, baked)['efficiency'], 6.32, places=2)
+        self.assertNotEqual(
+            round(_sheet_metrics(duke, params)['efficiency'], 2),
+            round(_sheet_metrics(duke, shorter)['efficiency'], 2),
+        )
 
     def test_unpaid_checkout_does_not_mark_a_listing_paid(self):
         self._login('seller@example.com', 'seller-pass-1')

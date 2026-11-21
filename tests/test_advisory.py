@@ -47,13 +47,13 @@ class CharterPlanTests(unittest.TestCase):
         self.assertEqual(card['stop_label'], 'Nonstop')
         self.assertEqual(len(card['points']), 2)
         self.assertTrue(card['confirmed_suitable'])
-        self.assertEqual(card['hourly_charter_rate'], 2000)
+        self.assertEqual(card['hourly_charter_rate'], 1888)
         self.assertNotIn('commission_mid', card)
         self.assertNotIn('estimate_low', card)
         self.assertNotIn('estimate_high', card)
         self.assertIsNotNone(card['estimated_total'])
         self.assertEqual(plan['categories'][0]['name'], 'Test Jet')
-        self.assertEqual(plan['categories'][0]['category_label'], 'Light jet')
+        self.assertEqual(plan['categories'][0]['category_label'], 'Super light jet')
         self.assertTrue(plan['categories'][0]['best_available'])
 
     def test_one_fuel_stop_is_mapped(self):
@@ -99,27 +99,32 @@ class CharterPlanTests(unittest.TestCase):
         self.assertGreaterEqual(plan['excluded']['seats'], 1)
         self.assertGreaterEqual(plan['excluded']['runway'], 1)
 
-    def test_missing_operating_cost_is_not_invented(self):
+    def test_missing_class_is_not_priced(self):
         plan = advisory.plan_charter(
-            self.origin, self.near, [_aircraft(total_hourly_cost=5000, hourly_variable_cost=0, aircraft_name='No Rate')],
+            self.origin, self.near, [_aircraft(category='Balloon', hourly_variable_cost=0, aircraft_name='No Rate')],
             [], self.runways, passengers=1,
         )
         self.assertIsNone(plan['suitable'][0]['estimated_total'])
         self.assertIn('not available for this aircraft', plan['suitable'][0]['price_note'])
 
-    def test_example_turboprop_price_uses_variable_cost_and_commission(self):
+    def test_price_is_variable_cost_times_class_factor_times_hours(self):
         import charter_pricing
         aircraft = _aircraft(category='Turboprop', hourly_variable_cost=2000, id=9)
-        priced = charter_pricing.price_mission(aircraft, 2, fuel_stops=0, passengers=1, domestic=False)
+        priced = charter_pricing.price_mission(aircraft, 2, fuel_stops=0, passengers=1, domestic=True)
         self.assertEqual(priced['hourly_rate'], 5500)
-        self.assertEqual(priced['operator_mid'], 14250)
-        self.assertEqual(priced['before_tax_mid'], 15833.33)
-        self.assertEqual(priced['commission_mid'], 1583.33)
-        self.assertEqual(priced['estimate_mid'], 15800)
+        self.assertEqual(priced['estimate_mid'], 11000)
         self.assertEqual(priced['status'], 'preliminary')
-        domestic = charter_pricing.price_mission(aircraft, 2, passengers=1, domestic=True)
-        self.assertEqual(domestic['tax_status'], 'us_domestic')
-        self.assertGreater(domestic['estimate_mid'], priced['estimate_mid'])
+
+    def test_trip_price_uses_the_aircraft_speed_and_variable_cost(self):
+        origin = {'iata': 'DFW', 'icao': 'KDFW', 'name': 'DFW', 'lat': 32.8968009949, 'lon': -97.0380020142, 'country': 'US', 'runway_ft': 13401}
+        destination = {'iata': 'JFK', 'icao': 'KJFK', 'name': 'JFK', 'lat': 40.63980103, 'lon': -73.77890015, 'country': 'US', 'runway_ft': 14511}
+        aircraft = _aircraft(id=21, aircraft_name='Sheet Jet', range=1900, speed=400, hourly_variable_cost=2500, passengers=7)
+        plan = advisory.plan_charter(origin, destination, [aircraft], [], {'KDFW': 13401, 'KJFK': 14511}, passengers=1)
+        card = plan['suitable'][0]
+        hours = advisory._haversine(origin['lat'], origin['lon'], destination['lat'], destination['lon']) / 400
+        self.assertAlmostEqual(card['flight_hours'], round(hours, 2), places=2)
+        self.assertEqual(card['hourly_charter_rate'], 5900)
+        self.assertEqual(card['estimated_total'], int(round((2500 * 2.36 * hours) / 100.0) * 100))
 
     def test_classes_follow_engine_and_range(self):
         import charter_pricing

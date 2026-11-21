@@ -148,18 +148,23 @@ def _sheet_metrics(aircraft, params):
     leg_hours = params['F2'] / speed if speed > 0 else 0.0
     year_hours = leg_hours * params['G2']
     passenger_pay = (params['Q2'] * params['P2']) * year_hours
-    hourly_variable = variable / 450
+    # Fuel uses total variable cost / 450. Hourly variable cost is /200 for a piston
+    # and /450 for a turboprop or jet, which is what cost per mile (BN) uses.
+    fuel_hourly = variable / 450
+    if 'piston' in kind:
+        pilot_pay = params['M2']
+        hourly_variable = variable / 200
+    elif 'business' in kind or 'jet' in kind:
+        pilot_pay = params['O2']
+        hourly_variable = variable / 450
+    else:
+        pilot_pay = params['N2']
+        hourly_variable = variable / 450
     charter_credit_rate = hourly_variable * params['R2']
     charter_leg = params['S2'] / speed if speed > 0 else 0.0
     charter_offset = charter_leg * params['T2'] * charter_credit_rate
     fuel_price = params['J2'] if 'piston' in kind and params['J2'] else params['I2']
-    fuel = ((hourly_variable / 6) * fuel_price) * year_hours
-    if 'piston' in kind:
-        pilot_pay = params['M2']
-    elif 'business' in kind or 'jet' in kind:
-        pilot_pay = params['O2']
-    else:
-        pilot_pay = params['N2']
+    fuel = ((fuel_hourly / 6) * fuel_price) * year_hours
     annual = (fuel + fixed) - charter_offset + passenger_pay - pilot_pay
     ownership = ((annual * params['H2']) + price) + (price - residual)
     speed_dollar = (ownership / speed) / 1000 if speed > 0 else 0.0

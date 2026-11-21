@@ -52,6 +52,13 @@
     .charter-time input[type="range"] { flex:1; accent-color:#F05545; }
     .charter-time span { min-width:5.5rem; color:#F05545; font-weight:800; }
     .charter-time span:last-child { text-align:right; }
+    .charter-pages { display:flex; justify-content:center; margin-top:1.25rem; }
+    .charter-pages[hidden] { display:none; }
+    .charter-pages .pagination { display:flex; justify-content:center; margin:0; gap:0.4rem; list-style:none; padding:0; }
+    .charter-pages .page-link { background:#343a40; color:#fff; border:0; padding:8px 16px; border-radius:4px; text-decoration:none; display:inline-block; }
+    .charter-pages .page-link:hover { background:#4a5568; color:#fff; }
+    .charter-pages .active .page-link { background:#F05545; }
+    .charter-pages .disabled .page-link { background:#6c757d; pointer-events:none; }
 </style>
 {% endblock %}
 {% block content %}
@@ -111,6 +118,7 @@
         <h2 id="charter-aircraft-title"></h2>
         <p class="charter-note">An aircraft close to the one you select is prioritized at a close price. Availability and price are estimates.</p>
         <div class="charter-grid" id="charter-aircraft-grid"></div>
+        <nav id="charter-pages" class="charter-pages" hidden aria-label="Charter aircraft pages"></nav>
     </section>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -131,6 +139,10 @@
     const aircraftSection = document.getElementById('charter-aircraft');
     const aircraftGrid = document.getElementById('charter-aircraft-grid');
     const aircraftTitleEl = document.getElementById('charter-aircraft-title');
+    const aircraftPages = document.getElementById('charter-pages');
+    const aircraftPageSize = 12;
+    let aircraftPage = 1;
+    let pagedClass = '';
     const timeBox = document.getElementById('charter-time');
     const timeSlider = document.getElementById('charter-time-slider');
     const chosen = {departure: '', arrival: ''};
@@ -440,9 +452,16 @@
         });
         const chosen = selectedClass ? packed.groups[selectedClass] : null;
         aircraftSection.hidden = !chosen;
+        if (selectedClass !== pagedClass) {
+            aircraftPage = 1;
+            pagedClass = selectedClass;
+        }
+        const pageCount = chosen ? Math.ceil(chosen.length / aircraftPageSize) : 1;
+        if (aircraftPage > pageCount) aircraftPage = pageCount;
+        const visible = chosen ? chosen.slice((aircraftPage - 1) * aircraftPageSize, aircraftPage * aircraftPageSize) : [];
         if (chosen) {
             aircraftTitleEl.textContent = chosen[0].category_label || '';
-            chosen.forEach(function (card) {
+            visible.forEach(function (card) {
                 const article = document.createElement('article');
                 article.className = 'aircraft-card';
                 article.innerHTML = photoHtml(card, true)
@@ -455,6 +474,27 @@
                 });
                 article.addEventListener('click', function () { draw(card); });
                 aircraftGrid.appendChild(article);
+            });
+        }
+        if (!chosen || chosen.length <= aircraftPageSize) {
+            aircraftPages.hidden = true;
+            aircraftPages.innerHTML = '';
+        } else {
+            aircraftPages.hidden = false;
+            aircraftPages.innerHTML = '<ul class="pagination">'
+                + '<li class="page-item' + (aircraftPage === 1 ? ' disabled' : '') + '"><a class="page-link" href="#" data-page="' + (aircraftPage - 1) + '">Previous</a></li>'
+                + '<li class="page-item active"><span class="page-link">' + aircraftPage + '</span></li>'
+                + '<li class="page-item' + (aircraftPage === pageCount ? ' disabled' : '') + '"><a class="page-link" href="#" data-page="' + (aircraftPage + 1) + '">Next</a></li>'
+                + '</ul>';
+            aircraftPages.querySelectorAll('a').forEach(function (link) {
+                link.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    const page = Number(link.dataset.page);
+                    if (page < 1 || page > pageCount || page === aircraftPage) return;
+                    aircraftPage = page;
+                    paint();
+                    aircraftSection.scrollIntoView({block: 'nearest'});
+                });
             });
         }
         const routeCard = chosen ? (chosen.some(function (card) { return card.id === drawnId; }) ? null : chosen[0]) : categories[0][0];
