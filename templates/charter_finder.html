@@ -357,30 +357,20 @@
         });
         return {order: order, groups: groups};
     }
-    function cabinRank(card) {
-        const volume = Number(card.cabin_volume);
-        if (volume) return volume;
-        const height = Number(card.cabin_height);
-        const width = Number(card.cabin_width);
-        const length = Number(card.cabin_length);
-        if (height && width && length) return height * width * length;
-        return 0;
-    }
-    function bestOf(rows) {
-        const best = {price: null, time: null, stops: null, seats: null, cabin: null};
-        rows.forEach(function (card) {
-            const amount = Number(card.estimated_total);
-            if (amount && (!best.price || amount < Number(best.price.estimated_total))) best.price = card;
-            const flight = Number(card.flight_hours);
-            if (flight && (!best.time || flight < Number(best.time.flight_hours))) best.time = card;
+    function representative(rows) {
+        let pool = rows.filter(function (card) { return (Number(card.passengers) || 0) <= 19; });
+        if (!pool.length) pool = rows;
+        const fewest = pool.reduce(function (min, card) {
             const stops = Number(card.fuel_stops) || 0;
-            if (!best.stops || stops < (Number(best.stops.fuel_stops) || 0)) best.stops = card;
-            const seats = Number(card.passengers) || 0;
-            if (!best.seats || seats > (Number(best.seats.passengers) || 0)) best.seats = card;
-            const size = cabinRank(card);
-            if (size && (!best.cabin || size > cabinRank(best.cabin))) best.cabin = card;
+            return stops < min ? stops : min;
+        }, 99);
+        const flying = pool.filter(function (card) {
+            return (Number(card.fuel_stops) || 0) === fewest && Number(card.estimated_total) > 0;
         });
-        return best;
+        const priced = (flying.length ? flying : pool).slice().sort(function (a, b) {
+            return Number(a.estimated_total) - Number(b.estimated_total);
+        });
+        return priced[Math.floor(priced.length / 2)] || rows[0];
     }
     function statsHtml(card) {
         return '<div class="aircraft-price"><div class="caption">Lowest price</div><div class="amount">' + esc(onePrice(card)) + '</div></div>'
@@ -389,13 +379,12 @@
             + specBar('Passengers', card.passengers, null)
             + specBar('Cabin', cabinSize(card), null);
     }
-    function categoryStats(rows) {
-        const best = bestOf(rows);
-        return '<div class="aircraft-price"><div class="caption">Prices starting at</div><div class="amount">' + esc(best.price ? onePrice(best.price) : 'Unavailable') + '</div></div>'
-            + specBar('Fastest time', best.time ? hours(best.time.flight_hours) : 'Unavailable', null)
-            + specBar('Fewest stops', best.stops ? stopText(best.stops) : 'Unavailable', null)
-            + specBar('Most passengers', best.seats ? best.seats.passengers : 'Unavailable', null)
-            + specBar('Largest cabin', best.cabin ? cabinSize(best.cabin) : 'Unavailable', null);
+    function categoryStats(card) {
+        return '<div class="aircraft-price"><div class="caption">Estimated price</div><div class="amount">' + esc(onePrice(card)) + '</div></div>'
+            + specBar('Flight time', hours(card.flight_hours), null)
+            + specBar('Fuel stops', stopText(card), null)
+            + specBar('Passengers', card.passengers, null)
+            + specBar('Cabin', cabinSize(card), null);
     }
     function photoHtml(card, withScore) {
         const photo = card.image || '/static/images/aircraft_placeholder.jpg';
@@ -427,15 +416,17 @@
             return;
         }
         if (!packed.groups[selectedClass]) selectedClass = '';
+        const shown = [];
         categories.forEach(function (rows) {
-            const card = rows[0];
+            const card = representative(rows);
+            shown.push(card);
             const article = document.createElement('article');
             const open = card.charter_class === selectedClass;
             article.className = 'aircraft-card' + (open ? ' is-selected' : '');
             article.innerHTML = photoHtml(card, false)
-                + '<p class="charter-kicker">Best available</p>'
+                + '<p class="charter-kicker">' + esc(aircraftTitle(card)) + '</p>'
                 + '<p class="charter-class">' + esc(card.category_label || '') + '</p>'
-                + categoryStats(rows)
+                + categoryStats(card)
                 + '<div class="listing-actions"><button class="btn" type="button"><span>Select aircraft</span></button></div>';
             article.querySelector('button').addEventListener('click', function (event) {
                 event.stopPropagation();
@@ -497,7 +488,7 @@
                 });
             });
         }
-        const routeCard = chosen ? (chosen.some(function (card) { return card.id === drawnId; }) ? null : chosen[0]) : categories[0][0];
+        const routeCard = chosen ? (chosen.some(function (card) { return card.id === drawnId; }) ? null : chosen[0]) : shown[0];
         if (routeCard && routeCard.id !== drawnId) draw(routeCard);
         notice.textContent = Math.round(latest.distance_nm) + ' nm';
     }
