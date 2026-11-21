@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Inquire for Charter{% endblock %}
+{% block meta_description %}Ask Jetschool about a charter. Availability and price are estimates.{% endblock %}
+{% block canonical %}{{ public_base }}/charter/inquire{% endblock %}
+{% block extra_head %}
+{% if request.args %}<meta name="robots" content="noindex, follow">{% endif %}
+{% endblock %}
+{% block content %}
+<div class="container py-5 charter-inquire">
+    <article class="contact-card">
+        <p class="contact-card__kicker">Jetschool</p>
+        <h1>Inquire for Charter</h1>
+        <p class="charter-inquire__note">Jetschool is the broker, not the operator. The operator sets the final price.</p>
+        {% set aircraft = request.args.get('aircraft', '') %}
+        {% set departure = request.args.get('departure', '') %}
+        {% set arrival = request.args.get('arrival', '') %}
+        {% if aircraft or departure or arrival or price_label %}
+        <dl class="charter-inquire__trip">
+            {% if aircraft %}<div><dt>Aircraft</dt><dd>{{ aircraft }}</dd></div>{% endif %}
+            {% if departure or arrival %}<div><dt>Route</dt><dd>{{ departure }}{% if departure and arrival %} → {% endif %}{{ arrival }}</dd></div>{% endif %}
+            {% if price_label %}<div><dt>Price</dt><dd>{{ price_label }}</dd></div>{% endif %}
+            {% if request.args.get('date') %}<div><dt>Departure</dt><dd>{{ request.args.get('date') }}{% if request.args.get('time') %} {{ request.args.get('time') }}{% endif %}</dd></div>{% endif %}
+            {% if request.args.get('passengers') %}<div><dt>Passengers</dt><dd>{{ request.args.get('passengers') }}</dd></div>{% endif %}
+        </dl>
+        <p class="charter-inquire__note">An aircraft close to the one you select is prioritized at a close price. Availability and price are estimates.</p>
+        {% endif %}
+        {% set account = get_current_user_info() %}
+        <form id="charter-inquiry-form">
+            <div class="charter-inquire__grid">
+                <div>
+                    <label for="charter-name">Name</label>
+                    <input id="charter-name" name="name" required autocomplete="name" value="{% if account %}{{ account.first_name }} {{ account.last_name }}{% endif %}">
+                </div>
+                <div>
+                    <label for="charter-email">Email</label>
+                    <input id="charter-email" name="email" type="email" required autocomplete="email" value="{% if account %}{{ account.email }}{% endif %}">
+                </div>
+                <div>
+                    <label for="charter-phone">Phone</label>
+                    <input id="charter-phone" name="phone" required autocomplete="tel" value="{% if account %}{{ account.phone or '' }}{% endif %}">
+                </div>
+                <div>
+                    <label for="charter-aircraft">Aircraft</label>
+                    <input id="charter-aircraft" name="aircraft_name" value="{{ aircraft }}">
+                </div>
+            </div>
+            <label for="charter-notes">Notes</label>
+            <textarea id="charter-notes" name="notes" rows="4"></textarea>
+            <input type="hidden" name="aircraft_id" value="{{ request.args.get('aircraft_id', '') }}">
+            <input type="hidden" name="departure_airport" value="{{ departure }}">
+            <input type="hidden" name="arrival_airport" value="{{ arrival }}">
+            <input type="hidden" name="departure_date" value="{{ request.args.get('date', '') }}">
+            <input type="hidden" name="departure_time" value="{{ request.args.get('time', '') }}">
+            <input type="hidden" name="return_date" value="{{ request.args.get('return', '') }}">
+            <input type="hidden" name="passengers" value="{{ request.args.get('passengers', '') }}">
+            <input type="hidden" name="estimated_price" value="{{ request.args.get('price', '') }}">
+            <input type="hidden" name="fuel_stops" value="{{ request.args.get('stops', '') }}">
+            <input type="hidden" name="route_notes" value="{{ request.args.get('route', '') }}">
+            <input class="contact-card__trap" tabindex="-1" autocomplete="off" name="company_url" aria-hidden="true">
+            <label class="charter-inquire__consent" for="charter-consent">
+                <input id="charter-consent" type="checkbox" required>
+                <span>Jetschool may contact me.</span>
+            </label>
+            <button type="submit" class="contact-card__submit">Send charter inquiry</button>
+            <p id="charter-inquiry-status" role="status"></p>
+        </form>
+    </article>
+</div>
+<style>
+    .charter-inquire { max-width: 760px; }
+    .contact-card {
+        background: #141414;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        padding: 2.1rem 1.8rem 1.7rem;
+        color: #f4f4f4;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+    }
+    .contact-card__kicker {
+        margin: 0 0 0.3rem;
+        color: #F05545;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+    }
+    .contact-card h1 {
+        margin: 0 0 1.1rem;
+        color: #fff;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 2.1rem;
+    }
+    .charter-inquire__trip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.7rem;
+        margin: 0 0 0.9rem;
+    }
+    .charter-inquire__trip div {
+        background: #1c1c1c;
+        border-radius: 10px;
+        padding: 0.7rem 0.8rem;
+    }
+    .charter-inquire__trip dt {
+        color: #c8c8c8;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .charter-inquire__trip dd { margin: 0.15rem 0 0; color: #fff; font-weight: 700; }
+    .charter-inquire__note { margin: 0 0 0.4rem; color: #ccc; }
+    .charter-inquire__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+    .contact-card label {
+        display: block;
+        margin: 0.85rem 0 0.3rem;
+        color: #fff;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+    .contact-card input, .contact-card textarea {
+        width: 100%;
+        background: #0e0e0e;
+        color: #fff;
+        border: 1px solid #3a3a3a;
+        border-radius: 8px;
+        padding: 0.7rem 0.8rem;
+        font-size: 1rem;
+    }
+    .contact-card textarea { resize: vertical; }
+    .contact-card__trap { position: absolute; left: -9999px; height: 0; width: 0; opacity: 0; }
+    .charter-inquire__consent {
+        display: flex;
+        gap: 0.65rem;
+        align-items: flex-start;
+        margin-top: 1rem;
+        color: #e8e8e8;
+        font-weight: 500;
+        letter-spacing: 0;
+        text-transform: none;
+    }
+    .charter-inquire__consent input { width: auto; margin-top: 0.25rem; }
+    .contact-card__submit {
+        margin-top: 1.1rem;
+        border: 0;
+        border-radius: 999px;
+        background: #F05545;
+        color: #fff;
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 1.05rem;
+        font-weight: 700;
+        padding: 0.72rem 1.3rem;
+        cursor: pointer;
+    }
+    .contact-card__submit:hover { background: #ff6a58; }
+    #charter-inquiry-status { min-height: 1.4rem; margin: 0.75rem 0 0; color: #d8d8d8; }
+    @media (max-width: 720px) { .charter-inquire__grid { grid-template-columns: 1fr; } }
+</style>
+<script>
+(function () {
+    const form = document.getElementById('charter-inquiry-form');
+    form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const status = document.getElementById('charter-inquiry-status');
+        status.textContent = 'Sending…';
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.inquiry_type = 'charter';
+        data.consent = document.getElementById('charter-consent').checked;
+        const token = document.querySelector('meta[name="csrf-token"]');
+        fetch('/api/inquiries', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token ? token.getAttribute('content') : ''},
+            body: JSON.stringify(data),
+        }).then(function (response) { return response.json().then(function (body) { return {ok: response.ok, body: body}; }); })
+          .then(function (result) {
+              status.textContent = result.ok ? 'Request received.' : (result.body.error || 'Could not save that inquiry.');
+              if (result.ok) form.reset();
+          });
+    });
+})();
+</script>
+{% endblock %}

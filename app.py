@@ -387,6 +387,17 @@ def charter_search():
     """Compare aircraft models for a charter mission. Estimates are not bookings."""
     return render_template('charter_finder.html')
 
+
+@app.route('/charter/inquire')
+def charter_inquire():
+    """Charter contact page. The trip details come from the aircraft the renter selected."""
+    raw = request.args.get('price') or ''
+    try:
+        price_label = f'${int(float(raw)):,}'
+    except (TypeError, ValueError):
+        price_label = ''
+    return render_template('charter_inquire.html', price_label=price_label)
+
 @app.route('/empty-legs')
 def empty_legs():
     """Unfinished empty-leg product. Send people to the aircraft finder."""
@@ -3429,11 +3440,83 @@ def api_contact():
     return jsonify({'ok': True})
 
 
+_INQUIRY_LABELS = {
+    'charter': 'Charter inquiry',
+    'purchase': 'Listing inquiry',
+    'advising': 'Advising call',
+    'seller': 'Seller inquiry',
+}
+
+
+def _inquiry_alert_text(row):
+    """The same details an admin reads for a contact message."""
+    lines = []
+    aircraft = str(row.get('aircraft_name') or '').strip()
+    if aircraft:
+        lines.append(aircraft)
+    route = ' → '.join(part for part in (
+        str(row.get('departure_airport') or '').strip(),
+        str(row.get('arrival_airport') or '').strip(),
+    ) if part)
+    route_notes = str(row.get('route_notes') or '').strip()
+    if route_notes:
+        lines.append(route_notes)
+    elif route:
+        lines.append(route)
+    departure = ' '.join(part for part in (
+        str(row.get('departure_date') or '').strip(),
+        str(row.get('departure_time') or '').strip(),
+    ) if part)
+    if departure:
+        lines.append(departure)
+    return_date = str(row.get('return_date') or '').strip()
+    if return_date:
+        lines.append('Return ' + return_date)
+    if row.get('passengers'):
+        lines.append(f"{row['passengers']} passengers")
+    if row.get('estimated_price'):
+        lines.append(f"Estimate ${float(row['estimated_price']):,.0f}")
+    for key in ('timeline', 'budget', 'preferred_time', 'mission', 'notes'):
+        value = str(row.get(key) or '').strip()
+        if value:
+            lines.append(value)
+    return '\n'.join(lines) or 'Inquiry received.'
+
+
+def _admin_alert_rows():
+    """Contact messages and every inquiry, newest first, in one admin inbox."""
+    rows = []
+    for message in db_module.list_contact_messages():
+        rows.append({
+            'id': message.get('id'),
+            'name': message.get('name') or '',
+            'email': message.get('email') or '',
+            'phone': message.get('phone') or '',
+            'message': message.get('message') or '',
+            'created_at': message.get('created_at') or '',
+            'kind': 'contact',
+            'label': 'Message',
+        })
+    for inquiry in db_module.list_advisory_inquiries():
+        rows.append({
+            'id': inquiry.get('id'),
+            'name': inquiry.get('name') or '',
+            'email': inquiry.get('email') or '',
+            'phone': inquiry.get('phone') or '',
+            'message': _inquiry_alert_text(inquiry),
+            'created_at': inquiry.get('created_at') or '',
+            'kind': inquiry.get('inquiry_type') or 'inquiry',
+            'label': _INQUIRY_LABELS.get(inquiry.get('inquiry_type'), 'Inquiry'),
+        })
+    rows.sort(key=lambda row: row.get('created_at') or '', reverse=True)
+    return rows[:100]
+
+
 @app.route('/api/admin/contacts')
 @require_admin
 def api_admin_contacts():
     try:
-        return jsonify({'messages': db_module.list_contact_messages()})
+        return jsonify({'messages': _admin_alert_rows()})
     except Exception:
         logger.exception('api_admin_contacts failed')
         return jsonify({'error': 'server_error'}), 500
@@ -11805,17 +11888,19 @@ def api_inquiries():
     except Exception:
         logger.exception('inquiry save failed')
         return jsonify({'error': 'Could not save that inquiry.'}), 500
-    note = f"{kind} inquiry #{inquiry_id} from {name} <{email}>"
+    label = _INQUIRY_LABELS.get(kind, 'Inquiry')
+    detail = _inquiry_alert_text(payload)
+    note = f'{email}' + (f'\n{phone}' if phone else '') + f'\n\n{detail}'
     try:
         for admin_id in db_module.list_admin_user_ids():
-            db_module.create_notification(admin_id, 'inquiry', f'New {kind} inquiry', note, '/admin/inquiries')
+            db_module.create_notification(admin_id, 'inquiry', f'{label} from {name}', note, '/admin#alerts')
     except Exception:
         logger.exception('inquiry notification failed')
     try:
         import email_service
         target = (os.environ.get('ADMIN_EMAILS') or 'support@jetschoolusa.com').split(',')[0].strip()
-        if target and kind != 'seller':
-            email_service.send_email(target, f'Jetschool {kind} inquiry #{inquiry_id}', f'<p>{note}</p>', note)
+        if target:
+            email_service.send_email(target, f'Jetschool {label} from {name}', f'<p>{note.replace(chr(10), "<br>")}</p>', note)
         if kind == 'seller' and listing_id:
             listing = db_module.get_listing_with_owner(listing_id)
             seller_email = (listing or {}).get('email') or ''
