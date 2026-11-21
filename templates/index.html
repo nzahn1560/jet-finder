@@ -59,6 +59,33 @@
         margin: 0;
     }
 
+    .finder-actions {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.9rem;
+        margin: 1.6rem 0 0.4rem;
+    }
+
+    .finder-actions .btn {
+        width: 100%;
+        margin: 0;
+        min-height: 3rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+        line-height: 1.25;
+    }
+
+    @media (max-width: 900px) {
+        .finder-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 560px) {
+        .finder-actions { grid-template-columns: 1fr; }
+    }
+
     .finder-discounts {
         max-width: 36rem;
         background: #7f1d1d;
@@ -3700,12 +3727,31 @@
         color: #F05545;
     }
 
+    .listing-seller-block {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.1rem;
+        margin: 0.15rem 0 0.45rem;
+    }
+
+    .listing-seller-block span {
+        color: #F05545;
+        font-size: 0.68rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
     .listing-seller {
-        display: inline-block;
-        margin-bottom: 0.35rem;
-        color: #f4f4f4;
-        font-size: 1rem;
-        text-decoration: none;
+        color: #fff;
+        font-size: 1.15rem;
+        font-weight: 800;
+        line-height: 1.2;
+        text-decoration: underline;
+        text-decoration-thickness: 2px;
+        text-decoration-color: #F05545;
+        text-underline-offset: 3px;
     }
 
     .listing-seller:hover { color: #F05545; }
@@ -3721,7 +3767,10 @@
 
     .aircraft-card .listing-actions .btn {
         width: 100%;
-        height: 64px;
+        height: auto;
+        min-height: 64px;
+        white-space: normal;
+        text-align: center;
         margin: 0;
         padding: 6px 4px;
         display: flex;
@@ -4060,7 +4109,7 @@
         <div>
             <h1 class="finder-title">{% if marketplace %}Aircraft for Sale{% else %}Find the Right Aircraft. Backed by Data.{% endif %}</h1>
             {% if not marketplace %}
-            <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="finder-actions">
                 <a class="btn btn-outline-light" href="{{ url_for('aircraft_for_sale') }}">Explore Aircraft for Sale</a>
                 <a class="btn btn-outline-light" href="{{ url_for('charter_search') }}">Find My Perfect Charter</a>
                 <a class="btn btn-outline-light" href="{{ url_for('create_listing') }}">List Your Aircraft — Free</a>
@@ -6771,7 +6820,7 @@
                 
                 <div class="listing-face">
                     <h5 class="aircraft-name">${listingHref ? `<a href="${listingHref}">${listingTitle}</a>` : listingTitle}</h5>
-                    ${sellerId ? `<a class="listing-seller" href="/people/${sellerId}">${sellerName}</a>` : ''}
+                    ${sellerId ? `<div class="listing-seller-block"><span>Seller</span><a class="listing-seller" href="/people/${sellerId}">Contact ${sellerName}</a></div>` : ''}
                     ${brokerageName ? `<div style="font-size:1rem; color:#f4f4f4; margin-bottom:0.35rem;">${brokerageName}${brokerageCategory ? ' · ' + brokerageCategory : ''}</div>` : ''}
                     <div class="aircraft-price" style="background:#2a2a2a; color:#fff; padding:6px 8px; text-align:center; border-radius:8px; margin:6px 0;">
                         <div style="font-size:0.72rem; letter-spacing:0.04em; text-transform:uppercase; color:#c8c8c8;">${aircraft.is_user_listing ? 'Asking price' : 'Average market purchase price'}</div>
@@ -6799,7 +6848,7 @@
                         ${Number(aircraft.listings_for_sale) > 0 && aircraft.model_path ? `<p style="margin:0.4rem 0;"><a href="${escCard(aircraft.model_path)}" style="color:#F05545;">${Number(aircraft.listings_for_sale)} listed for sale</a></p>` : ''}
                         <div class="listing-actions">
                             <button class="btn inquire-buy" type="button" data-aircraft="${listingTitle}" style="grid-column: 1 / -1;">
-                                <i class="fas fa-paper-plane"></i><span>Inquire to Buy</span>
+                                <i class="fas fa-paper-plane"></i><span>Ask Jetschool to help you buy this</span>
                             </button>
                         </div>
                     </div> <!-- End aircraft-content -->
@@ -8507,7 +8556,7 @@
     <div class="modal-dialog">
         <form class="modal-content bg-dark text-white" id="buy-inquiry-form">
             <div class="modal-header">
-                <h2 class="modal-title h5" id="buy-inquiry-title">Inquire to Buy</h2>
+                <h2 class="modal-title h5" id="buy-inquiry-title">Ask Jetschool to help you buy this</h2>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">

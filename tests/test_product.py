@@ -69,7 +69,7 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'Create Listing', home.data)
         self.assertIn(b'>Register<', home.data)
         self.assertIn(b'Schedule a Free Aircraft Advising Call', home.data)
-        self.assertIn(b'Inquire to Buy', home.data)
+        self.assertIn(b'Ask Jetschool to help you buy this', home.data)
         self.assertNotIn(b'Browse All Aircraft', home.data)
         self.assertNotIn(b'Broker Map', home.data)
         self.assertNotIn(b'Off Market', home.data)
@@ -1302,6 +1302,58 @@ class ProductTests(unittest.TestCase):
         titles = [note['title'] for note in notes.get_json()['notifications']]
         self.assertIn('Contact from Ada Buyer', titles)
 
+    def test_inquiries_reach_admin_alerts(self):
+        page = self.client.get('/charter/inquire')
+        token = page.data.split(b'name="csrf-token" content="', 1)[1].split(b'"', 1)[0].decode()
+        saved = self.client.post('/api/inquiries', json={
+            'inquiry_type': 'charter',
+            'name': 'Charter Buyer',
+            'email': 'charter-inquiry@example.com',
+            'phone': '5551234567',
+            'aircraft_name': 'Cirrus SR20',
+            'departure_airport': 'KTEB',
+            'arrival_airport': 'KPBI',
+            'notes': 'Weekend trip',
+            'consent': True,
+        }, headers={'X-CSRF-Token': token})
+        self.assertEqual(saved.status_code, 201, saved.get_json())
+        call = self.client.post('/api/inquiries', json={
+            'inquiry_type': 'advising',
+            'name': 'Call Buyer',
+            'email': 'call-inquiry@example.com',
+            'phone': '5551234568',
+            'notes': 'Free advising call',
+            'consent': True,
+        }, headers={'X-CSRF-Token': token})
+        self.assertEqual(call.status_code, 201, call.get_json())
+        listing = self.client.post('/api/inquiries', json={
+            'inquiry_type': 'purchase',
+            'name': 'Listing Buyer',
+            'email': 'listing-inquiry@example.com',
+            'phone': '5551234569',
+            'aircraft_name': 'Citation CJ3',
+            'consent': True,
+        }, headers={'X-CSRF-Token': token})
+        self.assertEqual(listing.status_code, 201, listing.get_json())
+        self._login('buyer@example.com', 'buyer-pass-1')
+        self.assertEqual(self.client.get('/api/admin/contacts').status_code, 403)
+        self._login('admin@example.com', 'admin-pass-1')
+        inbox = self.client.get('/api/admin/contacts')
+        self.assertEqual(inbox.status_code, 200)
+        messages = inbox.get_json()['messages']
+        charter = next(row for row in messages if row['email'] == 'charter-inquiry@example.com')
+        self.assertEqual(charter['label'], 'Charter inquiry')
+        self.assertIn('Cirrus SR20', charter['message'])
+        self.assertIn('KTEB', charter['message'])
+        self.assertIn('Weekend trip', charter['message'])
+        self.assertEqual(next(row['label'] for row in messages if row['email'] == 'call-inquiry@example.com'), 'Advising call')
+        self.assertEqual(next(row['label'] for row in messages if row['email'] == 'listing-inquiry@example.com'), 'Listing inquiry')
+        titles = [note['title'] for note in self.client.get('/api/notifications').get_json()['notifications']]
+        self.assertIn('Charter inquiry from Charter Buyer', titles)
+        self.assertIn('Advising call from Call Buyer', titles)
+        self.assertIn('Listing inquiry from Listing Buyer', titles)
+        self.assertTrue(all(note['href'] == '/admin#alerts' for note in self.client.get('/api/notifications').get_json()['notifications'] if note['title'].startswith('Charter inquiry')))
+
     def test_privacy_page_names_analytics_and_keeps_one_canonical(self):
         page = self.client.get('/privacy')
         self.assertEqual(page.status_code, 200)
@@ -1977,7 +2029,8 @@ class ProductTests(unittest.TestCase):
         self.assertIn(b'rel="canonical" href="http://localhost/listing/' + str(listing_id).encode() + b'"', page.data)
         self.assertIn(b'"@type": "Product"', page.data)
         self.assertNotIn(b'listing_view', page.data)
-        self.assertIn(b'View seller contact details', page.data)
+        self.assertIn(b'Contact Seller', page.data)
+        self.assertIn(b'Ask Jetschool to help you buy this', page.data)
         self.assertNotIn(b'id="contact-seller"', page.data)
         self.assertNotIn(b'listing_broker_send', page.data)
         self.assertNotIn(b'noindex', page.data)

@@ -635,22 +635,24 @@ async function loadAdminAlerts() {
         const rows = data.messages || [];
         if (tab) tab.textContent = 'Alerts' + (rows.length ? ' (' + rows.length + ')' : '');
         if (!rows.length) {
-            target.innerHTML = '<div class="ap__empty">No contact messages yet.</div>';
+            target.innerHTML = '<div class="ap__empty">No alerts yet.</div>';
             return;
         }
         target.innerHTML = rows.map(function (row) {
             const when = esc((row.created_at || '').replace('T', ' ').slice(0, 16));
             const phone = row.phone ? '<div>' + esc(row.phone) + '</div>' : '';
+            const label = row.label ? '<div style="color:#F05545;letter-spacing:0.06em;text-transform:uppercase;font-size:0.75rem;">' + esc(row.label) + '</div>' : '';
             return '<article class="ap__card ap__card--note"><div class="ap__note">'
+                + label
                 + '<h3>' + esc(row.name) + '</h3>'
                 + '<div><a href="mailto:' + esc(row.email) + '">' + esc(row.email) + '</a></div>'
                 + phone
                 + '<div style="color:#8e8e93;">' + when + '</div>'
-                + '<p>' + esc(row.message) + '</p>'
+                + '<p style="white-space:pre-line;">' + esc(row.message) + '</p>'
                 + '</div></article>';
         }).join('');
     } catch (e) {
-        target.innerHTML = '<div class="ap__empty">Could not load contact messages.</div>';
+        target.innerHTML = '<div class="ap__empty">Could not load alerts.</div>';
     }
 }
 
