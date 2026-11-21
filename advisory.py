@@ -284,7 +284,7 @@ def plan_charter(
         else:
             runway_status = 'Runway length is not recorded for every airport on this route'
         one_way_nm = route['distance_nm']
-        hours = _hours(one_way_nm * (2 if round_trip else 1), speed, route['legs'] * (2 if round_trip else 1))
+        hours = (direct / speed) if speed else None
         priced = charter_pricing.price_mission(
             aircraft,
             hours,
@@ -295,6 +295,7 @@ def plan_charter(
             international=international,
             config=pricing,
         )
+        hours = priced.get('billable_hours') or hours
         public = charter_pricing.public_price(priced)
         photo = next((slot.get('url') for slot in image_slots(aircraft) if slot.get('present') and slot.get('url')), '')
         card = {

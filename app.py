@@ -11979,7 +11979,7 @@ def admin_charter_pricing():
             'airport_allowance': number('airport_allowance', 500),
             'stop_handling_fee': number('stop_handling_fee', 250),
             'minimum_billable_hours': minimum,
-            'commission_rate': number('commission_rate', 10) / 100,
+            'commission_rate': 0,
             'domestic_percentage_tax': number('domestic_percentage_tax', 0.075),
             'domestic_segment_tax': number('domestic_segment_tax', 5.30),
             'international_head_tax': number('international_head_tax', 23.40),

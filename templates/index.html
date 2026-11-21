@@ -7328,23 +7328,30 @@
         return `${manufacturer}_${name}`.toUpperCase();
     }
 
+    function sheetInput(value, fallback) {
+        if (value == null || value === '') return fallback;
+        const number = toNumber(value);
+        return Number.isFinite(number) ? number : fallback;
+    }
+
     function buildScenarioParams(inputs = {}) {
+        // Blank fields stay on the spreadsheet defaults. A typed 0 is kept.
         const params = {
-            F2: toNumber(inputs.averageTripLength) || 0,
-            G2: toNumber(inputs.numberOfTrips) || 0,
-            H2: toNumber(inputs.yearsOfOwnership) || 5,
-            I2: toNumber(inputs.jetAPrice) || 0,
-            J2: toNumber(inputs.avgasPrice) || 9,
-            K2: (toNumber(inputs.depreciationRate) || 0) / 100,
-            L2: (toNumber(inputs.costToCharter) || 0) / 100,
-            M2: toNumber(inputs.pistonPilotPay) || 0,
-            N2: toNumber(inputs.turbopropPilotPay) || 82500,
-            O2: toNumber(inputs.businessJetPilotPay) || 0,
-            P2: toNumber(inputs.plannedPax) || 0,
-            Q2: toNumber(inputs.passengerPay) || 0,
-            R2: (toNumber(inputs.charterRatePercentage) || 0) / 100,
-            S2: toNumber(inputs.averageCharterTripLength) || 0,
-            T2: toNumber(inputs.charterTrips) || 0
+            F2: sheetInput(inputs.averageTripLength, 971),
+            G2: sheetInput(inputs.numberOfTrips, 120),
+            H2: sheetInput(inputs.yearsOfOwnership, 5),
+            I2: sheetInput(inputs.jetAPrice, 6.50),
+            J2: sheetInput(inputs.avgasPrice, 9),
+            K2: sheetInput(inputs.depreciationRate, 4) / 100,
+            L2: sheetInput(inputs.costToCharter, 200) / 100,
+            M2: sheetInput(inputs.pistonPilotPay, 65000),
+            N2: sheetInput(inputs.turbopropPilotPay, 82500),
+            O2: sheetInput(inputs.businessJetPilotPay, 130000),
+            P2: sheetInput(inputs.plannedPax, 0),
+            Q2: sheetInput(inputs.passengerPay, 0),
+            R2: sheetInput(inputs.charterRatePercentage, 50) / 100,
+            S2: sheetInput(inputs.averageCharterTripLength, 0),
+            T2: sheetInput(inputs.charterTrips, 0)
         };
 
         params.cacheKey = [
@@ -7366,18 +7373,20 @@
         const AJ2 = toNumber(aircraft?.total_fixed_cost);
         const AK2 = toNumber(aircraft?.total_variable_cost);
 
+        const aircraftType = (aircraft?.category || '').toLowerCase();
         const AB2 = AA2 * Math.pow(1 - params.K2, params.H2);
         const AC2 = Y2 > 0 ? params.F2 / Y2 : 0;
         const AD2 = AC2 * params.G2;
         const AE2 = (params.Q2 * params.P2) * AD2;
-        const BL2 = AK2 / 450;
+        // Fuel uses total variable cost / 450. The hourly variable column is /200 for a piston.
+        const fuelHourly = AK2 / 450;
+        const BL2 = aircraftType.includes('piston') ? AK2 / 200 : AK2 / 450;
         const AF2 = BL2 * params.R2;
         const AG2 = Y2 > 0 ? params.S2 / Y2 : 0;
         const AH2 = AG2 * params.T2;
         const AI2 = AH2 * AF2;
-        const aircraftType = (aircraft?.category || '').toLowerCase();
         const fuelPrice = aircraftType.includes('piston') ? (params.J2 || params.I2) : params.I2;
-        const AL2 = ((BL2 / 6) * fuelPrice) * AD2;
+        const AL2 = ((fuelHourly / 6) * fuelPrice) * AD2;
         const AM2 = AJ2 + AK2;
 
         let pilotPay = params.N2;
@@ -7701,16 +7710,21 @@
                 case 'best_performance_dollar':
                 case 'best_efficiency_dollar':
                 case 'best_all_around_dollar': {
-                    const metricName = {
-                        best_speed_dollar: 'speed',
-                        best_range_dollar: 'range',
-                        best_performance_dollar: 'performance',
-                        best_efficiency_dollar: 'efficiency',
-                        best_all_around_dollar: 'allAround'
+                    const pointName = {
+                        best_speed_dollar: 'bestSpeedDollar',
+                        best_range_dollar: 'bestRangeDollar',
+                        best_performance_dollar: 'bestPerformanceDollar',
+                        best_efficiency_dollar: 'bestEfficiencyDollar',
+                        best_all_around_dollar: 'bestAllAroundDollar'
                     }[sortBy];
-                    aValue = sheetDollarPercent(a, metricName);
-                    bValue = sheetDollarPercent(b, metricName);
-                    return (bValue == null ? -1 : bValue) - (aValue == null ? -1 : aValue);
+                    const aMetrics = calculateDynamicMetrics(a, getUserInputs());
+                    const bMetrics = calculateDynamicMetrics(b, getUserInputs());
+                    aValue = Number(aMetrics[pointName]);
+                    bValue = Number(bMetrics[pointName]);
+                    if (!Number.isFinite(aValue) && !Number.isFinite(bValue)) return 0;
+                    if (!Number.isFinite(aValue)) return 1;
+                    if (!Number.isFinite(bValue)) return -1;
+                    return aValue - bValue;
                 }
 
                 case 'price_low':
@@ -8082,7 +8096,7 @@
             console.log('🔄 User changed inputs - recalculating all aircraft with Excel equations');
             // Recalculate dynamic metrics for all aircraft using Excel equations
             allAircraftData.forEach(aircraft => {
-                const dynamicMetrics = calculateDynamicMetrics(aircraft, userInputs);
+                const dynamicMetrics = calculateDynamicMetrics(aircraft, getUserInputs());
 
                 // Update aircraft object with calculated values
                 aircraft.average_trip_time = dynamicMetrics.averageTripTime;

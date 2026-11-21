@@ -1,12 +1,9 @@
 """Charter planning rates built from the aircraft spreadsheet.
 
-Total Hourly Cost in the spreadsheet is fixed ownership cost plus variable cost,
-spread over the sheet's annual hours. Hourly Charter Rate is half of Hourly
-Variable Cost. That column is an ownership credit, not a market charter quote.
-
-Estimates use Hourly Variable Cost and a category multiplier. A verified hourly
-rate replaces the multiplier when an administrator has recorded one and dated it.
-Missing costs stay missing.
+The customer price is the spreadsheet Hourly Variable Cost, times the class
+factor, times the flight hours. Flight hours are the great-circle distance
+divided by the spreadsheet speed. A dated verified rate replaces that hourly
+figure. Missing variable cost stays missing.
 """
 from __future__ import annotations
 
@@ -22,12 +19,13 @@ DEFAULTS: dict[str, Any] = {
         'piston_multi': 3.0,
         'turboprop_single': 2.75,
         'turboprop_multi': 2.75,
-        'very_light': 2.5,
-        'light': 2.5,
-        'midsize': 2.4,
-        'super_midsize': 2.25,
-        'large': 2.1,
-        'ultra_long': 2.0,
+        'very_light': 2.35,
+        'light': 2.35,
+        'super_light': 2.36,
+        'midsize': 2.20,
+        'super_midsize': 2.27,
+        'large': 2.25,
+        'ultra_long': 2.65,
     },
     'reposition_low': 0.10,
     'reposition_mid': 0.25,
@@ -35,7 +33,7 @@ DEFAULTS: dict[str, Any] = {
     'airport_allowance': 500.0,
     'stop_handling_fee': 250.0,
     'minimum_billable_hours': None,
-    'commission_rate': 0.10,
+    'commission_rate': 0.0,
     'domestic_percentage_tax': 0.075,
     'domestic_segment_tax': 5.30,
     'international_head_tax': 23.40,
@@ -53,6 +51,7 @@ CATEGORY_ORDER = (
     'turboprop_multi',
     'very_light',
     'light',
+    'super_light',
     'midsize',
     'super_midsize',
     'large',
@@ -66,9 +65,10 @@ CATEGORY_LABELS = {
     'turboprop_multi': 'Turboprop multi',
     'very_light': 'Very light jet',
     'light': 'Light jet',
+    'super_light': 'Super light jet',
     'midsize': 'Midsize jet',
     'super_midsize': 'Super midsize jet',
-    'large': 'Large jet',
+    'large': 'Heavy jet',
     'ultra_long': 'Ultra-long range jet',
 }
 
@@ -122,6 +122,8 @@ def charter_category(aircraft: dict, override: str | None = None) -> str | None:
         'vlj': 'very_light',
         'very_light_jet': 'very_light',
         'light_jet': 'light',
+        'super_light_jet': 'super_light',
+        'superlight': 'super_light',
         'midsize_jet': 'midsize',
         'super_midsize_jet': 'super_midsize',
         'large_jet': 'large',
@@ -157,13 +159,17 @@ def charter_category(aircraft: dict, override: str | None = None) -> str | None:
             return 'super_midsize'
         if distance >= 2200:
             return 'midsize'
+        if distance >= 1700:
+            return 'super_light'
         if distance >= 1100:
             return 'light'
         return 'very_light'
     if passengers <= 6:
         return 'very_light'
-    if passengers <= 8:
+    if passengers <= 7:
         return 'light'
+    if passengers <= 8:
+        return 'super_light'
     if passengers <= 9:
         return 'midsize'
     if passengers <= 12:
@@ -194,7 +200,7 @@ def _verified_rate(override: dict, config: dict) -> float | None:
 
 
 def hourly_rate(aircraft: dict, config: dict | None = None) -> dict:
-    """The planning hourly rate, or an unavailable result when the sheet has no variable cost."""
+    """Spreadsheet hourly variable cost times the class factor. A dated verified rate replaces it."""
     settings = merged(config)
     override = _override(settings, aircraft)
     variable = _num(override.get('variable_hourly_cost')) or _num(aircraft.get('hourly_variable_cost'))
@@ -247,7 +253,7 @@ def price_mission(
     international: bool = False,
     config: dict | None = None,
 ) -> dict:
-    """A low, middle, and high customer range. Commission stays out of the public fields."""
+    """Customer total. Hourly variable cost times the class factor, times the flight hours."""
     settings = merged(config)
     rate = hourly_rate(aircraft, settings)
     empty = {
@@ -263,60 +269,24 @@ def price_mission(
     hours = _num(flight_hours)
     if not rate['hourly_rate'] or not hours:
         return empty
-    billable = hours
+    billable = hours * (2 if round_trip else 1)
     minimum = _num(settings.get('minimum_billable_hours'))
     if minimum and billable < minimum:
         billable = minimum
-    directions = 2 if round_trip else 1
-    stops = max(0, int(fuel_stops or 0))
-    fees = float(settings['airport_allowance']) * directions
-    fees += float(settings['stop_handling_fee']) * stops * directions
-    flight_charge = rate['hourly_rate'] * billable
-    commission = float(settings['commission_rate'])
-    if commission <= 0 or commission >= 1:
-        commission = 0.10
-    pax = max(1, int(passengers or 1))
-    segments = (stops + 1) * directions
-
-    def scenario(reposition_share: float) -> tuple[float, float]:
-        operator = flight_charge + (flight_charge * reposition_share) + fees
-        before_tax = operator / (1 - commission)
-        tax = 0.0
-        if domestic:
-            tax = before_tax * float(settings['domestic_percentage_tax'])
-            tax += pax * segments * float(settings['domestic_segment_tax'])
-        elif international:
-            tax = pax * directions * float(settings['international_head_tax'])
-        return before_tax, before_tax + tax
-
-    low_pre, low_total = scenario(float(settings['reposition_low']))
-    mid_pre, mid_total = scenario(float(settings['reposition_mid']))
-    high_pre, high_total = scenario(float(settings['reposition_high']))
-    if domestic:
-        shown = (low_total, mid_total, high_total)
-        tax_status = 'us_domestic'
-    elif international:
-        shown = (low_total, mid_total, high_total)
-        tax_status = 'international_head_tax'
-    else:
-        shown = (low_pre, mid_pre, high_pre)
-        tax_status = 'not_calculated'
-    low, mid, high = (_round_hundred(value) for value in shown)
-    if high < low:
-        low, high = high, low
+    total = _round_hundred(rate['hourly_rate'] * billable)
     return {
         'status': rate['status'],
         'category': rate['category'],
         'hourly_rate': round(rate['hourly_rate'], 2),
         'billable_hours': round(billable, 2),
-        'flight_charge': round(flight_charge, 2),
-        'operator_mid': round(mid_pre * (1 - commission), 2),
-        'before_tax_mid': round(mid_pre, 2),
-        'commission_mid': round(mid_pre * commission, 2),
-        'estimate_low': low,
-        'estimate_mid': mid,
-        'estimate_high': high,
-        'tax_status': tax_status,
+        'flight_charge': round(rate['hourly_rate'] * billable, 2),
+        'operator_mid': round(rate['hourly_rate'] * billable, 2),
+        'before_tax_mid': round(rate['hourly_rate'] * billable, 2),
+        'commission_mid': 0,
+        'estimate_low': total,
+        'estimate_mid': total,
+        'estimate_high': total,
+        'tax_status': 'included' if domestic or international else 'included',
         'price_note': DISCLAIMER,
     }
 

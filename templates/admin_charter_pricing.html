@@ -9,7 +9,8 @@
     <form method="post" class="p-3 mb-4" style="background:#141414;border:1px solid #333;border-radius:12px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="form" value="settings">
-        <h2 class="h4">Category multipliers</h2>
+        <h2 class="h4">Class factor</h2>
+        <p>The estimate is the spreadsheet hourly variable cost, times this factor, times the flight time. The flight time is the route distance divided by that aircraft's speed.</p>
         <div class="row g-2">
             {% for key, label in categories %}
             <div class="col-md-4">
@@ -26,7 +27,6 @@
             <div class="col-md-4"><label class="form-label">Airport allowance</label><input class="form-control bg-dark text-white border-secondary" name="airport_allowance" value="{{ settings.airport_allowance }}"></div>
             <div class="col-md-4"><label class="form-label">Extra fee per fuel stop</label><input class="form-control bg-dark text-white border-secondary" name="stop_handling_fee" value="{{ settings.stop_handling_fee }}"></div>
             <div class="col-md-4"><label class="form-label">Minimum billable hours</label><input class="form-control bg-dark text-white border-secondary" name="minimum_billable_hours" value="{{ settings.minimum_billable_hours or '' }}"></div>
-            <div class="col-md-4"><label class="form-label">Brokerage share of selling price %</label><input class="form-control bg-dark text-white border-secondary" name="commission_rate" value="{{ (settings.commission_rate * 100)|round(1) }}"></div>
             <div class="col-md-4"><label class="form-label">U.S. percentage tax</label><input class="form-control bg-dark text-white border-secondary" name="domestic_percentage_tax" value="{{ settings.domestic_percentage_tax }}"></div>
             <div class="col-md-4"><label class="form-label">U.S. segment tax ({{ settings.tax_year }})</label><input class="form-control bg-dark text-white border-secondary" name="domestic_segment_tax" value="{{ settings.domestic_segment_tax }}"></div>
             <div class="col-md-4"><label class="form-label">International head tax</label><input class="form-control bg-dark text-white border-secondary" name="international_head_tax" value="{{ settings.international_head_tax }}"></div>
