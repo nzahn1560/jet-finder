@@ -47,7 +47,7 @@ class CharterPlanTests(unittest.TestCase):
         self.assertEqual(card['stop_label'], 'Nonstop')
         self.assertEqual(len(card['points']), 2)
         self.assertTrue(card['confirmed_suitable'])
-        self.assertEqual(card['hourly_charter_rate'], 1888)
+        self.assertEqual(card['hourly_charter_rate'], 1488)
         self.assertNotIn('commission_mid', card)
         self.assertNotIn('estimate_low', card)
         self.assertNotIn('estimate_high', card)
@@ -123,8 +123,8 @@ class CharterPlanTests(unittest.TestCase):
         card = plan['suitable'][0]
         hours = advisory._haversine(origin['lat'], origin['lon'], destination['lat'], destination['lon']) / 400
         self.assertAlmostEqual(card['flight_hours'], round(hours, 2), places=2)
-        self.assertEqual(card['hourly_charter_rate'], 5900)
-        self.assertEqual(card['estimated_total'], int(round((2500 * 2.36 * hours) / 100.0) * 100))
+        self.assertEqual(card['hourly_charter_rate'], 4650)
+        self.assertEqual(card['estimated_total'], int(round((2500 * 1.86 * hours) / 100.0) * 100))
 
     def test_classes_follow_engine_and_range(self):
         import charter_pricing
