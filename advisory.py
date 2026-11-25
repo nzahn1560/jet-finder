@@ -333,15 +333,7 @@ def plan_charter(
         else:
             unverified.append(card)
 
-    try:
-        from product import score_aircraft_for_trip
-        scores = score_aircraft_for_trip(aircraft_list, trip_nm)
-    except Exception:
-        scores = {}
-    for card in suitable + unverified:
-        score = scores.get(card.get('id')) or {}
-        card['all_around_dollar'] = score.get('dollar')
-        card['all_around_percent'] = score.get('percent')
+    _score_mission(suitable + unverified, pax)
     unverified.sort(key=lambda row: (row['fuel_stops'], row['estimated_total'] or 10 ** 12, row['name']))
     return {
         'ok': True,
@@ -358,8 +350,37 @@ def plan_charter(
     }
 
 
+def _score_mission(cards: list[dict], passengers: int) -> None:
+    """Best value for this trip: fill the seats asked for, then speed and the trip price.
+
+    A higher percent is better. Seat use is the party size divided by the cabin.
+    Speed and price are scaled across the airplanes that can fly this trip.
+    """
+    priced = [
+        card for card in cards
+        if card.get('estimated_total') and card.get('speed_kts') and (card.get('passengers') or 0) >= passengers
+    ]
+    speeds = [card['speed_kts'] for card in priced]
+    prices = [card['estimated_total'] for card in priced]
+    slow = min(speeds) if speeds else 0
+    fast = max(speeds) if speeds else 0
+    cheap = min(prices) if prices else 0
+    dear = max(prices) if prices else 0
+    for card in cards:
+        seats = card.get('passengers') or 0
+        speed = card.get('speed_kts') or 0
+        price = card.get('estimated_total')
+        if not price or not speed or seats < passengers:
+            card['all_around_percent'] = None
+            continue
+        seat_use = passengers / seats
+        speed_score = 1.0 if fast <= slow else (speed - slow) / (fast - slow)
+        price_score = 1.0 if dear <= cheap else (dear - price) / (dear - cheap)
+        card['all_around_percent'] = int(round((seat_use + speed_score + price_score) / 3 * 100))
+
+
 def _best_by_category(cards: list[dict]) -> list[dict]:
-    """One aircraft per class: the best all-around score, then the lower price."""
+    """One aircraft per class: the best value for this trip, then the lower price."""
     import charter_pricing
     groups: dict[str, list[dict]] = {}
     for card in cards:

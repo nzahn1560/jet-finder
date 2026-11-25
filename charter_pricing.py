@@ -20,11 +20,11 @@ DEFAULTS: dict[str, Any] = {
         'turboprop_single': 2.75,
         'turboprop_multi': 1.85,
         'very_light': 2.35,
-        'light': 2.11,
+        'light': 2.04,
         'super_light': 1.86,
-        'midsize': 2.45,
+        'midsize': 2.54,
         'super_midsize': 2.22,
-        'large': 2.34,
+        'large': 2.56,
         'ultra_long': 2.07,
     },
     'reposition_low': 0.10,
@@ -115,8 +115,120 @@ def _multi_engine(aircraft: dict) -> bool | None:
     return None
 
 
+# Longest name first, so Citation XLS is not read as a Citation X and Falcon 2000 is not a Falcon 20.
+# These are the classes US charter fleets publish for that airplane, not a cut on its spreadsheet range.
+_JET_FAMILIES: tuple[tuple[str, str], ...] = tuple(sorted((
+    ('GLOBAL 7500', 'ultra_long'),
+    ('GLOBAL 6500', 'ultra_long'),
+    ('GLOBAL 6000', 'ultra_long'),
+    ('GLOBAL EXPRESS', 'ultra_long'),
+    ('GLOBAL 5000', 'ultra_long'),
+    ('FALCON 8X', 'ultra_long'),
+    ('FALCON 7X', 'ultra_long'),
+    ('G650ER', 'ultra_long'),
+    ('G650', 'ultra_long'),
+    ('G700', 'ultra_long'),
+    ('G600', 'ultra_long'),
+    ('G550', 'ultra_long'),
+    ('G500', 'ultra_long'),
+    ('G-V', 'ultra_long'),
+    ('BBJ', 'ultra_long'),
+    ('ACJ', 'ultra_long'),
+    ('CHALLENGER 850', 'large'),
+    ('CHALLENGER 650', 'large'),
+    ('CHALLENGER 605', 'large'),
+    ('CHALLENGER 604', 'large'),
+    ('CHALLENGER 601', 'large'),
+    ('FALCON 900', 'large'),
+    ('LEGACY 650', 'large'),
+    ('LEGACY 600', 'large'),
+    ('LINEAGE', 'large'),
+    ('G450', 'large'),
+    ('G400', 'large'),
+    ('G350', 'large'),
+    ('G300', 'large'),
+    ('G-IV', 'large'),
+    ('G-III', 'large'),
+    ('ERJ-145', 'large'),
+    ('CHALLENGER 3500', 'super_midsize'),
+    ('CHALLENGER 350', 'super_midsize'),
+    ('CHALLENGER 300', 'super_midsize'),
+    ('FALCON 2000', 'super_midsize'),
+    ('FALCON 50', 'super_midsize'),
+    ('PRAETOR 600', 'super_midsize'),
+    ('LEGACY 500', 'super_midsize'),
+    ('CITATION LONGITUDE', 'super_midsize'),
+    ('CITATION X+', 'super_midsize'),
+    ('CITATION X', 'super_midsize'),
+    ('G280', 'super_midsize'),
+    ('G200', 'super_midsize'),
+    ('HAWKER 4000', 'super_midsize'),
+    ('CITATION SOVEREIGN', 'midsize'),
+    ('CITATION LATITUDE', 'midsize'),
+    ('CITATION VII', 'midsize'),
+    ('CITATION VI', 'midsize'),
+    ('CITATION III', 'midsize'),
+    ('PRAETOR 500', 'midsize'),
+    ('LEGACY 450', 'midsize'),
+    ('LEARJET 60', 'midsize'),
+    ('LEARJET 55', 'midsize'),
+    ('HAWKER 1000', 'midsize'),
+    ('HAWKER 900', 'midsize'),
+    ('HAWKER 850', 'midsize'),
+    ('HAWKER 800', 'midsize'),
+    ('HAWKER 750', 'midsize'),
+    ('G150', 'midsize'),
+    ('G100', 'midsize'),
+    ('FALCON 20', 'midsize'),
+    ('CITATION XLS', 'super_light'),
+    ('CITATION EXCEL', 'super_light'),
+    ('PC-24', 'super_light'),
+    ('PHENOM 300', 'light'),
+    ('LEARJET 75', 'light'),
+    ('LEARJET 70', 'light'),
+    ('LEARJET 45', 'light'),
+    ('LEARJET 40', 'light'),
+    ('LEARJET 36', 'light'),
+    ('LEARJET 35', 'light'),
+    ('LEARJET 31', 'light'),
+    ('CITATION CJ4', 'light'),
+    ('CITATION CJ3', 'light'),
+    ('CITATION CJ2', 'light'),
+    ('CITATION CJ1', 'light'),
+    ('CITATION ENCORE', 'light'),
+    ('CITATION BRAVO', 'light'),
+    ('CITATION V', 'light'),
+    ('CITATION SII', 'light'),
+    ('CITATION II', 'light'),
+    ('CITATION 500', 'light'),
+    ('BEECHJET', 'light'),
+    ('HAWKER 400', 'light'),
+    ('NEXTANT', 'light'),
+    ('PREMIER', 'light'),
+    ('WESTWIND', 'light'),
+    ('FALCON 10', 'light'),
+    ('CITATION M2', 'very_light'),
+    ('CITATION MUSTANG', 'very_light'),
+    ('CITATION JET', 'very_light'),
+    ('PHENOM 100', 'very_light'),
+    ('HONDAJET', 'very_light'),
+    ('ECLIPSE', 'very_light'),
+    ('VISION', 'very_light'),
+), key=lambda item: len(item[0]), reverse=True))
+
+
+def _jet_family(name: str) -> str | None:
+    text = str(name or '').strip().upper()
+    if text in ('SP', 'SPX'):
+        return 'midsize'
+    for needle, category in _JET_FAMILIES:
+        if text.startswith(needle):
+            return category
+    return None
+
+
 def charter_category(aircraft: dict, override: str | None = None) -> str | None:
-    """Planning class from engine type, then range. A missing range falls back to seats."""
+    """Planning class from the airplane family. Engine type, then range, covers a name that is not listed."""
     chosen = (override or '').strip().lower().replace('-', '_').replace(' ', '_')
     aliases = {
         'vlj': 'very_light',
@@ -148,6 +260,9 @@ def charter_category(aircraft: dict, override: str | None = None) -> str | None:
         return 'turboprop_multi' if multi else 'turboprop_single'
     if 'jet' not in kind and 'business' not in kind:
         return None
+    named = _jet_family(aircraft.get('aircraft_name'))
+    if named:
+        return named
     distance = _num(aircraft.get('range')) or 0
     passengers = _num(aircraft.get('passengers')) or 0
     if distance:
