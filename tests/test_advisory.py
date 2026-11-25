@@ -135,14 +135,31 @@ class CharterPlanTests(unittest.TestCase):
         self.assertEqual(twin, 'turboprop_multi')
         self.assertEqual(far, 'ultra_long')
         self.assertEqual(charter_pricing.CATEGORY_LABELS[far], 'Ultra-long range jet')
+        known = {
+            'PHENOM 100': 'very_light',
+            'CITATION CJ3': 'light',
+            'CITATION XLS+': 'super_light',
+            'LEARJET 60': 'midsize',
+            'CITATION X': 'super_midsize',
+            'CHALLENGER 604': 'large',
+            'FALCON 7X': 'ultra_long',
+            'ERJ-145ER': 'large',
+        }
+        for name, expected in known.items():
+            self.assertEqual(charter_pricing.charter_category({'category': 'Business Jet', 'aircraft_name': name, 'range': 1000, 'passengers': 8}), expected, name)
 
-    def test_route_score_uses_the_purchase_equation(self):
-        cheap = _aircraft(id=11, price=1000000, total_fixed_cost=80000, total_variable_cost=40000, aircraft_name='Cheap')
-        costly = _aircraft(id=12, price=8000000, total_fixed_cost=400000, total_variable_cost=300000, aircraft_name='Costly')
-        plan = advisory.plan_charter(self.origin, self.near, [cheap, costly], [], self.runways, passengers=1)
+    def test_mission_score_uses_seats_speed_and_price(self):
+        tight = _aircraft(id=11, aircraft_name='Tight', passengers=4, speed=400, hourly_variable_cost=800)
+        loose = _aircraft(id=12, aircraft_name='Loose', passengers=14, speed=400, hourly_variable_cost=800)
+        costly = _aircraft(id=13, aircraft_name='Costly', passengers=4, speed=400, hourly_variable_cost=2000)
+        fast = _aircraft(id=14, aircraft_name='Fast', passengers=4, speed=500, hourly_variable_cost=1000)
+        plan = advisory.plan_charter(
+            self.origin, self.near, [tight, loose, costly, fast], [], self.runways, passengers=4,
+        )
         scores = {card['name']: card['all_around_percent'] for card in plan['suitable']}
-        self.assertIsNotNone(scores['Cheap'])
-        self.assertGreater(scores['Cheap'], scores['Costly'])
+        self.assertGreater(scores['Tight'], scores['Loose'])
+        self.assertGreater(scores['Tight'], scores['Costly'])
+        self.assertGreater(scores['Fast'], scores['Tight'])
 
 
 if __name__ == '__main__':
